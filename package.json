@@ -1,0 +1,13 @@
+{
+  "name": "mandarin-dac-bridge",
+  "version": "1.0.0",
+  "description": "Takes exclusive, bit-perfect control of USB DACs and offers each one to Audirvana and Mandarin as a UPnP renderer.",
+  "main": "bridge.js",
+  "license": "MIT",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node bridge.js",
+    "test": "node --test test/*.test.js"
+  }
+}

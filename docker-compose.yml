@@ -1,0 +1,25 @@
+# Mandarin DAC Bridge — docker compose up -d --build
+services:
+  dac-bridge:
+    build: .
+    image: mandarin-dac-bridge
+    container_name: mandarin-dac-bridge
+    restart: unless-stopped
+    # UPnP discovery is multicast: the container must be on the host's network.
+    network_mode: host
+    # The host's sound devices, including DACs plugged in later
+    # (116 is ALSA's device number). The container needs to open them.
+    volumes:
+      - /dev/snd:/dev/snd
+      - dac-bridge-data:/data
+    device_cgroup_rules:
+      - "c 116:* rmw"
+    # Lets the helper play at real-time priority (optional, recommended).
+    cap_add:
+      - SYS_NICE
+    environment:
+      - TZ=Europe/London
+      # - BRIDGE_IP=192.168.1.20     # only if the machine has several networks
+
+volumes:
+  dac-bridge-data:

@@ -1,22 +1,30 @@
-# Build Layer
-FROM ://microsoft.com AS build-env
+# Mandarin DAC Bridge for Linux (DietPi, Debian, Ubuntu…), x86-64 or arm64.
+#
+#   docker compose up -d --build
+#
+# Needs the host's network (UPnP discovery is multicast) and its sound
+# devices (/dev/snd) — see docker-compose.yml.
+
+# The ALSA helper: a small C program, built here.
+FROM node:22-bookworm-slim AS helper
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc libc6-dev libasound2-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY helper/ helper/
+RUN gcc -O2 -Wall -o dachelper helper/dachelper-linux.c -lasound -lpthread
+
+FROM node:22-bookworm-slim
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg libasound2 ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-
-# Install native dependencies required by compiler components
-RUN apt-get update && apt-get install -y clang zlib1g-dev
-
-# Build and run target compilation
-COPY *.csproj ./
-RUN dotnet restore
-
-COPY . ./
-RUN dotnet publish -c Release -r linux-x64 -o out /p:PublishAot=true
-
-# Minimal Production Layer
-FROM alpine:3.19
-WORKDIR /
-RUN apk add --no-cache libgcc libstdc++
-COPY --from=build-env /app/out/MandarinDacBridge /MandarinDacBridge
-
+COPY package.json bridge.js ./
+COPY lib/ lib/
+COPY public/ public/
+COPY --from=helper /src/dachelper bin/dachelper
+ENV PORT=55500 DATA_DIR=/data NODE_ENV=production
+VOLUME /data
 EXPOSE 55500
-CMD ["/MandarinDacBridge"]
+STOPSIGNAL SIGTERM
+CMD ["node", "bridge.js"]
