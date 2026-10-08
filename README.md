@@ -1,4 +1,4 @@
-# MusicD brings to the DAC Bridge (.NET 10 Native)
+# Mandarin DAC Bridge (.NET 10 Native)
 
 A zero-configuration hardware interception and routing tool written in C# (.NET 10) and compiled natively via Native AOT. It enforces exclusive stream lockout mechanisms on physical USB DAC systems, rendering hardware addresses as independent virtualized UPnP rendering objects directly inside Audirvana and Mandarin.
 
