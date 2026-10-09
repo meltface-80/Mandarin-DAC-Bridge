@@ -4,7 +4,7 @@
 #
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/uninstall.sh)"
 #
-# Homebrew, Node.js and ffmpeg stay (Mandarin uses them too).
+# Homebrew and ffmpeg stay (Mandarin uses them too).
 set -uo pipefail
 
 LABEL="app.mandarin.dacbridge"

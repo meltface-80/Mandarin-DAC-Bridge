@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    Mandarin DAC Bridge: holds each USB DAC exclusively and offers it to
+    Audirvana and Mandarin as a UPnP renderer. Built ahead of time to one
+    native program (Native AOT), so nothing of .NET is needed where it runs;
+    the page is inside it. See README.md.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>mandarin-dac-bridge</AssemblyName>
+    <RootNamespace>MandarinDacBridge</RootNamespace>
+    <Version>1.0.0</Version>
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <UseSystemResourceKeys>true</UseSystemResourceKeys>
+    <OptimizationPreference>Speed</OptimizationPreference>
+    <StripSymbols>true</StripSymbols>
+    <!-- One small heap, collected without a background thread: the audio
+         path allocates next to nothing, so the collector rarely runs. -->
+    <ServerGarbageCollector>false</ServerGarbageCollector>
+    <ConcurrentGarbageCollection>false</ConcurrentGarbageCollection>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <NuGetAudit>false</NuGetAudit>
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Page/**" LogicalName="Page/%(RecursiveDir)%(Filename)%(Extension)" />
+    <InternalsVisibleTo Include="MandarinDacBridge.Tests" />
+  </ItemGroup>
+</Project>

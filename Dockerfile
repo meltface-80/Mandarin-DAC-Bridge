@@ -5,26 +5,23 @@
 # Needs the host's network (UPnP discovery is multicast) and its sound
 # devices (/dev/snd) — see docker-compose.yml.
 
-# The ALSA helper: a small C program, built here.
-FROM node:22-bookworm-slim AS helper
+# Built ahead of time (Native AOT) to one program: no .NET in the final image.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 RUN apt-get update \
- && apt-get install -y --no-install-recommends gcc libc6-dev libasound2-dev \
+ && apt-get install -y --no-install-recommends clang zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
-COPY helper/ helper/
-RUN gcc -O2 -Wall -o dachelper helper/dachelper-linux.c -lasound -lpthread
+COPY src/MandarinDacBridge/ src/MandarinDacBridge/
+RUN dotnet publish src/MandarinDacBridge -c Release -o /out --nologo
 
-FROM node:22-bookworm-slim
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg libasound2 ca-certificates \
+ && apt-get install -y --no-install-recommends ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json bridge.js ./
-COPY lib/ lib/
-COPY public/ public/
-COPY --from=helper /src/dachelper bin/dachelper
-ENV PORT=55500 DATA_DIR=/data NODE_ENV=production
+COPY --from=build /out/mandarin-dac-bridge /app/mandarin-dac-bridge
+ENV PORT=55500 DATA_DIR=/data
 VOLUME /data
 EXPOSE 55500
 STOPSIGNAL SIGTERM
-CMD ["node", "bridge.js"]
+ENTRYPOINT ["/app/mandarin-dac-bridge"]

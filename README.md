@@ -1,6 +1,8 @@
 # Mandarin DAC Bridge
 
-**Lets Audirvana and Mandarin share your USB DACs, bit-perfect.**
+**Lets Audirvana and Mandarin share your USB DACs, bit-perfect.** Written in C# (.NET 10) and
+built ahead of time (Native AOT) into one small program. Nothing of .NET needs installing where
+it runs.
 
 On a Mac, Audirvana takes a USB DAC in exclusive (hog) mode to switch its sample rate for each
 track. While it holds the DAC, nothing else can see it, so Mandarin finds no DAC. The bridge
@@ -18,9 +20,9 @@ fixes this by taking each DAC itself:
   what the DAC can do; the ✕ in the top-right corner takes you back.
 
 ```
- Audirvana ──UPnP──┐                       ┌──▶ exclusive, rate-switched ──▶ USB DAC 1
+ Audirvana ──UPnP──┐                         ┌──▶ exclusive, rate-switched ──▶ USB DAC 1
                    ├──▶  Mandarin DAC Bridge ┤
- Mandarin ───UPnP──┘     (port 55500)       └──▶ exclusive, rate-switched ──▶ USB DAC 2
+ Mandarin ───UPnP──┘      (port 55500)       └──▶ exclusive, rate-switched ──▶ USB DAC 2
 ```
 
 ---
@@ -39,10 +41,11 @@ macOS 14 or newer (macOS 27 included), Apple silicon or Intel. No Docker needed.
 3. **Done.** The page opens in your browser at **http://localhost:55500**. On a phone, open the
    address Terminal shows at the end. The bridge starts by itself whenever you log in.
 
-The installer uses the same Homebrew, Node.js 22 and ffmpeg as Mandarin, so it installs nothing
-new if Mandarin is already on the Mac. It downloads the bridge to `~/Mandarin-DAC-Bridge` and
-builds a small Core Audio helper there. If macOS asks to let **node** find devices on your
-network, choose **Allow**. To update, paste the same line again.
+The installer uses the same Homebrew and ffmpeg as Mandarin, so it installs nothing new if
+Mandarin is already on the Mac. It downloads the bridge from this repository's latest
+**Release** into `~/Mandarin-DAC-Bridge`. If there is no Release yet, it builds the bridge on the
+Mac instead, which takes a few minutes, once. If macOS asks to let **mandarin-dac-bridge** find
+devices on your network, choose **Allow**. To update, paste the same line again.
 
 **Then point the apps at the bridge:**
 
@@ -58,6 +61,14 @@ To remove it:
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/uninstall.sh)"
 ```
 
+### Publishing a build (for the repository owner)
+
+On GitHub, go to **Releases → Draft a new release**, create a tag such as `v1.0.0` and click
+**Publish**. GitHub Actions (`.github/workflows/release.yml`) then tests the code, builds it for
+Apple silicon and Intel Macs and for Linux x64 and arm64, and attaches the four
+`mandarin-dac-bridge-<platform>.tar.gz` files to the release. The installer always fetches the
+latest release.
+
 ---
 
 ## Install with Docker (DietPi, Intel i5, any Linux)
@@ -72,6 +83,7 @@ docker compose up -d --build
 ```
 
 Then open **http://<server-ip>:55500**. To update: `git pull && docker compose up -d --build`.
+The image builds the bridge with the .NET 10 SDK, then keeps only the native program and ffmpeg.
 
 You can use `docker run` instead of Compose:
 
@@ -105,6 +117,11 @@ docker run -d --name mandarin-dac-bridge --restart unless-stopped \
 | Bit-perfect | up to 24-bit (Core Audio's float path carries 24 bits exactly) | up to 32-bit |
 | DSD | DoP (off by default; switch it on per DAC) | DoP, on automatically when the DAC reports native DSD |
 
+The program calls Core Audio and ALSA directly from C#
+(`Native/CoreAudio.cs`, `Native/Alsa.cs`). On a Mac, Core Audio's real-time thread reads the
+samples from a buffer in native memory (`Audio/CoreAudioSink.cs`), so .NET's garbage collector
+never touches that path.
+
 * **Decoding.** ffmpeg turns whatever the app sends (FLAC, WAV, AIFF, ALAC, raw L16/L24, MP3,
   AAC…) into 32-bit integer PCM at the track's own rate, which carries 16- and 24-bit audio
   exactly. Only when the DAC can't take that rate is the track resampled (SoX, 28-bit
@@ -119,8 +136,8 @@ docker run -d --name mandarin-dac-bridge --restart unless-stopped \
   kept out. **Release** hands the DAC over at once.
 * **Volume** stays at 100% (bit-perfect). Use the DAC's or amplifier's volume. Mute works.
 
-The page's API is `GET /api/dacs`. Each DAC's UPnP description is at
-`/upnp/<id>/description.xml`.
+`mandarin-dac-bridge --list` prints the DACs found and what each takes. The page's API is
+`GET /api/dacs`. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
 
 ### Settings (all optional)
 
@@ -132,7 +149,8 @@ The page's API is `GET /api/dacs`. Each DAC's UPnP description is at
 | `MANDARIN_PORT` | `3500` | Mandarin's port, used to recognise its streams |
 | `BRIDGE_ALL_OUTPUTS` | — | `1` also offers non-USB outputs |
 | `BRIDGE_NAME_SUFFIX` | ` (Bridge)` | added to each DAC's name on the network |
-| `DATA_DIR` | `./data` | where `settings.json` lives |
+| `DATA_DIR` | `data/` beside the program | where `settings.json` lives |
+| `FFMPEG` | `ffmpeg` on the PATH, or Homebrew's | the decoder |
 
 On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. In Docker, they go
 under `environment:` in `docker-compose.yml`.
@@ -144,8 +162,8 @@ under `environment:` in `docker-compose.yml`.
 * **A DAC says "Waiting".** Another app holds it in exclusive mode, and the page names that app.
   Point the app at the bridge's UPnP device instead, or quit it.
 * **The apps don't see "(Bridge)" devices.** Check that the bridge and the apps are on the same
-  network. On a Mac, allow **node** under System Settings → Privacy & Security → Local Network.
-  In Docker, check that you used `--network host`.
+  network. On a Mac, allow **mandarin-dac-bridge** under System Settings → Privacy & Security →
+  Local Network. In Docker, check that you used `--network host`.
 * **The Mac's volume for the DAC** is shown on the DAC's page. Set it to 100% in Audio MIDI Setup
   for bit-perfect playback.
 
@@ -153,31 +171,30 @@ under `environment:` in `docker-compose.yml`.
 
 ## Development
 
-Plain Node.js with no npm dependencies, plus one small C helper per platform (`helper/`).
+.NET 10 SDK. ffmpeg is needed for the end-to-end tests; on Linux, libasound2 too.
 
 ```bash
-gcc -O2 -o bin/dachelper helper/dachelper-linux.c -lasound -lpthread           # Linux
-clang -O2 -o bin/dachelper helper/dachelper-mac.c -framework CoreAudio -framework CoreFoundation  # macOS
-npm test
-node bridge.js
+dotnet test                                                     # unit and end-to-end tests
+dotnet run --project src/MandarinDacBridge                      # run it
+dotnet publish src/MandarinDacBridge -c Release -r osx-arm64    # one native program (osx-x64, linux-x64, linux-arm64)
 ```
 
-`npm test` runs the unit tests and end-to-end tests. The end-to-end tests drive the bridge over
-real SOAP from two pretend apps: play, lockout, gapless, seek, pause, rate changes, DSD→DoP,
-resampling and UPnP events. They use a stand-in helper that plays in real time
-(`test/fake-helper.js`), and on Linux also the real ALSA helper.
+The end-to-end tests run the whole bridge in-process and drive it over real SOAP from two
+pretend apps: play, lockout, gapless, seek, pause, rate changes, DSD→DoP, resampling and UPnP
+events. They use a sink that plays in real time to a clock (`Audio/ClockSink.cs`), and on Linux
+also the real ALSA path.
 
 | File | What it does |
 |---|---|
-| `bridge.js` | starts everything |
-| `lib/manager.js` | finds the DACs; one bridge (helper, renderer, arbiter) per DAC |
-| `lib/devices.js` | what each DAC is and what it takes |
-| `lib/renderer.js` | the transport, the position, the audio path |
-| `lib/sources.js` | ffmpeg decoding, resampling only when needed, DSD as DoP |
-| `lib/dsd.js` | DSF/DFF parsing and DoP packing |
-| `lib/sink.js` | talks to the helper (`helper/proto.h`) |
-| `lib/arbiter.js` | which app is in control |
-| `lib/upnp/` | SSDP, the device description, SOAP control, GENA events |
-| `public/index.html` | the page |
-| `helper/dachelper-mac.c` | Core Audio: hog mode, physical format, IOProc |
-| `helper/dachelper-linux.c` | ALSA `hw:`: exclusive open, hw params, writes |
+| `Program.cs` | starts everything (`BridgeHost`); `--list`, `--version` |
+| `Manager.cs` | finds the DACs; one bridge (sink, renderer, arbiter) per DAC; settings |
+| `Devices.cs` | what each DAC is and what it takes |
+| `Renderer.cs` | the transport, the position, the audio path |
+| `Sources.cs` | ffmpeg decoding, resampling only when needed, DSD as DoP |
+| `Dsd.cs` | DSF/DFF parsing and DoP packing |
+| `Audio/` | the sinks: `CoreAudioSink` (hog mode, physical format, IOProc), `AlsaSink` (`hw:`), `ClockSink` (tests) |
+| `Native/` | the C calls: Core Audio, ALSA |
+| `Arbiter.cs` | which app is in control |
+| `Upnp/` | SSDP, the device description, SOAP control, GENA events |
+| `Web.cs` | the HTTP server (Kestrel): the page, the API, UPnP |
+| `Page/` | the page, built into the program |
