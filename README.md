@@ -87,23 +87,36 @@ docker compose up -d --build
 Then open **http://<server-ip>:55500**. To update: `git pull && docker compose up -d --build`.
 The image builds the bridge with the .NET 10 SDK, then keeps only the native program and ffmpeg.
 
-You can use `docker run` instead of Compose:
+You can use `docker run` instead of Compose. This builds straight from GitHub, so no clone is
+needed (it needs `git` on the host):
 
 ```bash
-docker build -t mandarin-dac-bridge .
-docker run -d --name mandarin-dac-bridge --restart unless-stopped \
+# Build the bridge from GitHub (first time, and to update)
+docker build -t mandarin-dac-bridge https://github.com/meltface-80/Mandarin-DAC-Bridge.git#main
+
+# Replace any existing container (the settings volume is kept)
+docker stop mandarin-dac-bridge 2>/dev/null
+docker rm mandarin-dac-bridge 2>/dev/null
+
+docker run -d \
+  --name mandarin-dac-bridge \
   --network host \
-  -v /dev/snd:/dev/snd --device-cgroup-rule='c 116:* rmw' \
+  --restart unless-stopped \
+  --device /dev/snd \
+  --privileged \
+  -v /dev/snd:/dev/snd \
   --cap-add SYS_NICE \
+  -e TZ=Europe/London \
   -v dac-bridge-data:/data \
   mandarin-dac-bridge
 ```
 
 * **`--network host` is required.** UPnP discovery uses multicast, which doesn't cross Docker's
   bridge network.
-* **`/dev/snd` with the cgroup rule** gives the container the sound devices, including a DAC
-  plugged in later. (`--device /dev/snd --privileged` also works, but only sees DACs that were
-  connected when the container started.)
+* **`--device /dev/snd`, `--privileged` and `-v /dev/snd:/dev/snd` together** let the container
+  open the DACs: `--device` hands the sound devices over, `--privileged` lets the container open
+  them, and the `/dev/snd` mount keeps the device list current, so a DAC plugged in later is
+  found too.
 * If Mandarin runs on the same machine with `--device /dev/snd`, switch off its local output for
   the DACs. Otherwise both containers try to open them.
 

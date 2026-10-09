@@ -306,7 +306,6 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
       <label>Time zone<input type="text" id="b-tz" value="Europe/London" spellcheck="false"></label>
       <label>Port<input type="text" id="b-port" value="55500" inputmode="numeric"></label>
       <label>This machine's IP (optional)<input type="text" id="b-ip" placeholder="only if it has several networks" spellcheck="false"></label>
-      <label class="check"><input type="checkbox" id="b-priv"> Use <code>--privileged</code> instead of the device rule (older Docker, or if the DACs aren't found)</label>
     </div>
 
     <div class="tabs" role="tablist" aria-label="How to run it">
@@ -324,10 +323,10 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
       <div class="note"><b><code>--network host</code> is required.</b> Audirvana and Mandarin find the bridge by multicast,
         which doesn't cross Docker's bridge network. Docker Desktop for Mac and Windows has no real host networking:
         on a Mac, use the <a href="#mac">one-line install</a>.</div>
-      <div class="note"><b>The sound devices.</b> <code>/dev/snd</code> with the cgroup rule
-        <code>c 116:* rmw</code> (116 is ALSA's device number) lets the container open the DACs, including one
-        plugged in later. <code>--privileged</code> works too, but only sees DACs that were plugged in when the
-        container started.</div>
+      <div class="note"><b>The sound devices.</b> <code>--device /dev/snd</code>, <code>--privileged</code> and
+        <code>-v /dev/snd:/dev/snd</code> work together: the first hands the sound devices to the container,
+        the second lets it open them, and the mount keeps the list current, so a DAC plugged in later is
+        found too. Leave out any of them and the DACs may not appear.</div>
       <div class="note"><b>Mandarin on the same machine?</b> If its container has <code>--device /dev/snd</code>,
         switch off its local output for the DACs (Settings → Audio Devices), so the bridge can hold them.</div>
     </div>
@@ -489,8 +488,10 @@ docker compose down --rmi local --volumes</pre>
       <div class="info-card">
         <div class="sym">No DACs in Docker</div>
         <h3>The container can't see /dev/snd</h3>
-        <p>Check <code>ls /dev/snd</code> on the host, then re-run the command with the
-          <code>--privileged</code> box ticked.</p>
+        <p>Check <code>cat /proc/asound/cards</code> on the host lists the DAC, and that the command still has
+          all three of <code>--device /dev/snd</code>, <code>--privileged</code> and
+          <code>-v /dev/snd:/dev/snd</code>. <code>docker exec mandarin-dac-bridge /app/mandarin-dac-bridge --diagnose</code>
+          shows what the container sees.</p>
       </div>
     </div>
   </div>
@@ -514,7 +515,6 @@ docker compose down --rmi local --volumes</pre>
     var tz = $("b-tz").value.trim() || "Europe/London";
     var port = ($("b-port").value.trim().match(/^\d{2,5}$/) || ["55500"])[0];
     var ip = $("b-ip").value.trim();
-    var priv = $("b-priv").checked;
     var ports = document.querySelectorAll(".port");
     for (var i = 0; i < ports.length; i++) ports[i].textContent = port;
     var K = function (t) { return '<span class="k">' + t + "</span>"; };
@@ -529,8 +529,9 @@ docker compose down --rmi local --volumes</pre>
         "  " + K("--name") + " mandarin-dac-bridge \\\n" +
         "  " + K("--network") + " host \\\n" +
         "  " + K("--restart") + " unless-stopped \\\n" +
-        (priv ? "  " + K("--privileged") + " \\\n"
-              : "  " + K("-v") + " /dev/snd:/dev/snd \\\n  " + K("--device-cgroup-rule") + " 'c 116:* rmw' \\\n") +
+        "  " + K("--device") + " /dev/snd \\\n" +
+        "  " + K("--privileged") + " \\\n" +
+        "  " + K("-v") + " /dev/snd:/dev/snd \\\n" +
         "  " + K("--cap-add") + " SYS_NICE \\\n" +
         "  " + K("-e") + " TZ=" + esc(tz) + " \\\n" +
         (port !== "55500" ? "  " + K("-e") + " PORT=" + port + " \\\n" : "") +
@@ -547,8 +548,9 @@ docker compose down --rmi local --volumes</pre>
         "    container_name: mandarin-dac-bridge\n" +
         "    restart: unless-stopped\n" +
         "    network_mode: host\n" +
-        (priv ? "    privileged: true\n    volumes:\n"
-              : "    device_cgroup_rules:\n      - \"c 116:* rmw\"\n    volumes:\n      - /dev/snd:/dev/snd\n") +
+        "    devices:\n      - /dev/snd:/dev/snd\n" +
+        "    privileged: true\n" +
+        "    volumes:\n      - /dev/snd:/dev/snd\n" +
         "      - dac-bridge-data:/data\n" +
         "    cap_add:\n      - SYS_NICE\n" +
         "    environment:\n      TZ: " + esc(tz) + "\n" +
@@ -575,7 +577,6 @@ docker compose down --rmi local --volumes</pre>
   }
 
   ["b-tz", "b-port", "b-ip"].forEach(function (id) { $(id).addEventListener("input", build); });
-  $("b-priv").addEventListener("change", build);
   wireTabs("[data-tab]", "data-tab", function (v) { tab = v; build(); });
   wireTabs("[data-rtab]", "data-rtab", function (v) {
     var panes = document.querySelectorAll("[data-pane]");

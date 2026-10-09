@@ -7,13 +7,14 @@ services:
     restart: unless-stopped
     # UPnP discovery is multicast: the container must be on the host's network.
     network_mode: host
-    # The host's sound devices, including DACs plugged in later
-    # (116 is ALSA's device number). The container needs to open them.
+    # The host's sound devices: handed over, openable (privileged), and
+    # mounted so a DAC plugged in later is found too.
+    devices:
+      - /dev/snd:/dev/snd
+    privileged: true
     volumes:
       - /dev/snd:/dev/snd
       - dac-bridge-data:/data
-    device_cgroup_rules:
-      - "c 116:* rmw"
     # Lets the bridge feed the DAC at real-time priority (optional, recommended).
     cap_add:
       - SYS_NICE
