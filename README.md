@@ -1,5 +1,7 @@
 # Mandarin DAC Bridge
 
+**📖 Install guide & command builder: [meltface-80.github.io/Mandarin-DAC-Bridge](https://meltface-80.github.io/Mandarin-DAC-Bridge/)**
+
 **Lets Audirvana and Mandarin share your USB DACs, bit-perfect.** Written in C# (.NET 10) and
 built ahead of time (Native AOT) into one small program. Nothing of .NET needs installing where
 it runs.
