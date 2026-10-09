@@ -138,7 +138,7 @@ never touches that path.
   kept out. **Release** hands the DAC over at once.
 * **Volume** stays at 100% (bit-perfect). Use the DAC's or amplifier's volume. Mute works.
 
-`mandarin-dac-bridge --list` prints the DACs found and what each takes. The page's API is
+`mandarin-dac-bridge --list` prints the DACs found and what each takes, and every other output it saw with why it was passed over. `mandarin-dac-bridge --diagnose` prints everything the machine reports about its sound devices. The page's API is
 `GET /api/dacs`. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
 
 ### Settings (all optional)

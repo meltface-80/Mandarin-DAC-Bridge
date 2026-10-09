@@ -142,6 +142,7 @@ internal sealed class Manager(Config config) : IDisposable
     private Timer? timer;
     private int scanning;
     private string error = "";
+    private List<string> skipped = [];
 
     public Settings Settings { get; } = new(config.DataDir);
     public event Action<Bridge>? Added;
@@ -165,12 +166,14 @@ internal sealed class Manager(Config config) : IDisposable
         if (Interlocked.Exchange(ref scanning, 1) == 1) return;
         try
         {
-            var (found, err) = Devices.List(config);
+            var (found, err, skippedNow) = Devices.ListWithSkipped(config);
             var open = new List<DacDevice>();
             var close = new List<string>();
             lock (gate)
             {
                 error = err;
+                foreach (var x in skippedNow.Except(skipped)) Log.Write("seen, not bridged: " + x);
+                skipped = skippedNow;
                 var seen = new HashSet<string>();
                 foreach (var dev in found)
                 {
@@ -291,9 +294,12 @@ internal sealed class Manager(Config config) : IDisposable
         return new BridgeView
         {
             Dacs = list.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-            Error = err, Version = Config.Version, Host = config.Hostname, Platform = config.Platform
+            Error = err, Version = Config.Version, Host = config.Hostname, Platform = config.Platform,
+            Others = Others()
         };
     }
+
+    private List<string> Others() { lock (gate) return skipped.ToList(); }
 
     public void Dispose()
     {

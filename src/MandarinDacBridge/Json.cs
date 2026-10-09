@@ -11,6 +11,7 @@ internal sealed class BridgeView
     public string Version { get; set; } = "";
     public string Host { get; set; } = "";
     public string Platform { get; set; } = "";
+    public List<string> Others { get; set; } = [];
 }
 
 internal sealed class DacView

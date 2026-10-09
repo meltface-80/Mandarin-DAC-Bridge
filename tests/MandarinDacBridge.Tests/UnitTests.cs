@@ -206,6 +206,16 @@ public class DeviceTests
         Assert.Equal(0.8, d.Volume);
         Assert.StartsWith("32-bit integer · 2 ch · 44.1 kHz, 48 kHz", d.Formats[0]);
         Assert.Equal(2, Devices.FromMac(all, all: true).Count);
+        // A USB DAC whose driver reports no transport (or an odd one) still counts, by Apple's USB driver's UID;
+        // and every output passed over says why.
+        var odd = new[]
+        {
+            new MacRawDevice("AppleUSBAudioEngine:SMSL:SU-1:00112233:1", "SMSL USB AUDIO", "SMSL", "", 2, 44100, -1, null, [(44100, 768000)], []),
+            new MacRawDevice("BuiltInSpeakerDevice", "MacBook Pro Speakers", "Apple Inc.", "bltn", 2, 48000, -1, null, [(48000, 48000)], [])
+        };
+        var skipped = new List<string>();
+        Assert.Equal("SMSL USB AUDIO", Assert.Single(Devices.FromMac(odd, false, skipped)).Name);
+        Assert.Equal("MacBook Pro Speakers — Built-in, not USB", Assert.Single(skipped));
         Assert.Equal("Audirvana", Devices.FriendlyProcess("/Applications/Audirvana Studio.app/Contents/MacOS/Audirvana Studio"));
         Assert.Equal("Music", Devices.FriendlyProcess("/System/Applications/Music.app/Contents/MacOS/Music"));
     }

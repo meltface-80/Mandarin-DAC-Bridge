@@ -5,6 +5,7 @@
 //
 //   mandarin-dac-bridge            run (the page is at http://<this machine>:55500)
 //   mandarin-dac-bridge --list     the DACs found, and what each takes
+//   mandarin-dac-bridge --diagnose everything the machine says about its sound devices
 //   mandarin-dac-bridge --version
 //
 // Settings: Config.cs.
@@ -17,9 +18,11 @@ if (args.Contains("--version")) { Console.WriteLine(Config.Version); return 0; }
 
 var config = Config.FromEnvironment();
 
+if (args.Contains("--diagnose")) { Console.WriteLine(Devices.Diagnose()); return 0; }
+
 if (args.Contains("--list"))
 {
-    var (devices, error) = Devices.List(config);
+    var (devices, error, skipped) = Devices.ListWithSkipped(config);
     if (error != "") Console.WriteLine("! " + error);
     if (devices.Count == 0) Console.WriteLine("No USB DACs found.");
     foreach (var d in devices)
@@ -28,6 +31,11 @@ if (args.Contains("--list"))
         Console.WriteLine($"  rates: {string.Join(", ", d.Rates.Select(Devices.KHz))}");
         Console.WriteLine($"  bits: {string.Join(", ", d.Bits)}  channels: {d.Channels}{(d.DsdNative.Length > 0 ? "  native DSD" : "")}");
         if (d.HolderPid > 0) Console.WriteLine($"  held by {(d.HolderName != "" ? d.HolderName : "process " + d.HolderPid)}");
+    }
+    if (skipped.Count > 0)
+    {
+        Console.WriteLine("Also seen, not bridged:");
+        foreach (var s in skipped) Console.WriteLine("  " + s);
     }
     return 0;
 }

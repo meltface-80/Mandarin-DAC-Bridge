@@ -97,9 +97,14 @@ internal static partial class Devices
         return m.Success ? int.Parse(m.Groups[1].Value) : 0;
     }
 
-    public static List<DacDevice> ListLinux(string root = "/proc/asound")
+    public static List<DacDevice> ListLinux(string root = "/proc/asound") => ListLinux(root, []);
+
+    public static List<DacDevice> ListLinux(string root, List<string> skipped)
     {
-        var lines = Read(Path.Combine(root, "cards")).Split('\n');
+        var cards = Read(Path.Combine(root, "cards"));
+        if (cards.Trim() == "" || cards.Contains("no soundcards", StringComparison.OrdinalIgnoreCase))
+            skipped.Add("no sound cards at all in " + root + (File.Exists("/.dockerenv") ? " (in Docker: is /dev/snd passed in, and is the DAC plugged into this machine?)" : ""));
+        var lines = cards.Split('\n');
         var list = new List<DacDevice>();
         for (int i = 0; i < lines.Length; i++)
         {
@@ -108,12 +113,12 @@ internal static partial class Devices
             string num = m.Groups[1].Value, cardId = m.Groups[2].Value, driver = m.Groups[3].Value, shortName = m.Groups[4].Value.Trim();
             var dir = Path.Combine(root, "card" + num);
             var usbid = Read(Path.Combine(dir, "usbid")).Trim();
-            if (driver != "USB-Audio" && usbid == "") continue;
+            if (driver != "USB-Audio" && usbid == "") { skipped.Add($"{shortName} — {driver}, not USB"); continue; }
             var longName = i + 1 < lines.Length ? lines[i + 1].Trim() : "";
             var s = ParseStream(Read(Path.Combine(dir, "stream0")));
             var pcm = s.Alts.Where(a => !a.Format.Contains("DSD", StringComparison.OrdinalIgnoreCase)).ToList();
             var dsd = s.Alts.Where(a => a.Format.Contains("DSD", StringComparison.OrdinalIgnoreCase)).ToList();
-            if (pcm.Count == 0 && !Directory.Exists(Path.Combine(dir, "pcm0p"))) continue;
+            if (pcm.Count == 0 && !Directory.Exists(Path.Combine(dir, "pcm0p"))) { skipped.Add($"{shortName} — USB, but has no playback (input only)"); continue; }
             var status = Read(Path.Combine(dir, "pcm0p", "sub0", "status"));
             var owner = Regex.Match(status, @"owner_pid\s*:\s*(\d+)");
             int ownerPid = owner.Success ? int.Parse(owner.Groups[1].Value) : 0;
@@ -142,39 +147,56 @@ internal static partial class Devices
 
     // ------------------------------------------------------------------ macOS
 
-    public static List<MacRawDevice> ReadMac()
+    public static List<MacRawDevice> ReadMac() => ReadMac([]);
+
+    // Every output device Core Audio has; one that can't be read is noted and the rest still listed.
+    public static List<MacRawDevice> ReadMac(List<string> skipped)
     {
         var list = new List<MacRawDevice>();
         foreach (var d in CoreAudio.Devices())
         {
-            int ch = CoreAudio.OutputChannels(d);
-            if (ch == 0) continue;
-            var transport = CoreAudio.FourCc(CoreAudio.Get<uint>(d, CoreAudio.DeviceTransportType, CoreAudio.ScopeGlobal) ?? 0);
-            double? vol = CoreAudio.Get<float>(d, CoreAudio.DeviceVolumeScalar, CoreAudio.ScopeOutput, 0)
-                          ?? CoreAudio.Get<float>(d, CoreAudio.DeviceVolumeScalar, CoreAudio.ScopeOutput, 1);
-            var rates = CoreAudio.GetArray<AudioValueRange>(d, CoreAudio.DeviceAvailableNominalSampleRates, CoreAudio.ScopeGlobal)
-                .Select(r => (r.Minimum, r.Maximum)).ToArray();
-            var stream = CoreAudio.FirstOutputStream(d);
-            var formats = stream == CoreAudio.Unknown ? [] : CoreAudio.GetArray<AudioStreamRangedDescription>(stream, CoreAudio.StreamAvailablePhysicalFormats, CoreAudio.ScopeGlobal)
-                .Select(f => new MacRawFormat(CoreAudio.FourCc(f.Format.FormatId), f.SampleRateRange.Minimum, f.SampleRateRange.Maximum,
-                    (int)f.Format.BitsPerChannel, (f.Format.FormatFlags & CoreAudio.FlagIsFloat) != 0, (int)f.Format.ChannelsPerFrame)).ToArray();
-            list.Add(new MacRawDevice(CoreAudio.GetString(d, CoreAudio.DeviceUid), CoreAudio.GetString(d, CoreAudio.ObjectName),
-                CoreAudio.GetString(d, CoreAudio.ObjectManufacturer), transport, ch, CoreAudio.NominalRate(d), CoreAudio.HogOwner(d),
-                vol, rates, formats));
+            string name = "";
+            try
+            {
+                name = CoreAudio.GetString(d, CoreAudio.ObjectName);
+                int ch = CoreAudio.OutputChannels(d);
+                if (ch == 0) continue;   // an input (a microphone)
+                var transport = CoreAudio.FourCc(CoreAudio.Get<uint>(d, CoreAudio.DeviceTransportType, CoreAudio.ScopeGlobal) ?? 0);
+                double? vol = CoreAudio.Get<float>(d, CoreAudio.DeviceVolumeScalar, CoreAudio.ScopeOutput, 0)
+                              ?? CoreAudio.Get<float>(d, CoreAudio.DeviceVolumeScalar, CoreAudio.ScopeOutput, 1);
+                var rates = CoreAudio.GetArray<AudioValueRange>(d, CoreAudio.DeviceAvailableNominalSampleRates, CoreAudio.ScopeGlobal)
+                    .Select(r => (r.Minimum, r.Maximum)).ToArray();
+                var stream = CoreAudio.FirstOutputStream(d);
+                var formats = stream == CoreAudio.Unknown ? [] : CoreAudio.GetArray<AudioStreamRangedDescription>(stream, CoreAudio.StreamAvailablePhysicalFormats, CoreAudio.ScopeGlobal)
+                    .Select(f => new MacRawFormat(CoreAudio.FourCc(f.Format.FormatId), f.SampleRateRange.Minimum, f.SampleRateRange.Maximum,
+                        (int)f.Format.BitsPerChannel, (f.Format.FormatFlags & CoreAudio.FlagIsFloat) != 0, (int)f.Format.ChannelsPerFrame)).ToArray();
+                list.Add(new MacRawDevice(CoreAudio.GetString(d, CoreAudio.DeviceUid), name,
+                    CoreAudio.GetString(d, CoreAudio.ObjectManufacturer), transport, ch, CoreAudio.NominalRate(d), CoreAudio.HogOwner(d),
+                    vol, rates, formats));
+            }
+            catch (Exception e) { skipped.Add($"{(name == "" ? "device " + d : name)} — Core Audio couldn't read it: {e.Message}"); }
         }
         return list;
     }
 
+    // USB by its transport, or — for a driver that reports none or an odd one — by Apple's USB driver's UID.
+    public static bool IsUsb(MacRawDevice d) =>
+        d.Transport == "usb" ||
+        (d.Transport is not ("bltn" or "hdmi" or "dprt" or "airp" or "blue" or "bltl" or "virt" or "grup" or "aggr" or "cont") &&
+         (d.Uid.StartsWith("AppleUSBAudioEngine", StringComparison.OrdinalIgnoreCase) || d.Uid.Contains("USB", StringComparison.OrdinalIgnoreCase)));
+
     // Core Audio's devices → DACs: USB only unless all is set; never virtual or aggregate devices.
-    public static List<DacDevice> FromMac(IEnumerable<MacRawDevice> raw, bool all = false)
+    public static List<DacDevice> FromMac(IEnumerable<MacRawDevice> raw, bool all = false) => FromMac(raw, all, []);
+
+    public static List<DacDevice> FromMac(IEnumerable<MacRawDevice> raw, bool all, List<string> skipped)
     {
         var list = new List<DacDevice>();
         foreach (var d in raw)
         {
             if (d.Uid == "" || d.Channels <= 0) continue;
-            bool usb = d.Transport == "usb";
-            if (!usb && !all) continue;
-            if (d.Transport is "virt" or "grup" or "aggr") continue;
+            bool usb = IsUsb(d);
+            if (d.Transport is "virt" or "grup" or "aggr") { skipped.Add($"{d.Name} — {(d.Transport == "virt" ? "virtual" : "aggregate")} device"); continue; }
+            if (!usb && !all) { skipped.Add($"{d.Name} — {TransportName(d.Transport)}, not USB"); continue; }
             var ranges = d.Formats.Where(f => f.Id == "lpcm").ToArray();
             var fromFormats = StandardRates.Where(r => ranges.Any(f => r >= f.Min - 0.5 && r <= f.Max + 0.5)).ToArray();
             var fromNominal = StandardRates.Where(r => d.Rates.Any(x => r >= x.Min - 0.5 && r <= x.Max + 0.5)).ToArray();
@@ -202,7 +224,8 @@ internal static partial class Devices
     private static string TransportName(string t) => t switch
     {
         "bltn" => "Built-in", "hdmi" => "HDMI", "dprt" => "DisplayPort", "thun" => "Thunderbolt", "1394" => "FireWire",
-        "blue" => "Bluetooth", "airp" => "AirPlay", "pci" => "PCI", _ => t
+        "blue" => "Bluetooth", "bltl" => "Bluetooth", "airp" => "AirPlay", "pci" => "PCI", "virt" => "Virtual", "grup" or "aggr" => "Aggregate",
+        "cont" => "Continuity", "" => "no transport reported", _ => t
     };
 
     // "24-bit integer · 2 ch · 44.1 kHz, 48 kHz…", one line per depth and kind.
@@ -230,15 +253,23 @@ internal static partial class Devices
 
     public static (List<DacDevice> Devices, string Error) List(Config config)
     {
+        var (devices, error, _) = ListWithSkipped(config);
+        return (devices, error);
+    }
+
+    // The DACs, and every other output seen with why it isn't one.
+    public static (List<DacDevice> Devices, string Error, List<string> Skipped) ListWithSkipped(Config config)
+    {
         List<DacDevice> devices;
+        var skipped = new List<string>();
         string error = "";
         if (config.TestDevices != null) devices = TestDevices(config.TestDevices);
-        else if (OperatingSystem.IsLinux()) devices = ListLinux();
+        else if (OperatingSystem.IsLinux()) devices = ListLinux("/proc/asound", skipped);
         else if (OperatingSystem.IsMacOS())
         {
             try
             {
-                devices = FromMac(ReadMac(), config.AllOutputs);
+                devices = FromMac(ReadMac(skipped), config.AllOutputs, skipped);
                 foreach (var d in devices) if (d.HolderPid > 0) d.HolderName = FriendlyProcess(CoreAudio.ProcessPath(d.HolderPid));
             }
             catch (Exception e) { devices = []; error = "Core Audio: " + e.Message; }
@@ -249,7 +280,45 @@ internal static partial class Devices
             d.Id = IdOf(d.Key);
             d.DopRates = DopCandidates.Where(r => d.Rates.Contains(r)).ToArray();
         }
-        return (devices, error);
+        return (devices, error, skipped);
+    }
+
+    // Everything the machine says about its sound devices, raw, for a bug report (--diagnose).
+    public static string Diagnose()
+    {
+        var o = new StringBuilder();
+        o.AppendLine($"Mandarin DAC Bridge {Config.Version} · {System.Runtime.InteropServices.RuntimeInformation.OSDescription} · {System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}");
+        if (OperatingSystem.IsMacOS())
+        {
+            foreach (var d in CoreAudio.Devices())
+            {
+                try
+                {
+                    o.AppendLine($"\n[{d}] {CoreAudio.GetString(d, CoreAudio.ObjectName)}  ·  maker: {CoreAudio.GetString(d, CoreAudio.ObjectManufacturer)}");
+                    o.AppendLine($"  uid: {CoreAudio.GetString(d, CoreAudio.DeviceUid)}");
+                    o.AppendLine($"  transport: '{CoreAudio.FourCc(CoreAudio.Get<uint>(d, CoreAudio.DeviceTransportType, CoreAudio.ScopeGlobal) ?? 0)}'  output channels: {CoreAudio.OutputChannels(d)}  rate: {CoreAudio.NominalRate(d)}  hog: {CoreAudio.HogOwner(d)}");
+                    var stream = CoreAudio.FirstOutputStream(d);
+                    if (stream != CoreAudio.Unknown)
+                        foreach (var f in CoreAudio.GetArray<AudioStreamRangedDescription>(stream, CoreAudio.StreamAvailablePhysicalFormats, CoreAudio.ScopeGlobal))
+                            o.AppendLine($"  format: {CoreAudio.FourCc(f.Format.FormatId)} {f.Format.BitsPerChannel}-bit {((f.Format.FormatFlags & CoreAudio.FlagIsFloat) != 0 ? "float" : "int")} {f.Format.ChannelsPerFrame} ch {f.SampleRateRange.Minimum}-{f.SampleRateRange.Maximum}");
+                }
+                catch (Exception e) { o.AppendLine($"  ! {e.GetType().Name}: {e.Message}"); }
+            }
+        }
+        else if (OperatingSystem.IsLinux())
+        {
+            o.AppendLine("\n/proc/asound/cards:\n" + Read("/proc/asound/cards"));
+            if (!Directory.Exists("/dev/snd")) o.AppendLine("/dev/snd: missing (in Docker: pass it in with -v /dev/snd:/dev/snd)");
+            else try { o.AppendLine("/dev/snd: " + string.Join(" ", Directory.GetFiles("/dev/snd").Select(Path.GetFileName))); }
+            catch (Exception e) { o.AppendLine("/dev/snd: can't be read (" + e.GetType().Name + ")"); }
+            foreach (var dir in Directory.Exists("/proc/asound") ? Directory.GetDirectories("/proc/asound", "card*") : [])
+            {
+                o.AppendLine($"\n{dir}: usbid={Read(Path.Combine(dir, "usbid")).Trim()} entries={string.Join(" ", Directory.GetFileSystemEntries(dir).Select(Path.GetFileName))}");
+                var st = Read(Path.Combine(dir, "stream0"));
+                if (st != "") o.AppendLine(st);
+            }
+        }
+        return o.ToString();
     }
 
     private static List<DacDevice> TestDevices(string json) =>

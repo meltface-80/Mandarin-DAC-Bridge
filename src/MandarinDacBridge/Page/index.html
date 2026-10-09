@@ -60,6 +60,9 @@
   .dot.off { background: transparent; border: 1px solid var(--muted); }
 
   .empty { text-align: center; color: var(--muted); padding: 70px 20px; border: 1px dashed var(--line); border-radius: 16px; }
+  .others { margin-top: 18px; color: var(--muted); font-size: 13.5px; border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; background: var(--panel); }
+  .others summary { cursor: pointer; }
+  .others ul { margin: 10px 0 2px 18px; display: grid; gap: 4px; }
   .empty h2 { font-family: var(--serif); font-weight: 400; color: var(--text); font-size: 22px; margin-bottom: 6px; }
 
   /* The DAC's page */
@@ -132,6 +135,10 @@
     <h2>No USB DACs found</h2>
     <p>Plug one in: it appears here within a few seconds.</p>
   </div>
+  <details class="others" id="others" hidden>
+    <summary>Other sound devices seen, not bridged</summary>
+    <ul id="others-list"></ul>
+  </details>
 </main>
 
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="d-name">
@@ -171,6 +178,10 @@ function renderTiles() {
       <div class="state"><span class="dot ${s.cls}"></span><span>${esc(s.text)}</span></div>
     </button>`;
   }).join("");
+  const others = data.others || [];
+  $("#others").hidden = others.length === 0;
+  if (!data.dacs.length && others.length) $("#others").open = true;
+  $("#others-list").innerHTML = others.map((o) => `<li>${esc(o)}</li>`).join("");
   const b = $("#banner");
   b.hidden = !data.error;
   b.textContent = data.error || "";
