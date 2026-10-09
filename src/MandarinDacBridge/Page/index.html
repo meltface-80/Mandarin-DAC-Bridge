@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DAC Bridge</title>
+<meta name="description" content="Mandarin DAC Bridge: the USB DACs on this machine, held exclusively and offered to Audirvana and Mandarin.">
+<link rel="icon" href="icon.png">
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+  @font-face { font-family: "Manrope"; src: url("fonts/manrope.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+  @font-face { font-family: "Young Serif"; src: url("fonts/young-serif.woff2") format("woff2"); font-display: swap; }
+  :root {
+    --bg: #17191c; --bg-deep: #121416; --panel: #1f2226; --panel-2: #262a2f; --line: #30353b;
+    --text: #ecebe6; --muted: #9a9ca1; --gold: #c9a45c; --gold-hi: #d4b06a; --gold-dim: #6e5a32;
+    --wash: rgba(201,164,92,.08); --good: #8fc19a; --warn: #e0a96d; --bad: #e07a6d;
+    --shadow: 0 10px 30px rgba(0,0,0,.35);
+    --sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --serif: "Young Serif", Georgia, serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f4f3ef; --bg-deep: #ece9e2; --panel: #fbfaf7; --panel-2: #f1efe9; --line: #d6d2c8;
+      --text: #17191c; --muted: #4f5257; --gold: #7a5a1f; --gold-hi: #7a5a1f; --gold-dim: #b9a57a;
+      --wash: rgba(122,90,31,.07); --good: #2f6b45; --warn: #8a5a12; --bad: #a33b2b;
+      --shadow: 0 10px 30px rgba(40,30,10,.12);
+      color-scheme: light;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); }
+  body { font-family: var(--sans); font-size: 15px; line-height: 1.5; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+
+  header { max-width: 1040px; margin: 0 auto; padding: 36px 20px 8px; display: flex; align-items: center; gap: 14px; }
+  header img { width: 40px; height: 40px; border-radius: 10px; }
+  header h1 { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.1; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .host { margin-left: auto; color: var(--muted); font-size: 12.5px; text-align: right; }
+
+  main { max-width: 1040px; margin: 0 auto; padding: 18px 20px 60px; }
+  .banner { border: 1px solid var(--gold-dim); background: var(--wash); border-radius: 12px; padding: 12px 16px; margin-bottom: 18px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+
+  .tile { position: relative; text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    padding: 20px 20px 18px; cursor: pointer; min-height: 150px; display: flex; flex-direction: column; gap: 4px;
+    transition: border-color .15s, transform .15s, box-shadow .15s; }
+  .tile:hover { border-color: var(--gold-dim); transform: translateY(-2px); box-shadow: var(--shadow); }
+  .tile:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+  .tile .name { font-family: var(--serif); font-size: 20px; line-height: 1.2; overflow-wrap: anywhere; }
+  .tile .model { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .tile .state { margin-top: auto; padding-top: 14px; font-size: 13px; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .tile .state span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+  .dot.ok { background: var(--gold); }
+  .dot.play { background: var(--good); box-shadow: 0 0 0 4px color-mix(in srgb, var(--good) 22%, transparent); }
+  .dot.wait { background: var(--warn); }
+  .dot.off { background: transparent; border: 1px solid var(--muted); }
+
+  .empty { text-align: center; color: var(--muted); padding: 70px 20px; border: 1px dashed var(--line); border-radius: 16px; }
+  .empty h2 { font-family: var(--serif); font-weight: 400; color: var(--text); font-size: 22px; margin-bottom: 6px; }
+
+  /* The DAC's page */
+  .sheet { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.55); display: none; align-items: flex-start; justify-content: center;
+    padding: 40px 16px; overflow-y: auto; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+  .sheet.open { display: flex; }
+  .card { position: relative; width: 100%; max-width: 640px; background: var(--panel); border: 1px solid var(--line); border-radius: 20px;
+    padding: 28px 24px 24px; box-shadow: var(--shadow); }
+  .close { position: absolute; top: 14px; right: 14px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--panel-2); cursor: pointer; display: grid; place-items: center; }
+  .close:hover { border-color: var(--gold-dim); }
+  .close svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; }
+  .card h2 { font-family: var(--serif); font-weight: 400; font-size: 26px; line-height: 1.2; padding-right: 48px; overflow-wrap: anywhere; }
+  .card .model { color: var(--muted); font-size: 14px; margin-top: 2px; }
+  .card h3 { font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); font-weight: 700; margin: 26px 0 8px; }
+  .now { margin-top: 18px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; display: grid; gap: 4px; }
+  .now .line1 { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .now .meta { color: var(--muted); font-size: 13.5px; overflow-wrap: anywhere; }
+  .now .fmt { font-family: var(--mono); font-size: 12.5px; color: var(--text); }
+  .now .warn { color: var(--warn); font-size: 13.5px; }
+
+  dl { display: grid; grid-template-columns: minmax(110px, 34%) 1fr; border-top: 1px solid var(--line); }
+  dt, dd { padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  dt { color: var(--muted); padding-right: 12px; }
+  dd { overflow-wrap: anywhere; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-family: var(--mono); font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 9px; background: var(--bg-deep); }
+  .chip.on { border-color: var(--gold); color: var(--gold); }
+  ul.formats { list-style: none; display: grid; gap: 4px; }
+  ul.formats li { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .row:first-of-type { border-top: 1px solid var(--line); }
+  .row .lbl { font-size: 14px; }
+  .row .hint { color: var(--muted); font-size: 12.5px; }
+  .switch { position: relative; width: 46px; height: 28px; flex: none; border-radius: 999px; background: var(--line); border: 0; cursor: pointer; transition: background .15s; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--text); transition: transform .15s; }
+  .switch[aria-checked="true"] { background: var(--gold); }
+  .switch[aria-checked="true"]::after { transform: translateX(18px); background: var(--bg); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; flex: none; }
+  .seg button { border: 0; background: transparent; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  .seg button[aria-pressed="true"] { background: var(--gold); color: var(--bg); }
+  .btn { border: 1px solid var(--gold-dim); background: var(--wash); border-radius: 10px; padding: 7px 14px; cursor: pointer; font-size: 13.5px; flex: none; }
+  .btn:hover { border-color: var(--gold); }
+  .foot { margin-top: 22px; color: var(--muted); font-size: 12.5px; }
+  @media (max-width: 520px) {
+    header { padding-top: 24px; flex-wrap: wrap; }
+    header .host { margin-left: 0; text-align: left; width: 100%; }
+    .sheet { padding: 0; }
+    .card { border-radius: 0; min-height: 100vh; border: 0; padding-top: 24px; }
+    dl { grid-template-columns: 1fr; }
+    dt { padding-bottom: 0; border-bottom: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon.png" alt="">
+  <div>
+    <h1>DAC Bridge</h1>
+    <div class="sub">Mandarin · exclusive, bit-perfect USB DACs</div>
+  </div>
+  <div class="host" id="host"></div>
+</header>
+
+<main>
+  <div class="banner" id="banner" hidden></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>
+    <h2>No USB DACs found</h2>
+    <p>Plug one in: it appears here within a few seconds.</p>
+  </div>
+</main>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="d-name">
+  <div class="card" id="card"></div>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const kHz = (r) => (r / 1000).toFixed(r % 1000 ? 1 : 0).replace(/\.0$/, "") + " kHz";
+const dsdOf = (dopRate) => "DSD" + Math.round(dopRate * 16 / 44100);
+const time = (s) => { s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+
+let data = { dacs: [] };
+let openId = null;
+
+function state(d) {
+  if (!d.enabled) return { cls: "off", text: "Not bridged · left to the Mac" };
+  if (!d.exclusive) return { cls: "wait", text: d.holder ? `Waiting · ${d.holder} has the DAC` : "Waiting for the DAC" };
+  const p = d.player || {}, who = d.control && d.control.owner;
+  if (p.transport === "PLAYING" || p.transport === "TRANSITIONING") return { cls: "play", text: `${who ? who + " · " : ""}${p.format || "Playing"}` };
+  if (p.transport === "PAUSED_PLAYBACK") return { cls: "ok", text: `Paused${who ? " · " + who : ""}` };
+  if (p.status === "ERROR_OCCURRED") return { cls: "wait", text: p.error || "Couldn't play" };
+  return { cls: "ok", text: "Exclusive · ready" };
+}
+
+function renderTiles() {
+  const g = $("#grid");
+  $("#empty").hidden = data.dacs.length > 0;
+  g.innerHTML = data.dacs.map((d) => {
+    const s = state(d);
+    const model = [d.manufacturer, d.name !== d.deviceName ? d.deviceName : ""].filter(Boolean).join(" · ") || d.transport;
+    return `<button class="tile" data-id="${esc(d.id)}" aria-label="${esc(d.name)}: show capabilities">
+      <div class="name">${esc(d.name)}</div>
+      <div class="model">${esc(model)}</div>
+      <div class="state"><span class="dot ${s.cls}"></span><span>${esc(s.text)}</span></div>
+    </button>`;
+  }).join("");
+  const b = $("#banner");
+  b.hidden = !data.error;
+  b.textContent = data.error || "";
+  $("#host").textContent = data.host ? `${data.host} · v${data.version}` : "";
+}
+
+function renderSheet() {
+  const d = data.dacs.find((x) => x.id === openId);
+  if (!d) { closeSheet(); return; }
+  const s = state(d), p = d.player || {}, c = d.control || {};
+  const rates = d.rates.length ? d.rates.map((r) => `<span class="chip${p.format && d.currentRate === r ? " on" : ""}">${kHz(r)}</span>`).join("") : "<span class=\"hint\">not reported</span>";
+  const bits = d.bits.length ? d.bits.map((b) => `<span class="chip">${b}-bit</span>`).join("") : "<span class=\"hint\">not reported</span>";
+  let dsd = [];
+  if (d.dsdNative && d.dsdNative.length) dsd.push("Native DSD (" + d.dsdNative.map(kHz).join(", ") + ")");
+  if (d.dopRates && d.dopRates.length) dsd.push("DoP up to " + dsdOf(Math.max(...d.dopRates)) + " if the DAC decodes DoP");
+  const vol = d.volume == null ? "" : `<dt>Mac volume</dt><dd>${Math.round(d.volume * 100)}%${d.volume < 0.999 ? ' <span class="hint">— set it to 100% in Audio MIDI Setup for bit-perfect</span>' : ""}</dd>`;
+  const playing = p.transport && p.transport !== "STOPPED" && p.transport !== "NO_MEDIA_PRESENT";
+  const blocked = c.blocked ? `<div class="meta">Kept ${esc(c.blocked.name)} out (${esc(c.blocked.action)}, ${Math.round((Date.now() - c.blocked.at) / 1000)} s ago)</div>` : "";
+
+  $("#card").innerHTML = `
+    <button class="close" id="close" aria-label="Close"><svg viewBox="0 0 16 16"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+    <h2 id="d-name">${esc(d.name)}</h2>
+    <div class="model">${esc([d.manufacturer, d.deviceName !== d.name ? d.deviceName : ""].filter(Boolean).join(" · ") || d.transport)}</div>
+
+    <div class="now">
+      <div class="line1"><span class="dot ${s.cls}"></span><span>${esc(s.cls === "play" ? "Playing" + (c.owner ? " · " + c.owner : "") : s.text)}</span></div>
+      ${playing && (p.title || p.artist) ? `<div class="meta">${esc(p.title)}${p.artist ? " — " + esc(p.artist) : ""}${p.duration ? ` · ${time(p.position)} / ${time(p.duration)}` : ""}</div>` : ""}
+      ${playing && p.format ? `<div class="fmt">${esc(p.format)}${p.physical ? " → DAC " + esc(p.physical) : ""}</div>` : ""}
+      ${c.owner && d.enabled ? `<div class="meta">In control: ${esc(c.owner)}${c.locked ? " (others are kept out)" : ""}</div>` : ""}
+      ${blocked}
+      ${d.enabled && !d.exclusive && d.waiting ? `<div class="warn">${esc(d.waiting)}. ${d.platform === "darwin" ? "In Audirvana, choose <b>" + esc(d.upnpName || d.name) + "</b> as the output (UPnP) instead of the DAC itself; the bridge takes the DAC as soon as it is let go." : "Switch the DAC off in the other program; the bridge takes it as soon as it is free."}</div>` : ""}
+    </div>
+
+    <h3>Capabilities</h3>
+    <dl>
+      <dt>Connection</dt><dd>${esc(d.transport)}${d.usb ? ` <span class="chip">${esc(d.usb)}</span>` : ""}</dd>
+      <dt>Channels</dt><dd>${d.channels}</dd>
+      <dt>Sample rates</dt><dd><div class="chips">${rates}</div></dd>
+      <dt>Bit depths</dt><dd><div class="chips">${bits}</div></dd>
+      <dt>DSD</dt><dd>${dsd.length ? esc(dsd.join(" · ")) : "PCM only"}</dd>
+      ${d.currentRate ? `<dt>Running at</dt><dd>${kHz(d.currentRate)}</dd>` : ""}
+      ${vol}
+      <dt>Formats</dt><dd><ul class="formats">${(d.formats || []).map((f) => `<li>${esc(f)}</li>`).join("") || "<li>—</li>"}</ul></dd>
+      ${d.upnpName ? `<dt>On the network</dt><dd>${esc(d.upnpName)}</dd>` : ""}
+    </dl>
+
+    <h3>Settings</h3>
+    <div class="row">
+      <div><div class="lbl">Bridge this DAC</div><div class="hint">Off: the bridge lets go and the Mac or other apps can use it.</div></div>
+      <button class="switch" role="switch" aria-checked="${d.enabled}" aria-label="Bridge this DAC" id="s-enabled"></button>
+    </div>
+    <div class="row">
+      <div><div class="lbl">DSD files</div><div class="hint">DoP sends DSD untouched; PCM converts it. Auto: DoP where the DAC reports DSD.</div></div>
+      <div class="seg" role="group" aria-label="DSD files">
+        ${["auto", "dop", "pcm"].map((m) => `<button data-dsd="${m}" aria-pressed="${d.dsd === m}">${m === "auto" ? "Auto" : m.toUpperCase()}</button>`).join("")}
+      </div>
+    </div>
+    ${c.owner && d.enabled ? `<div class="row"><div><div class="lbl">Hand over</div><div class="hint">Lets another app take this DAC now, even while ${esc(c.owner)} holds it.</div></div><button class="btn" id="s-release">Release</button></div>` : ""}
+    <div class="foot">Volume is fixed at 100% for bit-perfect playback: use the DAC's or amplifier's volume.</div>`;
+
+  $("#close").onclick = closeSheet;
+  $("#s-enabled").onclick = () => post(`/api/dacs/${d.id}/settings`, { enabled: !d.enabled });
+  for (const b of document.querySelectorAll("[data-dsd]")) b.onclick = () => post(`/api/dacs/${d.id}/settings`, { dsd: b.dataset.dsd });
+  const r = $("#s-release");
+  if (r) r.onclick = () => post(`/api/dacs/${d.id}/release`, {});
+}
+
+function openSheet(id) {
+  openId = id;
+  renderSheet();
+  $("#sheet").classList.add("open");
+  document.body.style.overflow = "hidden";
+  const c = $("#close");
+  if (c) c.focus();
+}
+function closeSheet() {
+  const was = openId;
+  openId = null;
+  $("#sheet").classList.remove("open");
+  document.body.style.overflow = "";
+  const t = was && document.querySelector(`.tile[data-id="${was}"]`);
+  if (t) t.focus();
+}
+
+$("#grid").addEventListener("click", (e) => { const t = e.target.closest(".tile"); if (t) openSheet(t.dataset.id); });
+$("#sheet").addEventListener("click", (e) => { if (e.target.id === "sheet") closeSheet(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && openId) closeSheet(); });
+
+async function post(url, body) {
+  try { await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch (e) { /* the next refresh shows it */ }
+  refresh();
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/dacs", { cache: "no-store" });
+    data = await r.json();
+  } catch (e) {
+    data = Object.assign({}, data, { error: "The bridge isn't answering. Is it running?" });
+  }
+  renderTiles();
+  if (openId) renderSheet();
+}
+
+refresh();
+setInterval(refresh, 2000);
+</script>
+</body>
+</html>

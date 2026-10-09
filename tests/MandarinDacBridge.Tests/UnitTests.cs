@@ -1,0 +1,342 @@
+using System.Buffers.Binary;
+using System.Net;
+using System.Text;
+using MandarinDacBridge.Upnp;
+using Xunit;
+
+namespace MandarinDacBridge.Tests;
+
+public class DsdTests
+{
+    internal static byte[] Dsf(int channels = 2, int bytesPerChannel = 4096 * 2, Func<int, int, byte>? fill = null, byte pad = 0)
+    {
+        fill ??= (ch, i) => (byte)((ch * 16 + i) & 255);
+        const int block = 4096;
+        int blocks = (bytesPerChannel + block - 1) / block;
+        var data = new byte[blocks * block * channels];
+        for (int b = 0; b < blocks; b++)
+            for (int ch = 0; ch < channels; ch++)
+                for (int i = 0; i < block; i++)
+                {
+                    int n = b * block + i;
+                    data[b * block * channels + ch * block + i] = n < bytesPerChannel ? fill(ch, n) : pad;
+                }
+        var head = new byte[92];
+        Encoding.ASCII.GetBytes("DSD ").CopyTo(head, 0);
+        BinaryPrimitives.WriteUInt64LittleEndian(head.AsSpan(4), 28);
+        BinaryPrimitives.WriteUInt64LittleEndian(head.AsSpan(12), (ulong)(92 + data.Length));
+        Encoding.ASCII.GetBytes("fmt ").CopyTo(head, 28);
+        BinaryPrimitives.WriteUInt64LittleEndian(head.AsSpan(32), 52);
+        BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(40), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(48), 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(52), (uint)channels);
+        BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(56), 2822400);
+        BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(60), 1);
+        BinaryPrimitives.WriteUInt64LittleEndian(head.AsSpan(64), (ulong)bytesPerChannel * 8);
+        BinaryPrimitives.WriteUInt32LittleEndian(head.AsSpan(72), block);
+        Encoding.ASCII.GetBytes("data").CopyTo(head, 80);
+        BinaryPrimitives.WriteUInt64LittleEndian(head.AsSpan(84), (ulong)(12 + data.Length));
+        return [.. head, .. data];
+    }
+
+    [Fact]
+    public void DsfHeader()
+    {
+        var h = Dsd.Parse(Dsf())!;
+        Assert.Equal("dsf", h.Kind);
+        Assert.Equal(2822400, h.Rate);
+        Assert.Equal(2, h.Channels);
+        Assert.Equal(92, h.DataStart);
+        Assert.True(h.LsbFirst);
+        Assert.Equal("DSD64", Dsd.Name(h.Rate));
+    }
+
+    [Fact]
+    public void DsfToDop_MarkersAlternate_BytesInTimeOrder_BitsReversed()
+    {
+        var file = Dsf(bytesPerChannel: 6000);   // the second block is part padding
+        var h = Dsd.Parse(file)!;
+        var p = new DopPacker(h);
+        var data = file.AsSpan((int)h.DataStart);
+        var o = new List<byte>();
+        o.AddRange(p.Push(data[..8]));
+        o.AddRange(p.Push(data[8..5000]));
+        o.AddRange(p.Push(data[5000..]));
+        o.AddRange(p.Finish());
+        var bytes = o.ToArray();
+        int silence = (int)Math.Round(176400 * 0.05);
+        Assert.Equal((3000 + silence) * 8, bytes.Length);
+        for (int f = 0; f < 3000; f++)
+            for (int ch = 0; ch < 2; ch++)
+            {
+                uint w = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan((f * 2 + ch) * 4));
+                Assert.Equal(f % 2 == 1 ? 0xFAu : 0x05u, w >> 24);
+                Assert.Equal(Dsd.Reverse[(ch * 16 + f * 2) & 255], (byte)(w >> 16));
+                Assert.Equal(Dsd.Reverse[(ch * 16 + f * 2 + 1) & 255], (byte)(w >> 8));
+                Assert.Equal(0u, w & 255);
+            }
+        uint last = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(bytes.Length - 4));
+        Assert.Equal(0x6969u, (last >> 8) & 0xFFFF);
+    }
+
+    [Fact]
+    public void DffHeaderAndDop()
+    {
+        const int channels = 2, perCh = 1000;
+        var data = new byte[perCh * channels];
+        for (int i = 0; i < perCh; i++) for (int ch = 0; ch < channels; ch++) data[i * channels + ch] = (byte)((i * 3 + ch) & 255);
+        static byte[] Chunk(string id, byte[] body)
+        {
+            var h = new byte[12];
+            Encoding.ASCII.GetBytes(id).CopyTo(h, 0);
+            BinaryPrimitives.WriteUInt64BigEndian(h.AsSpan(4), (ulong)body.Length);
+            return [.. h, .. body];
+        }
+        var fs = new byte[4]; BinaryPrimitives.WriteUInt32BigEndian(fs, 5644800);
+        var chnl = new byte[10]; BinaryPrimitives.WriteUInt16BigEndian(chnl, 2); Encoding.ASCII.GetBytes("SLFTSRGT").CopyTo(chnl, 2);
+        var prop = Chunk("PROP", [.. Encoding.ASCII.GetBytes("SND "), .. Chunk("FS  ", fs), .. Chunk("CHNL", chnl), .. Chunk("CMPR", Encoding.ASCII.GetBytes("DSD \u000enot compressed\0"))]);
+        byte[] body = [.. Encoding.ASCII.GetBytes("DSD "), .. Chunk("FVER", [1, 5, 0, 0]), .. prop, .. Chunk("DSD ", data)];
+        var file = new byte[12 + body.Length];
+        Encoding.ASCII.GetBytes("FRM8").CopyTo(file, 0);
+        BinaryPrimitives.WriteUInt64BigEndian(file.AsSpan(4), (ulong)body.Length);
+        body.CopyTo(file, 12);
+        var h = Dsd.Parse(file)!;
+        Assert.Equal("dff", h.Kind);
+        Assert.Equal(5644800, h.Rate);
+        Assert.Equal("DSD128", Dsd.Name(h.Rate));
+        var p = new DopPacker(h);
+        byte[] o = [.. p.Push(file.AsSpan((int)h.DataStart)), .. p.Finish()];
+        uint w0 = BinaryPrimitives.ReadUInt32LittleEndian(o.AsSpan(4));   // frame 0, right channel
+        Assert.Equal(0x05u, w0 >> 24);
+        Assert.Equal((byte)1, (byte)(w0 >> 16));
+        Assert.Equal((byte)4, (byte)(w0 >> 8));
+    }
+
+    [Fact]
+    public void SeekLandsOnABlock()
+    {
+        var h = Dsd.Parse(Dsf(bytesPerChannel: 4096 * 100))!;
+        Assert.Equal((8L * 4096 * 2, 8L * 4096), Dsd.SeekOffset(h, 0.1));   // 0.1 s = 35280 bytes per channel → block 8
+    }
+
+    [Fact]
+    public void MutingDopKeepsTheMarkers()
+    {
+        var b = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(b, 0x05123400);
+        BinaryPrimitives.WriteUInt32LittleEndian(b.AsSpan(4), 0xFA567800);
+        Dsd.MuteDop(b);
+        Assert.Equal(0x05696900u, BinaryPrimitives.ReadUInt32LittleEndian(b));
+        Assert.Equal(0xFA696900u, BinaryPrimitives.ReadUInt32LittleEndian(b.AsSpan(4)));
+    }
+}
+
+public class DeviceTests
+{
+    [Fact]
+    public void Linux_UsbDacStreamFile_WithNativeDsd()
+    {
+        var root = Directory.CreateTempSubdirectory("asound-").FullName;
+        File.WriteAllText(Path.Combine(root, "cards"),
+            " 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n                      HDA Intel PCH at 0xf7f10000 irq 33\n" +
+            " 1 [D90            ]: USB-Audio - Topping D90\n                      Topping Topping D90 at usb-0000:00:14.0-2, high speed\n");
+        Directory.CreateDirectory(Path.Combine(root, "card0"));
+        Directory.CreateDirectory(Path.Combine(root, "card1", "pcm0p", "sub0"));
+        File.WriteAllText(Path.Combine(root, "card1", "usbid"), "152a:8750\n");
+        File.WriteAllText(Path.Combine(root, "card1", "pcm0p", "sub0", "status"), "closed\n");
+        File.WriteAllText(Path.Combine(root, "card1", "stream0"), """
+            Topping Topping D90 at usb-0000:00:14.0-2, high speed : USB Audio
+
+            Playback:
+              Status: Running
+                Interface = 1
+                Altset = 1
+                Packet Size = 216
+                Momentary freq = 96000 Hz (0xc.0000)
+              Interface 1
+                Altset 1
+                Format: S32_LE
+                Channels: 2
+                Endpoint: 0x01 (1 OUT) (ASYNC)
+                Rates: 44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000
+                Data packet interval: 125 us
+                Bits: 32
+              Interface 1
+                Altset 2
+                Format: SPECIAL DSD_U32_BE
+                Channels: 2
+                Rates: 88200, 176400, 352800, 705600
+                Bits: 32
+
+            Capture:
+              Interface 2
+                Altset 1
+                Format: S16_LE
+                Channels: 2
+                Rates: 8000
+            """);
+        var list = Devices.ListLinux(root);
+        var d = Assert.Single(list);
+        Assert.Equal("Topping D90", d.Name);
+        Assert.Equal("Topping", d.Manufacturer);
+        Assert.Equal("152a:8750", d.Usb);
+        Assert.Equal("hw:CARD=D90,DEV=0", d.Spec);
+        Assert.Equal([44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000], d.Rates);
+        Assert.Equal([32], d.Bits);
+        Assert.Equal([88200, 176400, 352800, 705600], d.DsdNative);
+        Assert.Equal(96000, d.CurrentRate);
+    }
+
+    [Fact]
+    public void Mac_UsbDacsOnly_RatesFromThePhysicalFormats()
+    {
+        var all = new[]
+        {
+            new MacRawDevice("BuiltInSpeakerDevice", "MacBook Pro Speakers", "Apple Inc.", "bltn", 2, 48000, -1, null, [(44100, 44100), (48000, 48000)], []),
+            new MacRawDevice("AppleUSBAudioEngine:Chord:Mojo 2:1234:1", "Mojo 2", "Chord Electronics Ltd", "usb", 2, 44100, 812, 0.8,
+                [(44100, 44100), (768000, 768000)],
+                [new MacRawFormat("lpcm", 44100, 768000, 32, false, 2), new MacRawFormat("lpcm", 44100, 768000, 24, false, 2)])
+        };
+        var d = Assert.Single(Devices.FromMac(all));
+        Assert.Equal("Mojo 2", d.Name);
+        Assert.Equal("AppleUSBAudioEngine:Chord:Mojo 2:1234:1", d.Spec);
+        Assert.Equal([44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000], d.Rates);
+        Assert.Equal([24, 32], d.Bits);
+        Assert.Equal(812, d.HolderPid);
+        Assert.Equal(0.8, d.Volume);
+        Assert.StartsWith("32-bit integer · 2 ch · 44.1 kHz, 48 kHz", d.Formats[0]);
+        Assert.Equal(2, Devices.FromMac(all, all: true).Count);
+        Assert.Equal("Audirvana", Devices.FriendlyProcess("/Applications/Audirvana Studio.app/Contents/MacOS/Audirvana Studio"));
+        Assert.Equal("Music", Devices.FriendlyProcess("/System/Applications/Music.app/Contents/MacOS/Music"));
+    }
+}
+
+public class SourceTests
+{
+    [Fact]
+    public void TheRateSent_TheTracksOwn_ElseTheNearestInItsFamily()
+    {
+        int[] dac = [44100, 48000, 88200, 96000, 176400, 192000];
+        Assert.Equal(96000, Sources.PickRate(96000, dac));
+        Assert.Equal(176400, Sources.PickRate(352800, dac));
+        Assert.Equal(192000, Sources.PickRate(384000, dac));
+        Assert.Equal(44100, Sources.PickRate(22050, dac));
+        Assert.Equal(48000, Sources.PickRate(96000, [44100, 48000]));
+        Assert.Equal(96000, Sources.PickRate(88200, [48000, 96000]));
+        Assert.Equal(12345, Sources.PickRate(12345, []));
+        Assert.Equal(new RawPcm("s24be", 96000, 2, 24), Sources.RawPcmOf("audio/L24;rate=96000;channels=2"));
+        Assert.Null(Sources.RawPcmOf("audio/flac"));
+        Assert.True(Sources.IsDsd("audio/x-dsf", ""));
+        Assert.True(Sources.IsDsd("", "http://x/a.dff?id=1"));
+        Assert.False(Sources.IsDsd("audio/flac", "http://x/a.flac"));
+    }
+
+    [Fact]
+    public void WhatFfmpegSaysAboutItsInput()
+    {
+        var p = Sources.ParseProbe("""
+            Input #0, flac, from 'http://x/a.flac':
+              Duration: 00:03:21.45, start: 0.000000, bitrate: 2944 kb/s
+              Stream #0:0: Audio: flac, 96000 Hz, stereo, s32 (24 bit)
+            Stream mapping:
+              Stream #0:0 -> #0:0 (flac (native) -> pcm_s32le (native))
+            Output #0, wav, to 'pipe:1':
+              Stream #0:0: Audio: pcm_s32le, 96000 Hz, stereo, s32, 6144 kb/s
+            """);
+        Assert.Equal(("flac", 96000, 24, false, 201.45, 2), p);
+        Assert.Equal("96 kHz · 24-bit · FLAC", Renderer.Describe(new TrackInfo(96000, 2, 24, "flac", 96000, false, 0, false)));
+        Assert.Equal("DSD64 · DoP at 176.4 kHz", Renderer.Describe(new TrackInfo(176400, 2, 1, "DSD64", 2822400, false, 0, true)));
+        Assert.Equal("352.8 kHz → 176.4 kHz · 24-bit · FLAC", Renderer.Describe(new TrackInfo(176400, 2, 24, "flac", 352800, false, 0, false, true)));
+    }
+}
+
+public class SoapTests
+{
+    [Fact]
+    public void SoapRequestsAndDidl()
+    {
+        var meta = "<DIDL-Lite xmlns=\"urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:upnp=\"urn:schemas-upnp-org:metadata-1-0/upnp/\">" +
+                   "<item id=\"1\" parentID=\"0\" restricted=\"1\"><dc:title>So What &amp; More</dc:title><upnp:artist>Miles Davis</upnp:artist><upnp:album>Kind of Blue</upnp:album>" +
+                   "<res protocolInfo=\"http-get:*:audio/flac:*\" duration=\"0:09:22.000\">http://10.0.0.2:3500/stream/1.flac</res></item></DIDL-Lite>";
+        var body = "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body>" +
+                   "<u:SetAVTransportURI xmlns:u=\"urn:schemas-upnp-org:service:AVTransport:1\"><InstanceID>0</InstanceID>" +
+                   $"<CurrentURI>http://10.0.0.2:3500/stream/1.flac?a=1&amp;b=2</CurrentURI><CurrentURIMetaData>{Xml.Esc(meta)}</CurrentURIMetaData></u:SetAVTransportURI></s:Body></s:Envelope>";
+        var (action, args) = Xml.ParseSoap(body, "\"urn:schemas-upnp-org:service:AVTransport:1#SetAVTransportURI\"");
+        Assert.Equal("SetAVTransportURI", action);
+        Assert.Equal("0", args["InstanceID"]);
+        Assert.Equal("http://10.0.0.2:3500/stream/1.flac?a=1&b=2", args["CurrentURI"]);
+        Assert.Equal(meta, args["CurrentURIMetaData"]);
+        var d = Xml.ParseDidl(args["CurrentURIMetaData"], "http://10.0.0.2:3500/stream/1.flac");
+        Assert.Equal("So What & More", d.Title);
+        Assert.Equal("Miles Davis", d.Artist);
+        Assert.Equal("audio/flac", d.Mime);
+        Assert.Equal(562, d.Duration);
+        Assert.Equal("Play", Xml.ParseSoap("<s:Envelope><s:Body><u:Play xmlns:u=\"x\"/></s:Body></s:Envelope>", "").Action);
+        Assert.Equal("1:02:03", Xml.SecondsToHms(3723.9));
+        Assert.Contains("<errorCode>705</errorCode>", Control.Fault(705, "Transport is locked"));
+        Assert.Contains("<name>SetNextAVTransportURI</name>", Scpd.Document("AVTransport"));
+    }
+
+    [Fact]
+    public void LastChangeDocuments()
+    {
+        var x = Events.LastChange("AVTransport", new() { ["TransportState"] = "PLAYING", ["CurrentTrackURI"] = "http://a/b?c=1&d=2" });
+        Assert.Equal("<Event xmlns=\"urn:schemas-upnp-org:metadata-1-0/AVT/\"><InstanceID val=\"0\"><TransportState val=\"PLAYING\"/><CurrentTrackURI val=\"http://a/b?c=1&amp;d=2\"/></InstanceID></Event>", x);
+        Assert.Contains("<Volume channel=\"Master\" val=\"100\"/>", Events.LastChange("RenderingControl", new() { ["Volume"] = "100" }));
+        Assert.Contains("<LastChange>&lt;Event xmlns=&quot;urn:schemas-upnp-org:metadata-1-0/AVT/&quot;&gt;", Events.PropertySet("AVTransport", new() { ["TransportState"] = "STOPPED" }));
+        Assert.Contains("<e:property><CurrentConnectionIDs>0</CurrentConnectionIDs></e:property>", Events.PropertySet("ConnectionManager", new() { ["CurrentConnectionIDs"] = "0" }));
+    }
+}
+
+public class ArbiterTests
+{
+    [Fact]
+    public void TheFirstToPlayOwnsTheDac_OthersWaitOutTheGrace()
+    {
+        var a = new Arbiter(TimeSpan.FromSeconds(1), 3500);
+        var aud = a.Identify("::ffff:10.0.0.5", "Audirvana Studio/2.1.0", null);
+        var man = a.Identify("::ffff:10.0.0.9", "", "http://10.0.0.9:3500/stream/42.flac");
+        Assert.Equal("Audirvana", aud.Name);
+        Assert.Equal("Mandarin", man.Name);
+        Assert.Equal("Mandarin", a.Identify("10.0.0.9", "", null).Name);   // remembered without a URI
+        Assert.Null(a.Claim(aud, "Play", false));
+        Assert.NotNull(a.Claim(man, "Play", true));                           // kept out while it plays
+        Assert.NotNull(a.LastBlocked);
+        Assert.NotNull(a.Claim(man, "Play", false));                          // and within the grace after
+        a.Expire();
+        Assert.Null(a.Claim(man, "SetAVTransportURI", false));                // after the grace it may
+        Assert.Equal("Mandarin", a.Owner!.Name);
+        a.Release();
+        Assert.Null(a.Owner);
+    }
+}
+
+public class SsdpTests
+{
+    [Fact]
+    public async Task AnswersAnMSearchForARenderer_FromTheAskersNetwork()
+    {
+        var two = new List<LocalAddress>
+        {
+            new("en1", IPAddress.Parse("10.0.0.2"), IPAddress.Parse("255.255.255.0")),
+            new("en0", IPAddress.Parse("192.168.1.10"), IPAddress.Parse("255.255.255.0"))
+        };
+        Assert.Equal(IPAddress.Parse("192.168.1.10"), Ssdp.AddressFor(IPAddress.Parse("192.168.1.40"), two));
+        var sent = new List<string>();
+        var s = new Ssdp(55500, "", "test", () => [new Advert("uuid:abc", "/upnp/dac-1/description.xml")]);
+        s.UseInterfaces(two);
+        s.SendHook = (b, _) => { lock (sent) sent.Add(Encoding.ASCII.GetString(b)); };
+        var from = new IPEndPoint(IPAddress.Parse("192.168.1.40"), 50000);
+        void Ask(string st) => s.OnMessage($"M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 0\r\nST: {st}\r\n\r\n", from);
+        Ask("urn:schemas-upnp-org:device:MediaRenderer:1");
+        Ask("urn:schemas-upnp-org:service:AVTransport:1");
+        Ask("urn:schemas-upnp-org:device:MediaServer:1");
+        await Task.Delay(100);
+        Assert.Equal(2, sent.Count);
+        Assert.Contains(sent, x => x.Contains("LOCATION: http://192.168.1.10:55500/upnp/dac-1/description.xml") && x.Contains("USN: uuid:abc::urn:schemas-upnp-org:device:MediaRenderer:1"));
+        sent.Clear();
+        Ask("ssdp:all");
+        await Task.Delay(100);
+        Assert.Equal(6, sent.Count);   // root, uuid, the device type and three services
+    }
+}

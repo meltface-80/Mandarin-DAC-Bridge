@@ -1,22 +1,27 @@
-# Build Layer
-FROM ://microsoft.com AS build-env
+# Mandarin DAC Bridge for Linux (DietPi, Debian, Ubuntu…), x86-64 or arm64.
+#
+#   docker compose up -d --build
+#
+# Needs the host's network (UPnP discovery is multicast) and its sound
+# devices (/dev/snd) — see docker-compose.yml.
+
+# Built ahead of time (Native AOT) to one program: no .NET in the final image.
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends clang zlib1g-dev \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY src/MandarinDacBridge/ src/MandarinDacBridge/
+RUN dotnet publish src/MandarinDacBridge -c Release -o /out --nologo
+
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-
-# Install native dependencies required by compiler components
-RUN apt-get update && apt-get install -y clang zlib1g-dev
-
-# Build and run target compilation
-COPY *.csproj ./
-RUN dotnet restore
-
-COPY . ./
-RUN dotnet publish -c Release -r linux-x64 -o out /p:PublishAot=true
-
-# Minimal Production Layer
-FROM alpine:3.19
-WORKDIR /
-RUN apk add --no-cache libgcc libstdc++
-COPY --from=build-env /app/out/MandarinDacBridge /MandarinDacBridge
-
+COPY --from=build /out/mandarin-dac-bridge /app/mandarin-dac-bridge
+ENV PORT=55500 DATA_DIR=/data
+VOLUME /data
 EXPOSE 55500
-CMD ["/MandarinDacBridge"]
+STOPSIGNAL SIGTERM
+ENTRYPOINT ["/app/mandarin-dac-bridge"]

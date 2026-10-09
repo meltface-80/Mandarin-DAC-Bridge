@@ -1,72 +1,68 @@
-name: Deploy Native AOT Releases
+# Builds Mandarin DAC Bridge for every platform and attaches it to a GitHub
+# Release. On GitHub: Releases → Draft a new release → tag v1.0.0 → Publish.
+# A few minutes later the installer's link (releases/latest/download/…)
+# serves the new build.
+name: Release
 
 on:
-  push:
-    tags:
-      - 'v*' # Triggers the build sequence automatically on version tags like v1.0.0
+  release:
+    types: [published]
+  workflow_dispatch:
 
 permissions:
-  contents: write # Grants permission to create GitHub Releases and upload binaries
+  contents: write
 
 jobs:
-  build-and-release:
-    name: Build AOT for ${{ matrix.rid }}
-    runs-on: ${{ matrix.os }}
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64
+      - run: dotnet test -c Release
+
+  build:
+    needs: test
     strategy:
       matrix:
         include:
-          - os: macos-latest
-            rid: osx-arm64
-            artifact_name: mandarin-bridge-mac-arm64
-          - os: macos-latest
-            rid: osx-x64
-            artifact_name: mandarin-bridge-mac-x64
-          - os: ubuntu-latest
-            rid: linux-x64
-            artifact_name: mandarin-bridge-linux-x64
-
+          - { os: macos-latest, rid: osx-arm64 }
+          - { os: macos-latest, rid: osx-x64 }
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: ubuntu-24.04-arm, rid: linux-arm64 }
+    runs-on: ${{ matrix.os }}
     steps:
-    - name: Checkout Source Code
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+      - name: Version from the tag
+        shell: bash
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || v="1.0.0"
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+      - name: Native AOT build
+        run: dotnet publish src/MandarinDacBridge -c Release -r ${{ matrix.rid }} -p:Version=${{ env.VERSION }} -o out
+      - name: Package
+        run: tar -czf mandarin-dac-bridge-${{ matrix.rid }}.tar.gz -C out mandarin-dac-bridge
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mandarin-dac-bridge-${{ matrix.rid }}
+          path: mandarin-dac-bridge-${{ matrix.rid }}.tar.gz
 
-    # Setup the .NET 10 SDK environment using the preview channel
-    - name: Setup .NET 10 SDK
-      uses: actions/setup-dotnet@v4
-      with:
-        dotnet-version: '10.0.x'
-        dotnet-quality: 'preview'
-
-    # Native AOT on Linux requires clang and zlib libraries
-    - name: Install Linux Build Dependencies
-      if: matrix.os == 'ubuntu-latest'
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y clang zlib1g-dev
-
-    - name: Restore Project Dependencies
-      run: dotnet restore MandarinDacBridge.csproj
-
-    # Compile the standalone binary without runtime dependencies
-    - name: Compile Native AOT Binary
-      run: |
-        dotnet publish MandarinDacBridge.csproj \
-          -c Release \
-          -r ${{ matrix.rid }} \
-          -o ./publish \
-          /p:PublishAot=true
-
-    # Package the native binary into a clean tarball payload
-    - name: Compress Target Package
-      run: |
-        cd publish
-        tar -czf ../${{ matrix.artifact_name }}.tar.gz *
-        cd ..
-
-    # Upload compilation fragments to a shared repository release page
-    - name: Generate GitHub Release Asset
-      uses: softprops/action-gh-release@v2
-      with:
-        files: ${{ matrix.artifact_name }}.tar.gz
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        
+  release:
+    needs: build
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: mandarin-dac-bridge-*.tar.gz
