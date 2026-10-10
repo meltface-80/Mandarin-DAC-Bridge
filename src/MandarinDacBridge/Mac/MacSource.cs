@@ -35,6 +35,10 @@ internal sealed unsafe class MacSource : IDisposable
 {
     public const string LoopbackUid = "app.mandarin.dacbridge.loopback";
     private const int ChunkFrames = 4096;
+    // A large IO buffer for reading the loopback: fewer deadlines, so no skips of the device's clock (which
+    // give back a stretch from elsewhere in the stream). On the macOS test runner, 512 frames at 96 kHz and
+    // above skipped; 4096 never did.
+    private const uint CaptureBufferFrames = 4096;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct Shared
@@ -134,6 +138,7 @@ internal sealed unsafe class MacSource : IDisposable
     private bool StartCapture()
     {
         if (capturing) return true;
+        CoreAudio.SetBufferFrames(dev, CaptureBufferFrames);
         int err = CoreAudio.CreateIOProcId(dev, &Capture, sh, out procId);
         if (err != 0 || procId == IntPtr.Zero) { SetStatus($"couldn't read the DAC Bridge output ({err})"); return false; }
         Volatile.Write(ref sh->ReadPos, Volatile.Read(ref sh->WritePos));

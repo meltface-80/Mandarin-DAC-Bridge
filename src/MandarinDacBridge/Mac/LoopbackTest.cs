@@ -97,7 +97,7 @@ internal static unsafe class LoopbackTest
         bool changed = false, unproven = false;
         foreach (int rate in new[] { 44100, 96000, 192000 })
         {
-            var a = Once(dev, rate, 0);
+            var a = Once(dev, rate, usual);
             var b = Once(dev, rate, LargeBuffer);
             changed |= a == Verdict.Changed || b == Verdict.Changed;
             unproven |= a != Verdict.Exact && b != Verdict.Exact;
@@ -114,7 +114,8 @@ internal static unsafe class LoopbackTest
         CoreAudio.SetRate(dev, rate);
         for (int i = 0; i < 40 && (int)CoreAudio.NominalRate(dev) != rate; i++) Thread.Sleep(50);
         if ((int)CoreAudio.NominalRate(dev) != rate) { Console.WriteLine($"{Devices.KHz(rate)}: the device stayed at {Devices.KHz((int)CoreAudio.NominalRate(dev))}"); return Verdict.Changed; }
-        if (buffer > 0 && CoreAudio.SetBufferFrames(dev, buffer) != 0) Console.WriteLine($"{Devices.KHz(rate)}: couldn't set a {buffer}-frame buffer");
+        if (buffer > 0 && CoreAudio.BufferFrames(dev) != buffer && CoreAudio.SetBufferFrames(dev, buffer) != 0)
+            Console.WriteLine($"{Devices.KHz(rate)}: couldn't set a {buffer}-frame buffer");
         string label = $"{Devices.KHz(rate)}, {CoreAudio.BufferFrames(dev)}-frame buffer";
 
         var s = (State*)NativeMemory.AllocZeroed((nuint)sizeof(State));
