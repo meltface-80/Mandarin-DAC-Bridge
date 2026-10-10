@@ -638,6 +638,11 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal(562, p.GetProperty("duration").GetInt64());
         Assert.InRange(p.GetProperty("position").GetInt64(), 61, 63);
         Assert.Equal("playing", dac.GetProperty("spotify").GetString());
+        // What Soloist says, kept for finding out why a connection fails (its owner's only); and the sign-in, in the log.
+        var soloistLog = Path.Combine(hosts[^1].Manager.Settings.Dir, "soloist", id, "soloist.log");
+        Assert.Contains("[bridge] {\"type\":\"auth_state\",\"logged_in\":true", File.ReadAllText(soloistLog));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(soloistLog));
+        lock (logs) Assert.Contains(logs, l => l.Contains("Soloist is signed in, and the Spotify app has chosen it"));
         // Soloist's sound (the pretend one's tone, through the private PulseAudio) reaches the DAC: its clock runs.
         var renderer = hosts[^1].Manager.Get(id)!.Renderer;
         await Until(() => Task.FromResult(renderer.Position() > 1.0), 6000);

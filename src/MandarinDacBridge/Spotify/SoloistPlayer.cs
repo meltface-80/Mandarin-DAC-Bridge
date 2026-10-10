@@ -59,6 +59,8 @@ internal sealed class SoloistPlayer : IDisposable
     private LiveMeta meta = new("", "", "", "", 0);
     private string lastError = "";
     private string soloistError = "";
+    private readonly object logGate = new();
+    private bool? signedIn, active;
     private bool starting;                             // a start is on its way to the renderer
 
     public string Status { get; private set; } = "starting";
@@ -210,6 +212,8 @@ internal sealed class SoloistPlayer : IDisposable
                      "--initial-volume", (bridge.Level ?? 100).ToString(System.Globalization.CultureInfo.InvariantCulture), "--ws", "127.0.0.1:0"
                  })
             psi.ArgumentList.Add(a);
+        // SOLOIST_VERBOSE=1: Soloist's detailed log, into soloist.log (for finding out why a connection fails).
+        if (Environment.GetEnvironmentVariable("SOLOIST_VERBOSE") == "1") psi.ArgumentList.Add("--verbose");
         foreach (var (k, v) in PrivateEnvironment()) psi.Environment[k] = v;
         soloistError = "";
         Process p;
@@ -218,6 +222,7 @@ internal sealed class SoloistPlayer : IDisposable
         void Line(string? l)
         {
             if (l == null) return;
+            Keep(l);
             if (l.Contains("GLIBC_") || l.Contains("error while loading shared libraries")) soloistError = SoloistDownload.Explain(l);
             else if (l.Contains("rror") || l.Contains("WARN") || l.Contains("arning")) soloistError = l.Length > 200 ? l[..200] : l;
             else return;
@@ -229,6 +234,27 @@ internal sealed class SoloistPlayer : IDisposable
         p.BeginOutputReadLine();
         lock (gate) soloist = p;
         Log($"offering {bridge.FriendlyName()} to Spotify (Soloist)");
+    }
+
+    // All of Soloist's own output, in soloist.log beside its data (readable by its owner only; up to 2 MB, then
+    // the old one is kept as soloist.log.1). It can name the account: don't post it publicly.
+    private string LogFile => Path.Combine(Path.GetDirectoryName(dataDir)!, "soloist.log");
+
+    private void Keep(string line)
+    {
+        lock (logGate)
+        {
+            try
+            {
+                var f = LogFile;
+                var info = new FileInfo(f);
+                if (info.Exists && info.Length > 2_000_000) File.Move(f, f + ".1", overwrite: true);
+                bool fresh = !File.Exists(f);
+                File.AppendAllText(f, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}\n");
+                if (fresh && !OperatingSystem.IsWindows()) File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            catch (Exception) { /* a log, at best */ }
+        }
     }
 
     private void Teardown()
@@ -449,6 +475,13 @@ internal sealed class SoloistPlayer : IDisposable
         switch (Str(m, "type"))
         {
             case "auth_state":
+                Keep("[bridge] " + m.GetRawText());
+                if (Bool(m, "logged_in") != signedIn || Bool(m, "is_active") != active)
+                {
+                    signedIn = Bool(m, "logged_in");
+                    active = Bool(m, "is_active");
+                    Log(signedIn == true ? $"Soloist is signed in{(active == true ? ", and the Spotify app has chosen it" : "")}" : "Soloist is waiting for the Spotify app to choose it");
+                }
                 if (!Bool(m, "logged_in")) SetStatus("ready · choose it in Spotify");
                 else if (!Bool(m, "is_active") && !Ours()) SetStatus("connected · choose it in Spotify to play here");
                 break;
@@ -462,6 +495,7 @@ internal sealed class SoloistPlayer : IDisposable
                 if (m.TryGetProperty("item", out var it)) SetItem(it);
                 break;
             case "playback_changed":
+                Keep("[bridge] playback " + Str(m, "status"));
                 Apply(Str(m, "status"));
                 break;
             case "position_sync":
@@ -471,6 +505,7 @@ internal sealed class SoloistPlayer : IDisposable
                 if (bridge.VolumeOn) TakeVolume(m); else KeepVolume(m);
                 break;
             case "error":
+                Keep("[bridge] " + m.GetRawText());
                 Log("Soloist: " + Str(m, "message"));
                 break;
         }
