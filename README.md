@@ -21,16 +21,21 @@ fixes this by taking each DAC itself:
 * It shows a **page on port 55500**: one tile per DAC with its name and model. Tap a tile to see
   what the DAC can do; the ✕ in the top-right corner takes you back.
 * **Optionally** ([More ways to play](#more-ways-to-play)), each DAC is also a **Squeezebox player**
-  (Lyrion Music Server, Roon) and a **Spotify Connect speaker** (through Spotify Soloist, on Linux), can be **shared
+  (Lyrion Music Server, Roon), a **Spotify Connect speaker** (through Spotify Soloist, on Linux), a
+  **Qobuz Connect speaker** (through QobuzProxy) and a **Plex player** (through Caldera Headless, on
+  Linux). On a Mac, the **Music app and the Spotify app** play through it too. A DAC can be **shared
   with Roon Bridge** while idle, and a **now-playing screen** at `/now` shows what's playing on a
-  monitor beside it.
+  monitor beside it. Everything optional is off until you switch it on.
+* It runs on **macOS, Windows and Linux** (or Docker).
 
 ```
  Audirvana ───── UPnP ──────┐                          ┌──▶ exclusive, rate-switched ──▶ USB DAC 1
  Mandarin ────── UPnP ──────┤                          │
- Lyrion / Roon ─ Squeezebox ┼──▶  Mandarin DAC Bridge ─┤
- Spotify app ─── Connect ───┘      (port 55500)        └──▶ exclusive, rate-switched ──▶ USB DAC 2
-                                    /now: now playing
+ Lyrion / Roon ─ Squeezebox ┤                          │
+ Spotify app ─── Connect ───┼──▶  Mandarin DAC Bridge ─┤
+ Qobuz app ───── Connect ───┤      (port 55500)        │
+ Plexamp ─────── Plex ──────┤    /now: now playing     │
+ Music / Spotify on the Mac ┘                          └──▶ exclusive, rate-switched ──▶ USB DAC 2
 ```
 
 ---
@@ -69,13 +74,34 @@ To remove it:
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/uninstall.sh)"
 ```
 
+## Install on Windows
+
+Windows 10 or 11, x64 or ARM64. Open **Terminal** (right-click Start) and paste:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/install.ps1 | iex"
+```
+
+It installs ffmpeg with winget (if it isn't there) and the bridge into
+`%LOCALAPPDATA%\Mandarin-DAC-Bridge`, starts it now and at every sign-in (a hidden scheduled
+task), and opens **http://localhost:55500**. If Windows asks to let **mandarin-dac-bridge** use the
+network, allow it on private networks. To update, paste the same line again.
+
+The bridge holds each USB DAC in **WASAPI exclusive mode**, so Windows' mixer never touches the
+samples, and switches it to each track's own rate. In *Sound settings* the DACs show as in use:
+that's the hold. To remove it:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/uninstall.ps1 | iex"
+```
+
 ### Publishing a build (for the repository owner)
 
 On GitHub, go to **Releases → Draft a new release**, create a tag such as `v1.0.0` and click
 **Publish**. GitHub Actions (`.github/workflows/release.yml`) then tests the code, builds it for
-Apple silicon and Intel Macs and for Linux x64 and arm64, and attaches the four
-`mandarin-dac-bridge-<platform>.tar.gz` files to the release. The installer always fetches the
-latest release.
+Apple silicon and Intel Macs, Linux x64 and arm64, and Windows x64 and ARM64, and attaches
+`mandarin-dac-bridge-<platform>.tar.gz` (`.zip` for Windows) to the release. The installers always
+fetch the latest release.
 
 ---
 
@@ -180,6 +206,69 @@ reader, so the DAC's clock sets the pace: nothing is resampled and nothing drift
 the DAC when Spotify starts, the bridge tells Soloist to pause, so the Spotify app shows it didn't
 play. The volume stays at 100% for bit-perfect playback: a change in the Spotify app is put back.
 
+Soloist takes the API key only on its command line, so other accounts on the same machine could read
+it from the process list. On a machine you share with others, run the bridge in Docker. On a Mac,
+the Spotify app itself plays through the bridge instead ([below](#this-mac-the-music-app-and-the-spotify-app)).
+
+### Qobuz Connect, through QobuzProxy (Mac, Windows, Linux)
+
+Switch on **Qobuz Connect** on the page (or set `QOBUZ=1`) and press **Install QobuzProxy**: it
+fetches [QobuzProxy](https://github.com/leolobato/qobuz-proxy) (MIT) from GitHub into a private
+Python environment in `DATA_DIR/qobuz` (Python 3.10 or later must be installed; the Docker image has
+it). Then **Sign in to Qobuz** opens QobuzProxy's own page (port 8689). Each DAC then appears in the
+Qobuz app's device list as `"<DAC> (Bridge)"`.
+
+QobuzProxy speaks Qobuz Connect and hands each track to the DAC's UPnP device, so Qobuz plays
+through the bridge like Audirvana does, under the same one-app-at-a-time rule. The bridge tells it
+the DAC's best rate and depth, so it streams hi-res up to what the DAC takes. The bridge starts
+QobuzProxy again when DACs come or go.
+
+### Plex, through Caldera Headless (Linux)
+
+Switch on **Plex · Caldera Headless** on the page (or set `CALDERA=1`), press **Download
+Caldera** (it fetches [Caldera Headless](https://caldera.homes/music/amp/#linux) for this machine's
+processor), then **Sign in to Plex**: the page shows a code to enter at
+[plex.tv/link](https://plex.tv/link). Each DAC then appears as a player in Plexamp, Plex for iOS and
+the Plex web app. The Plex token stays in `settings.json` (owner-only) and is never sent to the page.
+
+Caldera plays to the DAC itself, bit-perfect, with its own player per DAC. The bridge shares the DAC
+with it: while nothing plays through the bridge, it lets go of the DAC so Caldera can open it, and
+it takes the DAC back when an app plays to the bridge and Caldera has let go (Caldera releases it
+when idle). Whoever plays first has it. What Caldera plays shows on the DAC's page and on `/now`.
+
+### This Mac: the Music app and the Spotify app
+
+Neither app can play to a DAC the bridge holds, or switch the DAC's rate per track. So, as
+[Arco](https://github.com/renebouwmeester/arco) does for Roon, a small virtual output, **DAC
+Bridge**, becomes the Mac's output while this is on. The app plays to it, and the bridge plays the
+same samples to the DAC you choose:
+
+```
+ Music / Spotify ──▶ "DAC Bridge" output ══ loopback ══▶ the bridge ──▶ exclusive, rate-switched ──▶ DAC
+```
+
+* **The track's own rate.** The Music app names each track's rate (AppleScript); the bridge sets the
+  virtual output to it, pausing the app around the change. Spotify is 44.1 kHz.
+* **Bit-perfect.** Samples come back as floats, which carry 24 bits exactly.
+* **No drift.** The virtual output's clock follows the DAC's: the bridge nudges it (within ±0.1%)
+  from how full its buffer runs, so the app is paced by the DAC.
+* Title, artist, album, cover and position show on the DAC's page and on `/now`.
+
+Install the output once (it builds the driver with Apple's command line tools, and asks for your
+password; the Mac's sound stops for a few seconds):
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/driver.sh)"
+# remove it again:  … driver.sh)" -- --remove
+```
+
+Then switch on **This Mac: Apple Music & Spotify** on the page (or set `MAC_APPS=1`) and pick the
+DAC. The first time, macOS asks to allow **Microphone** access: that's how the bridge reads the DAC
+Bridge output back (it never listens to a microphone). Switched off, the Mac's output goes back to
+what it was. `mandarin-dac-bridge --loopback-test` checks that the output gives back exactly what
+it's given, at 44.1, 96 and 192 kHz. The driver is adapted from Arco's (Apache-2.0; see
+`tools/mac/driver`).
+
 ### Roon Bridge, beside the bridge
 
 Roon Bridge can't be bundled with the bridge (Roon's licence), and Roon's own playback protocol
@@ -218,16 +307,17 @@ cage and Chromium to show it from boot:
 
 ## How it works
 
-| | macOS | Linux / Docker |
-|---|---|---|
-| Finding DACs | Core Audio (USB devices only) | `/proc/asound` (USB audio cards) |
-| Exclusive hold | Core Audio **hog mode**, held all the time | the ALSA **`hw:`** device, held open |
-| Rate switching | the DAC's physical format, set per track (integer, widest depth) | `hw` params, set per track (S32_LE, S24_LE, S24_3LE or S16_LE) |
-| Bit-perfect | up to 24-bit (Core Audio's float path carries 24 bits exactly) | up to 32-bit |
-| DSD | DoP (off by default; switch it on per DAC) | DoP, on automatically when the DAC reports native DSD |
+| | macOS | Windows | Linux / Docker |
+|---|---|---|---|
+| Finding DACs | Core Audio (USB devices only) | the MMDevice API (USB endpoints) | `/proc/asound` (USB audio cards) |
+| Exclusive hold | Core Audio **hog mode**, held all the time | **WASAPI exclusive mode**, event-driven | the ALSA **`hw:`** device, held open |
+| Rate switching | the DAC's physical format, set per track (integer, widest depth) | the exclusive stream's format, per track (32, 24 or 16-bit) | `hw` params, set per track (S32_LE, S24_LE, S24_3LE or S16_LE) |
+| Bit-perfect | up to 24-bit (Core Audio's float path carries 24 bits exactly) | up to 32-bit | up to 32-bit |
+| DSD | DoP (off by default; switch it on per DAC) | DoP (off by default; switch it on per DAC) | DoP, on automatically when the DAC reports native DSD |
+| Optional | Music and Spotify apps, Qobuz | Qobuz | Spotify Connect, Qobuz, Plex |
 
-The program calls Core Audio and ALSA directly from C#
-(`Native/CoreAudio.cs`, `Native/Alsa.cs`). On a Mac, Core Audio's real-time thread reads the
+The program calls Core Audio, WASAPI and ALSA directly from C#
+(`Native/CoreAudio.cs`, `Native/Wasapi.cs`, `Native/Alsa.cs`). On a Mac, Core Audio's real-time thread reads the
 samples from a buffer in native memory (`Audio/CoreAudioSink.cs`), so .NET's garbage collector
 never touches that path.
 
@@ -246,7 +336,7 @@ never touches that path.
 * **Volume** stays at 100% (bit-perfect). Use the DAC's or amplifier's volume. Mute works.
 
 `mandarin-dac-bridge --list` prints the DACs found and what each takes, and every other output it saw with why it was passed over. `mandarin-dac-bridge --diagnose` prints everything the machine reports about its sound devices. The page's API is
-`GET /api/dacs`, and `GET`/`POST /api/services` for Squeezebox and Spotify. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
+`GET /api/dacs`, and `GET`/`POST /api/services` for the optional connections. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
 
 ### Settings (all optional)
 
@@ -265,13 +355,19 @@ never touches that path.
 | `SPOTIFY` | — | `1` starts with Spotify Connect on (Spotify Soloist, Linux) |
 | `SOLOIST_API_KEY` | — | your Soloist API key (or type it on the page) |
 | `SOLOIST` | downloaded by the page, or on the PATH | the soloist program |
+| `QOBUZ` | — | `1` starts with Qobuz Connect on (QobuzProxy) |
+| `QOBUZPROXY_SOURCE` | the QobuzProxy release on GitHub | another place to install QobuzProxy from (a local copy, a fork) |
+| `CALDERA` | — | `1` starts with Plex through Caldera Headless on (Linux) |
+| `MAC_APPS` | — | `1` starts with the Music and Spotify apps on (macOS) |
 
-On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. In Docker, they go
-under `environment:` in `docker-compose.yml`.
+On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. On Windows, set them
+as user environment variables (`setx PORT 55501`) and sign in again. In Docker, they go under
+`environment:` in `docker-compose.yml`.
 
 ### Troubleshooting
 
-* **The log:** `~/Mandarin-DAC-Bridge/data/bridge.log` on a Mac, `docker logs mandarin-dac-bridge`
+* **The log:** `~/Mandarin-DAC-Bridge/data/bridge.log` on a Mac,
+  `%LOCALAPPDATA%\Mandarin-DAC-Bridge\data\bridge.log` on Windows, `docker logs mandarin-dac-bridge`
   in Docker.
 * **A DAC says "Waiting".** Another app holds it in exclusive mode, and the page names that app.
   Point the app at the bridge's UPnP device instead, or quit it.
@@ -284,6 +380,11 @@ under `environment:` in `docker-compose.yml`.
 * **No Squeezebox player in LMS.** Check *Connections* on the page: it says which server it's
   connected to. If it's still looking, type the server's address there (broadcasts don't cross
   subnets or VPNs).
+* **The Music app plays but the DAC is silent.** Allow **mandarin-dac-bridge** under System
+  Settings → Privacy & Security → Microphone, and check the Mac's output is **DAC Bridge**.
+  `mandarin-dac-bridge --loopback-test` checks the output itself.
+* **Qobuz doesn't list the DAC.** Check *Connections* on the page: it says whether QobuzProxy is
+  installed, running and signed in.
 * **The Mac's volume for the DAC** is shown on the DAC's page. Set it to 100% in Audio MIDI Setup
   for bit-perfect playback.
 
@@ -291,12 +392,13 @@ under `environment:` in `docker-compose.yml`.
 
 ## Development
 
-.NET 10 SDK. ffmpeg is needed for the end-to-end tests; on Linux, libasound2 too.
+.NET 10 SDK. ffmpeg is needed for the end-to-end tests; on Linux, libasound2 too (and PulseAudio
+for the Soloist test). CI runs the tests and a native build on macOS, Windows and Linux.
 
 ```bash
 dotnet test                                                     # unit and end-to-end tests
 dotnet run --project src/MandarinDacBridge                      # run it
-dotnet publish src/MandarinDacBridge -c Release -r osx-arm64    # one native program (osx-x64, linux-x64, linux-arm64)
+dotnet publish src/MandarinDacBridge -c Release -r osx-arm64    # one native program (osx-x64, linux-x64, linux-arm64, win-x64, win-arm64)
 ```
 
 The end-to-end tests run the whole bridge in-process and drive it over real SOAP from two

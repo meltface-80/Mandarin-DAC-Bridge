@@ -244,7 +244,7 @@ function renderConnections() {
     <div class="row">
       <div><div class="lbl">Spotify Connect</div>
         <div class="hint">${!sv.spotifyPossible
-          ? `Through Spotify Soloist, Spotify's own Connect client, which runs on Linux only. <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#spotify" target="_blank" rel="noopener">More</a>.`
+          ? `Through Spotify Soloist, Spotify's own Connect client, which runs on Linux only.${sv.macPossible ? " On this Mac, the Spotify app plays through the bridge instead: <b>This Mac</b> below." : ""} <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#spotify" target="_blank" rel="noopener">More</a>.`
           : `Each DAC appears in Spotify's device list, through <b>Spotify Soloist</b> (Spotify's own Connect client; Premium).
              You need your own <a href="https://developer.spotify.com/dashboard/soloist" target="_blank" rel="noopener">Soloist API key</a>.
              ${sv.spotify ? "<br>" + spotifyState(sv, sp) : ""}`}</div></div>
@@ -280,7 +280,7 @@ function renderConnections() {
       <div><div class="lbl">This Mac: Apple Music &amp; Spotify</div>
         <div class="hint">The Music app and the Spotify app on this Mac play through the bridge to a DAC, bit-perfect, the DAC at each track's own rate.
           They play to the <b>DAC Bridge</b> output (an audio driver, installed once), which is the Mac's sound output while this is on.
-          <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#mac" target="_blank" rel="noopener">More</a>.
+          <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#mac-apps" target="_blank" rel="noopener">More</a>.
           ${sv.macApps ? "<br>" + macState(sv) : ""}</div></div>
       <div class="ctl">
         ${sv.macApps && data.dacs.length > 1 ? `<select id="c-mdac" aria-label="The DAC for the Mac's apps">${data.dacs.map((d) => `<option value="${esc(d.id)}"${d.id === sv.macDac ? " selected" : ""}>${esc(d.name)}</option>`).join("")}</select>` : ""}

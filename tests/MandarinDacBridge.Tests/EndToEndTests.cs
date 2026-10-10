@@ -643,7 +643,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
             if [ $set_mode = 1 ]; then printf '%s\n' "$@" > "$cfg/set-args"; echo "$HOME|$LD_LIBRARY_PATH" > "$cfg/env"; exit 0; fi
             port=$(grep -o 'companion.port=[0-9]*' "$cfg/set-args" | cut -d= -f2)
             exec python3 -c '
-            import sys, http.server
+            import sys, http.server, socketserver
             port, path = int(sys.argv[1]), sys.argv[2]
             class H(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
@@ -651,7 +651,8 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
                     except OSError: body = b"<MediaContainer><Timeline type=\"music\" state=\"stopped\"/></MediaContainer>"
                     self.send_response(200); self.send_header("Content-Type", "text/xml"); self.end_headers(); self.wfile.write(body)
                 def log_message(self, *a): pass
-            http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+            socketserver.TCPServer.allow_reuse_address = True
+            socketserver.TCPServer(("127.0.0.1", port), H).serve_forever()
             ' "$port" "$cfg/timeline.xml"
 
             """);
@@ -713,6 +714,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         var id = await Start(Dev("clock"));
         var data = hosts[^1].Manager.Settings.Dir;
         // An "installed" QobuzProxy whose python notes how it was started and answers /api/status.
+        // (A plain TCPServer: http.server.HTTPServer looks its own address up in DNS first, which can stall on macOS.)
         var venvBin = Path.Combine(data, "qobuz", "venv", "bin");
         Directory.CreateDirectory(venvBin);
         File.WriteAllText(Path.Combine(data, "qobuz", "installed-" + Qobuz.QobuzConnect.Version), "test");
@@ -721,13 +723,14 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
             #!/bin/sh
             printf '%s\n' "$@" > "$QOBUZPROXY_DATA_DIR/args"
             exec python3 -c '
-            import http.server, json
+            import http.server, json, socketserver
             class H(http.server.BaseHTTPRequestHandler):
                 def do_GET(self):
                     body = json.dumps({"auth": {"authenticated": True, "email": "me@example.com"}, "speakers": []}).encode()
                     self.send_response(200); self.send_header("Content-Type", "application/json"); self.end_headers(); self.wfile.write(body)
                 def log_message(self, *a): pass
-            http.server.HTTPServer(("127.0.0.1", 8689), H).serve_forever()
+            socketserver.TCPServer.allow_reuse_address = True
+            socketserver.TCPServer(("127.0.0.1", 8689), H).serve_forever()
             '
 
             """);
@@ -739,7 +742,12 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         // QobuzProxy can take a while to start on a slow CI runner; a timeout shows the status it got to.
         var status = "";
         try { await Until(async () => (status = (await Dacs()).RootElement.GetProperty("services").GetProperty("qobuzStatus").GetString()!) == "ready · choose it in Qobuz · me@example.com", 20000); }
-        catch (TimeoutException) { Assert.Equal("ready · choose it in Qobuz · me@example.com", status); }
+        catch (TimeoutException)
+        {
+            string direct;
+            try { direct = await Http.GetStringAsync("http://127.0.0.1:8689/api/status"); } catch (Exception e) { direct = e.GetType().Name + ": " + e.Message; }
+            Assert.Fail($"status \"{status}\"; the pretend QobuzProxy {(File.Exists(Path.Combine(data, "qobuz", "args")) ? "started" : "never started")}; its page says: {direct}");
+        }
 
         var args = File.ReadAllLines(Path.Combine(data, "qobuz", "args"));
         Assert.Equal(["-m", "qobuz_proxy", "--config", Path.Combine(data, "qobuz", "config.yaml")], args);
