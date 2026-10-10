@@ -276,6 +276,7 @@ function renderConnections() {
       <div class="ctl">
         ${sv.caldera && sv.calderaPossible && (!sv.calderaVersion || sv.calderaDownload) ? `<button class="btn" id="c-cdl"${sv.calderaDownload.startsWith("downloading") ? " disabled" : ""}>${sv.calderaVersion ? "Download again" : "Download Caldera"}</button>` : ""}
         ${sv.caldera && sv.calderaPossible && !sv.plexSignedIn && !sv.plexCode ? `<button class="btn" id="c-plex">Sign in to Plex</button>` : ""}
+        ${sv.caldera && sv.plexSignedIn ? `<button class="btn" id="c-plexout">Sign out of Plex</button>` : ""}
         <button class="switch" role="switch" aria-checked="${sv.caldera}" aria-label="Plex through Caldera Headless" id="c-cal"></button>
       </div>
     </div>
@@ -320,7 +321,7 @@ function renderConnections() {
   if (mac) mac.onclick = () => postServices({ macApps: !sv.macApps });
   const mdac = $("#c-mdac");
   if (mdac) mdac.onchange = () => postServices({ macDac: mdac.value });
-  for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-qi", "/api/services/qobuz"], ["#c-rdl", "/api/services/roon"]]) {
+  for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-plexout", "/api/services/plex/signout"], ["#c-qi", "/api/services/qobuz"], ["#c-rdl", "/api/services/roon"]]) {
     const b = $(sel);
     if (b) b.onclick = async () => {
       b.disabled = true;
@@ -365,6 +366,7 @@ function calderaState(sv, statuses) {
   else parts.push("Caldera Headless " + esc(sv.calderaVersion) + " (it updates itself)");
   if (sv.plexCode) parts.push(`Go to <a href="https://plex.tv/link" target="_blank" rel="noopener">plex.tv/link</a> and enter <b class="code">${esc(sv.plexCode)}</b>`);
   else if (!sv.plexSignedIn) parts.push("Sign in to Plex." + (sv.plexMessage ? " " + esc(sv.plexMessage) : ""));
+  else parts.push(sv.plexAccount ? `Signed in to Plex as <b>${esc(sv.plexAccount)}</b>.` : "Signed in to Plex.");
   if (statuses.length) parts.push(esc(statuses[0]));
   return parts.join("<br>");
 }

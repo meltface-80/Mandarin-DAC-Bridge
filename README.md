@@ -234,6 +234,9 @@ Caldera** (it fetches [Caldera Headless](https://caldera.homes/music/amp/#linux)
 processor), then **Sign in to Plex**: the page shows a code to enter at
 [plex.tv/link](https://plex.tv/link). Each DAC then appears as a player in Plexamp, Plex for iOS and
 the Plex web app. The Plex token stays in `settings.json` (owner-only) and is never sent to the page.
+The page says which Plex account is signed in; **Sign out of Plex** forgets it (here and in Caldera's
+settings), so you can sign in with another. Plexamp lists the DACs for any account on the network,
+but plays only for the one signed in.
 
 Caldera plays to the DAC itself, bit-perfect, with its own player per DAC. The bridge shares the DAC
 with it: while nothing plays through the bridge, it lets go of the DAC so Caldera can open it, and

@@ -486,12 +486,14 @@ internal sealed class SoloistPlayer : IDisposable
                 else if (!Bool(m, "is_active") && !Ours()) SetStatus("connected · choose it in Spotify to play here");
                 break;
             case "playback_state":
+                Keep("[bridge] " + Clip(m.GetRawText()));
                 if (m.TryGetProperty("item", out var item)) SetItem(item);
                 if (m.TryGetProperty("position", out var pos)) SetPosition(pos);
                 if (!bridge.VolumeOn) KeepVolume(m);
                 Apply(Str(m, "status"));
                 break;
             case "track_changed":
+                Keep("[bridge] " + Clip(m.GetRawText()));
                 if (m.TryGetProperty("item", out var it)) SetItem(it);
                 break;
             case "playback_changed":
@@ -557,11 +559,15 @@ internal sealed class SoloistPlayer : IDisposable
         _ = Command($"{{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":{level}}}");
     }
 
+    private static string Clip(string s) => s.Length > 4000 ? s[..4000] + "…" : s;
+
     private void SetItem(JsonElement item)
     {
         var e = Entity(item);
-        if (e == null) return;
-        lock (gate) meta = e with { Position = meta.Position, At = meta.At };
+        if (e == null) { Log("a track without details from Soloist (see soloist.log)"); return; }
+        bool changed;
+        lock (gate) { changed = e.Title != meta.Title || e.Artist != meta.Artist; meta = e with { Position = meta.Position, At = meta.At }; }
+        if (changed && e.Title != "") Log($"now playing: {e.Title}{(e.Artist != "" ? " — " + e.Artist : "")}");
         Publish();
     }
 
@@ -569,6 +575,8 @@ internal sealed class SoloistPlayer : IDisposable
     {
         double ms = p.TryGetProperty("position_ms", out var x) && x.ValueKind == JsonValueKind.Number ? x.GetDouble() : 0;
         long at = p.TryGetProperty("timestamp_ms", out var t) && t.ValueKind == JsonValueKind.Number ? t.GetInt64() : Arbiter.Now;
+        // speed 0: not advancing (paused, buffering): the position as it stands, from now.
+        if (p.TryGetProperty("speed", out var sp) && sp.ValueKind == JsonValueKind.Number && sp.GetDouble() == 0) at = Arbiter.Now;
         lock (gate) meta = meta with { Position = ms / 1000, At = at };
         Publish();
     }

@@ -9,6 +9,9 @@ namespace MandarinDacBridge.Caldera;
 
 internal sealed class PlexLink(string clientId, Action<string> gotToken)
 {
+    // plex.tv (the tests answer for it).
+    internal static string PlexTv = "https://plex.tv";
+
     private readonly object gate = new();
     private CancellationTokenSource? polling;
 
@@ -24,6 +27,31 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
         return r;
     }
 
+    // Who a token belongs to (their Plex username, else their email), or "" if plex.tv won't say.
+    public static async Task<string> Account(string token, string clientId)
+    {
+        try
+        {
+            using var req = Request(HttpMethod.Get, $"{PlexTv}/api/v2/user", clientId);
+            req.Headers.TryAddWithoutValidation("X-Plex-Token", token);
+            using var res = await Sources.Http.SendAsync(req);
+            if (!res.IsSuccessStatusCode) return "";
+            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+            foreach (var k in new[] { "username", "title", "email" })
+                if (doc.RootElement.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s) return s;
+        }
+        catch (Exception) { /* offline, or plex.tv changed */ }
+        return "";
+    }
+
+    // Forgets a code being waited on (signing out).
+    public void Cancel()
+    {
+        lock (gate) polling?.Cancel();
+        Code = "";
+        Message = "";
+    }
+
     // Asks for a code, then waits (up to 15 minutes) for it to be entered at plex.tv/link.
     public async Task Start()
     {
@@ -35,7 +63,7 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
         }
         try
         {
-            using var res = await Sources.Http.SendAsync(Request(HttpMethod.Post, "https://plex.tv/api/v2/pins", clientId), cts.Token);
+            using var res = await Sources.Http.SendAsync(Request(HttpMethod.Post, $"{PlexTv}/api/v2/pins", clientId), cts.Token);
             res.EnsureSuccessStatusCode();
             using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cts.Token));
             var id = doc.RootElement.GetProperty("id").GetInt64();
@@ -57,7 +85,7 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
             while (!cts.IsCancellationRequested)
             {
                 await Task.Delay(2000, cts.Token);
-                using var res = await Sources.Http.SendAsync(Request(HttpMethod.Get, $"https://plex.tv/api/v2/pins/{id}", clientId), cts.Token);
+                using var res = await Sources.Http.SendAsync(Request(HttpMethod.Get, $"{PlexTv}/api/v2/pins/{id}", clientId), cts.Token);
                 if (!res.IsSuccessStatusCode) continue;
                 using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cts.Token));
                 if (doc.RootElement.TryGetProperty("authToken", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() is { Length: > 0 } token)
