@@ -43,6 +43,12 @@ internal sealed class ServicesView
     public string QobuzStatus { get; set; } = "";
     public bool QobuzSignedIn { get; set; }
     public int QobuzWebPort { get; set; }
+    // The Music and Spotify apps on this Mac (macOS).
+    public bool MacPossible { get; set; }
+    public bool MacApps { get; set; }
+    public bool MacDriver { get; set; }     // the DAC Bridge output is installed
+    public string MacDac { get; set; } = "";
+    public string MacStatus { get; set; } = "";
     public string RoonBridge { get; set; } = "";
 }
 

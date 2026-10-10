@@ -40,6 +40,15 @@ jobs:
           "$exe" --version
           "$exe" --list
           "$exe" --diagnose
+      # The Mac's "DAC Bridge" output: built, installed (sudo, Core Audio restarted) and checked
+      # bit-for-bit at three rates. Informational: a runner may lack audio or microphone access.
+      - name: Mac audio driver loopback
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        shell: bash
+        run: |
+          bash tools/mac/driver.sh
+          out/mandarin-dac-bridge --loopback-test
       - name: PowerShell scripts parse
         if: runner.os == 'Windows'
         shell: pwsh

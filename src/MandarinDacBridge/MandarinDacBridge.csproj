@@ -32,4 +32,9 @@
     <EmbeddedResource Include="Page/**" LogicalName="Page/%(RecursiveDir)%(Filename)%(Extension)" />
     <InternalsVisibleTo Include="MandarinDacBridge.Tests" />
   </ItemGroup>
+  <!-- macOS: an Info.plist inside the program, so macOS can ask (and name it) for the microphone (reading back the
+       DAC Bridge output) and for Apple Events (following the Music and Spotify apps). -->
+  <ItemGroup Condition="$(RuntimeIdentifier.StartsWith('osx'))">
+    <LinkerArg Include="-Wl,-sectcreate,__TEXT,__info_plist,$(MSBuildThisFileDirectory)Mac/Info.plist" />
+  </ItemGroup>
 </Project>

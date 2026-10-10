@@ -40,6 +40,9 @@ internal sealed class ServiceSettings
     public bool? Qobuz { get; set; }
     // Secret, like the Soloist key: the Plex token Caldera plays with.
     public string? PlexToken { get; set; }
+    // The Music and Spotify apps on this Mac, through the DAC Bridge output, to this DAC (macOS).
+    public bool? MacApps { get; set; }
+    public string? MacDac { get; set; }
 }
 
 internal sealed class SettingsFile
@@ -103,7 +106,7 @@ internal sealed class Settings
             {
                 Squeezelite = data.Services.Squeezelite, LmsServer = data.Services.LmsServer, Spotify = data.Services.Spotify,
                 SoloistKey = data.Services.SoloistKey, Caldera = data.Services.Caldera, PlexToken = data.Services.PlexToken,
-                Qobuz = data.Services.Qobuz
+                Qobuz = data.Services.Qobuz, MacApps = data.Services.MacApps, MacDac = data.Services.MacDac
             };
     }
 
@@ -117,6 +120,8 @@ internal sealed class Settings
             if (p.SoloistKey != null) data.Services.SoloistKey = p.SoloistKey.Trim()[..Math.Min(512, p.SoloistKey.Trim().Length)];
             if (p.Caldera is { } c) data.Services.Caldera = c;
             if (p.Qobuz is { } qb) data.Services.Qobuz = qb;
+            if (p.MacApps is { } ma) data.Services.MacApps = ma;
+            if (p.MacDac != null) data.Services.MacDac = p.MacDac;
             if (p.PlexToken != null) data.Services.PlexToken = p.PlexToken.Trim()[..Math.Min(512, p.PlexToken.Trim().Length)];
             Save();
         }
@@ -257,6 +262,7 @@ internal sealed class Manager(Config config) : IDisposable
     private readonly Dictionary<string, int> calderaPorts = new();
     private Caldera.PlexLink? plexLink;
     private Qobuz.QobuzConnect? qobuz;
+    private Mac.MacSource? mac;
 
     public Settings Settings { get; } = new(config.DataDir);
     public event Action<Bridge>? Added;
@@ -272,6 +278,7 @@ internal sealed class Manager(Config config) : IDisposable
     public void Start()
     {
         ConnectQobuz();
+        ConnectMac();
         Scan();
         timer = new Timer(_ => Scan(), null, config.ScanEvery, config.ScanEvery);
     }
@@ -346,6 +353,23 @@ internal sealed class Manager(Config config) : IDisposable
 
     public bool CalderaOn => Settings.Services().Caldera ?? config.Caldera;
     public bool QobuzOn => Settings.Services().Qobuz ?? config.Qobuz;
+    public bool MacOn => OperatingSystem.IsMacOS() && (Settings.Services().MacApps ?? config.MacApps);
+
+    // The Music and Spotify apps through the DAC Bridge output, while switched on (macOS).
+    private void ConnectMac()
+    {
+        Mac.MacSource? drop = null;
+        lock (servicesGate)
+        {
+            if (MacOn && mac == null) mac = new Mac.MacSource(config.DataDir, MacTarget);
+            else if (!MacOn && mac != null) { drop = mac; mac = null; }
+        }
+        drop?.Dispose();
+    }
+
+    // The DAC chosen for the Mac's apps, else the first.
+    private Bridge? MacTarget() =>
+        Settings.Services().MacDac is { Length: > 0 } id && Get(id) is { } b ? b : Bridges().OrderBy(x => x.FriendlyName(), StringComparer.OrdinalIgnoreCase).FirstOrDefault();
 
     // One QobuzProxy for all the DACs, while Qobuz is switched on.
     private void ConnectQobuz()
@@ -443,6 +467,7 @@ internal sealed class Manager(Config config) : IDisposable
             Connect(b, restartSpotify: keyChanged, restartCaldera: plexChanged);
         }
         ConnectQobuz();
+        ConnectMac();
         return Services();
     }
 
@@ -477,7 +502,14 @@ internal sealed class Manager(Config config) : IDisposable
         await plexLink.Start();
     }
 
-    public string? CalderaArt(string id) => Get(id)?.Caldera?.ArtUrl is { Length: > 0 } u ? u : null;
+    // The cover for what plays on this DAC, when the page can't fetch it itself: a URL (Caldera's, with the
+    // Plex token) or a file (the Music app's).
+    public string? Art(string id)
+    {
+        if (Get(id)?.Caldera?.ArtUrl is { Length: > 0 } u) return u;
+        if (mac?.ArtFile is { Length: > 0 } f) return f;
+        return null;
+    }
 
     // Fetches Spotify Soloist from Spotify (the page's Download, or an expired build), then starts the speakers again.
     public async Task DownloadSoloist()
@@ -514,6 +546,8 @@ internal sealed class Manager(Config config) : IDisposable
             PlexSignedIn = PlexToken != "", PlexCode = plexLink?.Code ?? "", PlexMessage = plexLink?.Message ?? "",
             Qobuz = QobuzOn, QobuzInstalled = qobuz?.Installed ?? false, QobuzInstall = qobuz?.Install ?? "",
             QobuzStatus = qobuz?.Status ?? "", QobuzSignedIn = qobuz?.SignedIn ?? false, QobuzWebPort = Qobuz.QobuzConnect.WebPort,
+            MacPossible = OperatingSystem.IsMacOS(), MacApps = MacOn,
+            MacDriver = OperatingSystem.IsMacOS() && Native.CoreAudio.FindDevice(Mac.MacSource.LoopbackUid) != Native.CoreAudio.Unknown, MacDac = MacTarget()?.Id ?? "", MacStatus = mac?.Status ?? "",
             RoonBridge = RoonBridge.Running()
         };
     }
@@ -620,6 +654,7 @@ internal sealed class Manager(Config config) : IDisposable
     {
         timer?.Dispose();
         qobuz?.Dispose();
+        mac?.Dispose();
         foreach (var b in Bridges()) b.Dispose();
     }
 }

@@ -18,6 +18,11 @@ internal sealed class LiveSource(TrackInfo info, int capacity = 12) : IPcmSource
 
     public void Preload(byte[] chunk) => queue.TryAdd(chunk);
 
+    // Without waiting (a producer on someone else's clock): false when full or closed.
+    public bool TryPush(byte[] chunk) => !closed.IsCancellationRequested && queue.TryAdd(chunk);
+
+    public int Count => queue.Count;
+
     // Blocks while the renderer is behind; false once the renderer has let go.
     public bool Push(byte[] chunk, CancellationToken ct)
     {

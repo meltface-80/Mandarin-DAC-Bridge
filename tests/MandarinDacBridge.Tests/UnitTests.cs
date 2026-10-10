@@ -532,3 +532,27 @@ public class QobuzTests
         Assert.Contains("http-get:*:audio/L24;rate=192000;channels=2:*", pi);
     }
 }
+
+public class MacTests
+{
+    [Fact]
+    public void WhatTheAppsSay_IsRead()
+    {
+        var m = Mac.MacPlayers.Parse("Music", "playing\nSo What\nMiles Davis\nKind of Blue\n562,4\n12.5\n4711");
+        Assert.Equal(("playing", "So What", "Miles Davis", "Kind of Blue", 562.4, 12.5, "4711"), (m.State, m.Title, m.Artist, m.Album, m.Duration, m.Position, m.Id));
+        // Spotify gives the duration in milliseconds, and no id here.
+        var s = Mac.MacPlayers.Parse("Spotify", "paused\r\nTrack\r\nArtist\r\nAlbum\r\n200000\r\n3.0");
+        Assert.Equal(("paused", 200.0, "Track|Artist|Album"), (s.State, s.Duration, s.Id));
+        Assert.Equal("stopped", Mac.MacPlayers.Parse("Music", "stopped").State);
+        Assert.Equal("stopped", Mac.MacPlayers.Parse("Music", "fast forwarding\nx").State);
+    }
+
+    [Fact]
+    public void FloatsFromTheDevice_GiveThe24BitSamplesBack_Exactly()
+    {
+        foreach (int v in new[] { 0, 1, -1, 8388607, -8388608, 4711, -123456, 0x5A5A5A })
+            Assert.Equal(v << 8, Mac.MacSource.ToInt((float)(v / 8388608.0)));
+        Assert.Equal(8388607 << 8, Mac.MacSource.ToInt(1.5f));
+        Assert.Equal(-8388608 << 8, Mac.MacSource.ToInt(-1.5f));
+    }
+}

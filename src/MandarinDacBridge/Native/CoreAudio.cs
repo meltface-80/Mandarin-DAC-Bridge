@@ -202,6 +202,34 @@ internal static unsafe partial class CoreAudio
 
     public static int HogOwner(uint dev) => Get<int>(dev, DeviceHogMode, ScopeGlobal) ?? -1;
 
+    // ---------------------------------------------------------------- the Mac's own output, and the DAC Bridge loopback
+
+    public static readonly uint DefaultOutputDevice = Code("dOut");
+    public static readonly uint ScopeInput = Code("inpt");
+    // The DAC Bridge driver's clock scalar (a CFNumber near 1.0): its clock follows the DAC's.
+    public static readonly uint LoopbackClockScalar = Code("mdbS");
+
+    public static uint DefaultOutput() => Get<uint>(SystemObject, DefaultOutputDevice, ScopeGlobal) ?? Unknown;
+
+    public static int SetDefaultOutput(uint dev) => Set(SystemObject, DefaultOutputDevice, ScopeGlobal, dev);
+
+    public static int SetRate(uint dev, double rate) => Set(dev, DeviceNominalSampleRate, ScopeGlobal, rate);
+
+    [LibraryImport(CF, EntryPoint = "CFNumberCreate")]
+    private static partial IntPtr CFNumberCreate(IntPtr allocator, int type, void* value);
+
+    public static int SetScalar(uint dev, double scalar)
+    {
+        var n = CFNumberCreate(IntPtr.Zero, 6 /* kCFNumberFloat64Type */, &scalar);
+        if (n == IntPtr.Zero) return -1;
+        try
+        {
+            var a = new PropertyAddress(LoopbackClockScalar, ScopeGlobal);
+            return SetPropertyData(dev, in a, 0, null, (uint)sizeof(IntPtr), &n);
+        }
+        finally { CFRelease(n); }
+    }
+
     public static double NominalRate(uint dev) => Get<double>(dev, DeviceNominalSampleRate, ScopeGlobal) ?? 0;
 
     public static string FourCc(uint v)

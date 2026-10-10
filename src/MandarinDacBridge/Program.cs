@@ -6,6 +6,7 @@
 //   mandarin-dac-bridge            run (the page is at http://<this machine>:55500)
 //   mandarin-dac-bridge --list     the DACs found, and what each takes
 //   mandarin-dac-bridge --diagnose everything the machine says about its sound devices
+//   mandarin-dac-bridge --loopback-test  (macOS) the DAC Bridge output gives back exactly what it gets
 //   mandarin-dac-bridge --version
 //
 // Settings: Config.cs.
@@ -19,6 +20,8 @@ if (args.Contains("--version")) { Console.WriteLine(Config.Version); return 0; }
 var config = Config.FromEnvironment();
 
 if (args.Contains("--diagnose")) { Console.WriteLine(Devices.Diagnose()); return 0; }
+
+if (args.Contains("--loopback-test")) return MandarinDacBridge.Mac.LoopbackTest.Run();
 
 if (args.Contains("--list"))
 {

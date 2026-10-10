@@ -16,6 +16,7 @@
 //   SOLOIST              the soloist program (else on the PATH, or downloaded by the page into DATA_DIR/soloist)
 //   CALDERA              1 = each DAC is a Plex player too, through Caldera Headless (Linux; also on the page)
 //   QOBUZ                1 = each DAC is a Qobuz Connect speaker too, through QobuzProxy (also on the page)
+//   MAC_APPS             1 = the Music and Spotify apps on this Mac play through the bridge (macOS; also on the page)
 using System.Reflection;
 
 namespace MandarinDacBridge;
@@ -41,6 +42,7 @@ internal sealed class Config
     public string SoloistKey { get; init; } = "";
     public bool Caldera { get; init; }
     public bool Qobuz { get; init; }
+    public bool MacApps { get; init; }
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
     public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : "other";
@@ -69,6 +71,7 @@ internal sealed class Config
             SoloistKey = Env("SOLOIST_API_KEY") ?? "",
             Caldera = Env("CALDERA") == "1",
             Qobuz = Env("QOBUZ") == "1",
+            MacApps = Env("MAC_APPS") == "1",
             TestDevices = Env("BRIDGE_TEST_DEVICES"),
             TestSink = Env("BRIDGE_TEST_SINK") is "fake" or "busy",
             TestSinkBusy = Env("BRIDGE_TEST_SINK") == "busy"

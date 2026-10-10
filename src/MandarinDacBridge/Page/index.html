@@ -118,9 +118,9 @@
   .conn .row:first-of-type { border-top: 0; }
   .conn .row:last-child { border-bottom: 0; }
   .conn .row > div:first-child { min-width: 0; }
-  .conn input[type=text], .conn input[type=password] { font: inherit; font-size: 13.5px; color: var(--text); background: var(--bg-deep); border: 1px solid var(--line);
+  .conn input[type=text], .conn input[type=password], .conn select { font: inherit; font-size: 13.5px; color: var(--text); background: var(--bg-deep); border: 1px solid var(--line);
     border-radius: 10px; padding: 7px 10px; width: 220px; max-width: 100%; }
-  .conn input[type=text]:focus, .conn input[type=password]:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .conn input[type=text]:focus, .conn input[type=password]:focus, .conn select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
   .conn .ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .tag { font-size: 12px; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
   .tag.on { border-color: var(--gold); color: var(--gold); }
@@ -218,12 +218,12 @@ function renderTiles() {
   renderConnections();
 }
 
-// The ways in: UPnP (always), Squeezebox, Spotify Connect, Roon Bridge alongside, and the display.
+// The ways in: UPnP (always), Squeezebox, Spotify, Qobuz, Plex, this Mac's apps, Roon Bridge alongside, and the display.
 function renderConnections() {
   const sv = data.services;
   if (!sv) return;
   const el = $("#conn");
-  if (el.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // don't redraw under typing
+  if (el.contains(document.activeElement) && ["INPUT", "SELECT"].includes(document.activeElement.tagName)) return;   // don't redraw under typing
   const sq = data.dacs.map((d) => d.squeezebox).filter(Boolean);
   const sp = data.dacs.map((d) => d.spotify).filter(Boolean);
   const nowUrl = `${location.protocol}//${location.host}/now`;
@@ -276,6 +276,17 @@ function renderConnections() {
         <button class="switch" role="switch" aria-checked="${sv.caldera}" aria-label="Plex through Caldera Headless" id="c-cal"></button>
       </div>
     </div>
+    ${sv.macPossible ? `<div class="row">
+      <div><div class="lbl">This Mac: Apple Music &amp; Spotify</div>
+        <div class="hint">The Music app and the Spotify app on this Mac play through the bridge to a DAC, bit-perfect, the DAC at each track's own rate.
+          They play to the <b>DAC Bridge</b> output (an audio driver, installed once), which is the Mac's sound output while this is on.
+          <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#mac" target="_blank" rel="noopener">More</a>.
+          ${sv.macApps ? "<br>" + macState(sv) : ""}</div></div>
+      <div class="ctl">
+        ${sv.macApps && data.dacs.length > 1 ? `<select id="c-mdac" aria-label="The DAC for the Mac's apps">${data.dacs.map((d) => `<option value="${esc(d.id)}"${d.id === sv.macDac ? " selected" : ""}>${esc(d.name)}</option>`).join("")}</select>` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.macApps}" aria-label="Apple Music and Spotify on this Mac" id="c-mac"></button>
+      </div>
+    </div>` : ""}
     <div class="row">
       <div><div class="lbl">Roon Bridge</div>
         <div class="hint">Runs beside the bridge, not inside it. Switch on <b>Share when idle</b> on a DAC to let Roon use it while nothing else plays.
@@ -294,6 +305,10 @@ function renderConnections() {
   if (key) key.onchange = () => { if (key.value.trim()) postServices({ soloistKey: key.value.trim() }); };
   $("#c-cal").onclick = () => postServices({ caldera: !sv.caldera });
   $("#c-qb").onclick = () => postServices({ qobuz: !sv.qobuz });
+  const mac = $("#c-mac");
+  if (mac) mac.onclick = () => postServices({ macApps: !sv.macApps });
+  const mdac = $("#c-mdac");
+  if (mdac) mdac.onchange = () => postServices({ macDac: mdac.value });
   for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-qi", "/api/services/qobuz"]]) {
     const b = $(sel);
     if (b) b.onclick = async () => {
@@ -308,6 +323,12 @@ function renderConnections() {
     try { await fetch("/api/services/soloist", { method: "POST" }); } catch (e) { /* next refresh */ }
     refresh();
   };
+}
+
+// What's still needed for the Mac's apps, or how it is.
+function macState(sv) {
+  if (!sv.macDriver) return `The DAC Bridge output isn't on this Mac yet. In Terminal, run<br><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/driver.sh)"</code><br>(it asks for your password; the Mac's sound stops for a few seconds). The first time something plays, macOS asks to allow Microphone access: that is how the bridge reads the DAC Bridge output back (it never listens to a microphone).`;
+  return esc(sv.macStatus || "starting…");
 }
 
 // What's still needed for Qobuz, or how it is.

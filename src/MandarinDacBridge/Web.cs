@@ -9,7 +9,7 @@
 //   /api/services/caldera   POST: download Caldera Headless from Caldera
 //   /api/services/plex      POST: a code to sign in to Plex at plex.tv/link (for Caldera)
 //   /api/services/qobuz     POST: install QobuzProxy (Qobuz Connect) into a private Python environment
-//   /api/dacs/<id>/art      the cover of what Caldera plays (fetched with the Plex token, kept here)
+//   /api/dacs/<id>/art      the cover of what Caldera or the Music app plays (fetched here: the Plex token stays here)
 //   /now                    the now-playing screen, for a display beside the DAC
 //   /api/health
 //   /upnp/<id>/…            each DAC's UPnP device: description, SCPDs,
@@ -146,7 +146,17 @@ internal static partial class Web
         }
         if ((m = ArtPath().Match(p)).Success && method == "GET")
         {
-            if (manager.CalderaArt(m.Groups[1].Value) is not { } art) { await Send(ctx, 404, "text/plain", "no cover"); return; }
+            if (manager.Art(m.Groups[1].Value) is not { } art) { await Send(ctx, 404, "text/plain", "no cover"); return; }
+            if (!art.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+            {
+                byte[] img;
+                try { img = await File.ReadAllBytesAsync(art); } catch (Exception) { await Send(ctx, 404, "text/plain", "no cover"); return; }
+                ctx.Response.ContentType = img.Length > 4 && img[0] == 0x89 && img[1] == 0x50 ? "image/png" : "image/jpeg";
+                ctx.Response.Headers.CacheControl = "no-cache";
+                ctx.Response.ContentLength = img.Length;
+                await ctx.Response.Body.WriteAsync(img);
+                return;
+            }
             try
             {
                 using var cover = await Sources.Http.GetAsync(art, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
@@ -174,7 +184,9 @@ internal static partial class Web
         if (method is not ("GET" or "HEAD")) { await Send(ctx, 405, "text/plain", "not allowed"); return; }
         var rel = p == "/" ? "index.html" : p is "/now" or "/now/" ? "now.html" : p.TrimStart('/');
         if (rel.Contains("..") || !SafePath().IsMatch(rel)) { await Send(ctx, 404, "text/plain", "not found"); return; }
-        using var res = typeof(Web).Assembly.GetManifestResourceStream("Page/" + rel);
+        // Built on Windows, the names keep its folder separator.
+        using var res = typeof(Web).Assembly.GetManifestResourceStream("Page/" + rel)
+                        ?? typeof(Web).Assembly.GetManifestResourceStream("Page/" + rel.Replace('/', '\\'));
         if (res == null) { await Send(ctx, 404, "text/plain", "not found"); return; }
         ctx.Response.ContentType = Types.GetValueOrDefault(Path.GetExtension(rel), "application/octet-stream");
         ctx.Response.Headers.CacheControl = rel.EndsWith(".html") ? "no-cache" : "max-age=86400";
