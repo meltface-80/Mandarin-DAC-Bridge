@@ -238,6 +238,10 @@ when idle). Whoever plays first has it. What Caldera plays shows on the DAC's pa
 
 ### This Mac: the Music app and the Spotify app
 
+> **Experimental above 44.1 kHz.** In testing, 44.1 kHz came back sample for sample, but at 96 and
+> 192 kHz a short stretch (a few thousand frames) came back from slightly later in the stream: the
+> samples are untouched, but there is a click. This is being worked on.
+
 Neither app can play to a DAC the bridge holds, or switch the DAC's rate per track. So, as
 [Arco](https://github.com/renebouwmeester/arco) does for Roon, a small virtual output, **DAC
 Bridge**, becomes the Mac's output while this is on. The app plays to it, and the bridge plays the
