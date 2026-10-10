@@ -215,6 +215,11 @@ internal static unsafe partial class CoreAudio
 
     public static int SetRate(uint dev, double rate) => Set(dev, DeviceNominalSampleRate, ScopeGlobal, rate);
 
+    // This process's IO buffer on a device, in frames (larger: fewer deadlines to meet).
+    public static readonly uint DeviceBufferFrameSize = Code("fsiz");
+    public static uint BufferFrames(uint dev) => Get<uint>(dev, DeviceBufferFrameSize, ScopeGlobal) ?? 0;
+    public static int SetBufferFrames(uint dev, uint frames) => Set(dev, DeviceBufferFrameSize, ScopeGlobal, frames);
+
     [LibraryImport(CF, EntryPoint = "CFNumberCreate")]
     private static partial IntPtr CFNumberCreate(IntPtr allocator, int type, void* value);
 
