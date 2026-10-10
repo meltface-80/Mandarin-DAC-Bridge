@@ -13,5 +13,5 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64 pulseaudio pulseaudio-utils
       - run: dotnet test -c Release

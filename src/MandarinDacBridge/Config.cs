@@ -9,6 +9,11 @@
 //   MANDARIN_PORT        Mandarin's own port, to recognise its streams (3500)
 //   BRIDGE_ALL_OUTPUTS   1 = offer every output, not only USB DACs
 //   BRIDGE_NAME_SUFFIX   added to each DAC's name on the network (" (Bridge)")
+//   SQUEEZELITE          1 = each DAC is a Squeezebox player too (also a switch on the page)
+//   LMS_SERVER           the Squeezebox server (Lyrion, Roon) to use, instead of looking for one
+//   SPOTIFY              1 = each DAC is a Spotify Connect speaker too, through Spotify Soloist (Linux; also on the page)
+//   SOLOIST_API_KEY      your Soloist API key (or typed on the page; kept in settings.json, never shown again)
+//   SOLOIST              the soloist program (else on the PATH, or downloaded by the page into DATA_DIR/soloist)
 using System.Reflection;
 
 namespace MandarinDacBridge;
@@ -26,6 +31,12 @@ internal sealed class Config
     public int MandarinPort { get; init; } = 3500;
     public bool AllOutputs { get; init; }
     public string NameSuffix { get; init; } = " (Bridge)";
+    // Defaults for the page's switches (the page's choice, once made, is kept in settings.json).
+    public bool Squeezelite { get; init; }
+    public string LmsServer { get; init; } = "";
+    public bool Spotify { get; init; }
+    public string Soloist { get; init; } = "";
+    public string SoloistKey { get; init; } = "";
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
     public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : "other";
@@ -47,12 +58,38 @@ internal sealed class Config
             MandarinPort = int.TryParse(Env("MANDARIN_PORT"), out var mp) ? mp : 3500,
             AllOutputs = Env("BRIDGE_ALL_OUTPUTS") == "1",
             NameSuffix = Environment.GetEnvironmentVariable("BRIDGE_NAME_SUFFIX") ?? " (Bridge)",
+            Squeezelite = Env("SQUEEZELITE") == "1",
+            LmsServer = Env("LMS_SERVER") ?? "",
+            Spotify = Env("SPOTIFY") == "1",
+            Soloist = Env("SOLOIST") ?? "",
+            SoloistKey = Env("SOLOIST_API_KEY") ?? "",
             TestDevices = Env("BRIDGE_TEST_DEVICES"),
             TestSink = Env("BRIDGE_TEST_SINK") is "fake" or "busy",
             TestSinkBusy = Env("BRIDGE_TEST_SINK") == "busy"
         };
         try { Directory.CreateDirectory(c.DataDir); } catch (Exception) { /* reported when settings are saved */ }
         return c;
+    }
+
+    // Where the page's Download puts Spotify Soloist.
+    public string SoloistDir => Path.Combine(DataDir, "soloist");
+
+    // soloist as set, else downloaded by the page, else on the PATH; "" if none.
+    public string FindSoloist() =>
+        Soloist != "" ? (File.Exists(Soloist) ? Soloist : "") : Find("soloist", [SoloistDir]);
+
+    // The PulseAudio server, which gives Soloist a private sound server to play into.
+    public static string FindPulseAudio() => Find("pulseaudio", []);
+
+    private static string Find(string name, string[] first)
+    {
+        foreach (var dir in first.Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries))
+                     .Concat(["/usr/local/bin", "/usr/bin"]))
+        {
+            var f = Path.Combine(dir, name);
+            if (File.Exists(f)) return f;
+        }
+        return "";
     }
 
     // ffmpeg on the PATH, else where Homebrew puts it (launchd's PATH is short).

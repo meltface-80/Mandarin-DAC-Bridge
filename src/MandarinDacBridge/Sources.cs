@@ -8,6 +8,9 @@
 //
 // DSD files (DSF, DFF) go to the DAC as DoP when that's on for it (Dsd.cs);
 // otherwise ffmpeg turns them into PCM.
+//
+// "live:<name>" is a stream inside the bridge (Spotify Connect's), opened by
+// whatever registered that name.
 using System.Diagnostics;
 using System.Globalization;
 using System.Text;
@@ -56,16 +59,26 @@ internal static partial class Sources
         return rates.Max();
     }
 
-    // "audio/L24;rate=96000;channels=2" → ffmpeg's raw input.
+    // "audio/L24;rate=96000;channels=2" → ffmpeg's raw input. Big-endian, as
+    // the type says, unless ";endian=little" (a Squeezebox server's raw PCM).
     public static RawPcm? RawPcmOf(string? mime)
     {
         var m = RawMime().Match((mime ?? "").Trim());
         if (!m.Success) return null;
         var rate = Regex.Match(m.Groups[2].Value, @"rate=(\d+)", RegexOptions.IgnoreCase);
         var ch = Regex.Match(m.Groups[2].Value, @"channels=(\d+)", RegexOptions.IgnoreCase);
-        return new RawPcm($"s{m.Groups[1].Value}be", rate.Success ? int.Parse(rate.Groups[1].Value) : 44100,
+        var le = Regex.IsMatch(m.Groups[2].Value, @"endian=little", RegexOptions.IgnoreCase);
+        return new RawPcm($"s{m.Groups[1].Value}{(le ? "le" : "be")}", rate.Success ? int.Parse(rate.Groups[1].Value) : 44100,
             ch.Success ? int.Parse(ch.Groups[1].Value) : 2, int.Parse(m.Groups[1].Value));
     }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Func<CancellationToken, IPcmSource>> live = new();
+
+    public static bool IsLive(string uri) => uri.StartsWith("live:", StringComparison.Ordinal);
+
+    public static void RegisterLive(string name, Func<CancellationToken, IPcmSource> open) => live[name] = open;
+
+    public static void UnregisterLive(string name) => live.TryRemove(name, out _);
 
     public static bool IsDsd(string? mime, string uri) =>
         DsdMime().IsMatch(mime ?? "") || DsdExt().IsMatch(uri);
@@ -91,6 +104,8 @@ internal static partial class Sources
     // A source for a track, at a position.
     public static IPcmSource Open(string uri, string mime, double offset, DacTraits dac, string ffmpeg, Action<string> log, CancellationToken ct)
     {
+        if (IsLive(uri))
+            return live.TryGetValue(uri[5..], out var open) ? open(ct) : throw new InvalidOperationException($"{uri} isn't playing");
         if (IsDsd(mime, uri) && dac.Dsd == "dop")
         {
             try

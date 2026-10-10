@@ -135,6 +135,12 @@ internal static partial class Libc
     [LibraryImport("libc", EntryPoint = "sched_setscheduler", SetLastError = true)]
     private static partial int SetScheduler(int pid, int policy, ref SchedParam param);
 
+    [LibraryImport("libc", EntryPoint = "mkfifo", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    private static partial int MkFifo(string path, uint mode);
+
+    // A named pipe (for Spotify Soloist's private sound server to write into).
+    public static bool MakeFifo(string path) => MkFifo(path, 0x180 /* 0600 */) == 0;
+
     // The calling thread at a real-time priority where the system allows it
     // (root, or a container with SYS_NICE). Best effort.
     public static bool FavourThisThread()

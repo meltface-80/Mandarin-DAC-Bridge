@@ -4,6 +4,11 @@
 #
 # Needs the host's network (UPnP discovery is multicast) and its sound
 # devices (/dev/snd) — see docker-compose.yml.
+#
+# Spotify Connect (optional) is Spotify Soloist, which may not be
+# redistributed: the page's Download button fetches it from Spotify into
+# /data. PulseAudio is here for it: each DAC's Soloist plays into a private
+# PulseAudio server with no sound card, only a pipe the bridge reads.
 
 # Built ahead of time (Native AOT) to one program: no .NET in the final image.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -16,7 +21,7 @@ RUN dotnet publish src/MandarinDacBridge -c Release -o /out --nologo
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg \
+ && apt-get install -y --no-install-recommends ffmpeg pulseaudio libatomic1 \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out/mandarin-dac-bridge /app/mandarin-dac-bridge

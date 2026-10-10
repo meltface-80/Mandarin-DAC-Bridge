@@ -10,6 +10,11 @@
 // One thread (the renderer's feed) calls Configure, Write and Drain; Flush
 // and Pause come from the control side, after the feed has been stopped (or
 // for Pause, at any time).
+//
+// Sharing (a DAC's "share when idle" setting, for Roon Bridge, squeezelite
+// or any other player on the same machine): while nothing plays, the sink
+// lets go of the DAC and doesn't take it back by itself; Reclaim takes it
+// back when the bridge is asked to play.
 namespace MandarinDacBridge.Audio;
 
 internal sealed class DeviceException(string message) : Exception(message);
@@ -35,6 +40,10 @@ internal interface ISink : IDisposable
     void Pause(bool on);
     // Frames played since the last Configure, Flush or Drain.
     long Played { get; }
+    // Lets go of the DAC (on) and stays off it until Reclaim; off: holds it as always.
+    void Share(bool on);
+    // Takes the DAC back now, if it is free; true when the sink has it. Configure must follow.
+    bool Reclaim();
 }
 
 internal static class SinkFactory
@@ -46,4 +55,9 @@ internal static class SinkFactory
         if (OperatingSystem.IsLinux()) return new AlsaSink(dev.Spec);
         throw new PlatformNotSupportedException("only macOS and Linux are supported");
     }
+}
+
+internal static class Sharing
+{
+    public const string Idle = "shared: let go while idle, for other players";
 }

@@ -20,11 +20,17 @@ fixes this by taking each DAC itself:
   *Transport is locked*), so the two never fight over it.
 * It shows a **page on port 55500**: one tile per DAC with its name and model. Tap a tile to see
   what the DAC can do; the ✕ in the top-right corner takes you back.
+* **Optionally** ([More ways to play](#more-ways-to-play)), each DAC is also a **Squeezebox player**
+  (Lyrion Music Server, Roon) and a **Spotify Connect speaker** (through Spotify Soloist, on Linux), can be **shared
+  with Roon Bridge** while idle, and a **now-playing screen** at `/now` shows what's playing on a
+  monitor beside it.
 
 ```
- Audirvana ──UPnP──┐                         ┌──▶ exclusive, rate-switched ──▶ USB DAC 1
-                   ├──▶  Mandarin DAC Bridge ┤
- Mandarin ───UPnP──┘      (port 55500)       └──▶ exclusive, rate-switched ──▶ USB DAC 2
+ Audirvana ───── UPnP ──────┐                          ┌──▶ exclusive, rate-switched ──▶ USB DAC 1
+ Mandarin ────── UPnP ──────┤                          │
+ Lyrion / Roon ─ Squeezebox ┼──▶  Mandarin DAC Bridge ─┤
+ Spotify app ─── Connect ───┘      (port 55500)        └──▶ exclusive, rate-switched ──▶ USB DAC 2
+                                    /now: now playing
 ```
 
 ---
@@ -122,6 +128,94 @@ docker run -d \
 
 ---
 
+## More ways to play
+
+UPnP is always on. Everything here is optional, and goes through the same exclusive,
+rate-switched path and the same rule: whatever is playing keeps the others out until it stops
+(and for 10 seconds after).
+
+### Squeezebox (squeezelite)
+
+Switch on **Squeezebox** under *Connections* on the page (or set `SQUEEZELITE=1`). Each DAC
+becomes a Squeezebox player, `"<DAC> (Bridge)"`, for **Lyrion Music Server** and for **Roon**
+with *Settings → Setup → Squeezebox support* on. The server is found by itself (UDP broadcast on
+3483); type its address on the page, or set `LMS_SERVER`, if it isn't.
+
+The bridge speaks the Squeezebox protocol (SlimProto) itself instead of running the squeezelite
+program, because squeezelite opens the DAC itself, and the bridge holds it. The server's stream
+goes through ffmpeg like a UPnP track. FLAC, PCM (WAV, AIFF, raw), MP3 and Ogg are taken as they
+come, and gapless: the bridge asks for the next track when it has read the current one. DSD is
+converted to PCM by the server. In LMS, set the player's volume control to *fixed at 100%*. Title,
+artist and cover come from LMS's JSON-RPC (Roon's Squeezebox support has none, so its tracks show
+just the format).
+
+### Spotify Connect, through Spotify Soloist (Linux)
+
+[Spotify Soloist](https://developer.spotify.com/documentation/soloist) is Spotify's own headless
+Spotify Connect client for Linux. With it switched on, each DAC appears in the Spotify app's device
+list as `"<DAC> (Bridge)"`. It needs:
+
+* **Your own Soloist API key.** Make it at
+  [Spotify for Developers → Soloist](https://developer.spotify.com/dashboard/soloist) (needs Spotify
+  Premium) and type it on the page. It is kept in `settings.json` (readable by its owner only) and
+  never shown again. You can also set `SOLOIST_API_KEY`.
+* **Soloist itself.** Spotify doesn't allow it to be redistributed, so the bridge doesn't include it:
+  **Download Soloist** on the page fetches the official build for this machine's processor
+  (x86-64, ARM64 or ARM32) from Spotify into `DATA_DIR/soloist`, the way RoPieee fetches Roon Bridge.
+  Each build lasts 90 days; the page shows until when, and an expired build that the bridge
+  downloaded is fetched again by itself.
+* **Linux with glibc 2.38 or later** (Debian 13, Ubuntu 24.04, Raspberry Pi OS trixie), or the
+  **Docker image**, which has it. Debian 12, DietPi on bookworm and Raspberry Pi OS bookworm are
+  too old to run Soloist natively; Docker works there. Soloist doesn't exist for macOS.
+* **PulseAudio** (`sudo apt install pulseaudio`; it's in the Docker image). The bridge runs it
+  privately, with no sound card: it doesn't touch the system's sound.
+
+How it fits: Soloist only plays to PipeWire or PulseAudio, and the bridge holds the DAC. So each DAC's
+Soloist is started with a private PulseAudio server of its own that has no sound card, only a pipe
+sink: Soloist's sound comes out of a named pipe as 32-bit samples at 44.1 kHz, and the bridge plays
+them through the same exclusive, rate-switched path as everything else. The pipe waits for its
+reader, so the DAC's clock sets the pace: nothing is resampled and nothing drifts, and 16- and
+24-bit audio arrive unchanged. Soloist's WebSocket (on 127.0.0.1) tells the bridge what's playing
+(title, artists, album, cover, position) and when Spotify plays, pauses or stops. If another app has
+the DAC when Spotify starts, the bridge tells Soloist to pause, so the Spotify app shows it didn't
+play. The volume stays at 100% for bit-perfect playback: a change in the Spotify app is put back.
+
+### Roon Bridge, beside the bridge
+
+Roon Bridge can't be bundled with the bridge (Roon's licence), and Roon's own playback protocol
+(RAAT) is closed, so it can't play *through* the bridge. It can run *beside* it and share the
+DACs. Like RoPieee, this downloads Roon's own installer from Roon Labs and runs it (Linux):
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/linux/roon-bridge.sh)"
+```
+
+On a Mac, install [Roon Bridge for macOS](https://download.roonlabs.net/builds/RoonBridge.dmg).
+In Docker, install Roon Bridge on the host, not in the container. Then on each DAC Roon should
+use, switch on **Share when idle**. The bridge then lets go of that DAC whenever nothing plays through
+it (no app playing, none in its 10-second grace), so Roon Bridge can open it. When Audirvana,
+Mandarin, LMS or Spotify play to the bridge, it takes the DAC back, if Roon has let go of it.
+While Roon is playing, they are refused with *the DAC is held by another program*. The tile says
+*Shared · free for other players* or *Shared · RoonBridge is playing*.
+
+Or skip Roon Bridge: with the Squeezebox player on, Roon's Squeezebox support plays to the
+bridge directly (with Roon's limits for Squeezebox players, and not as Roon Ready).
+
+### The now-playing screen
+
+`http://<machine>:55500/now`, full-screen in any browser: cover, title, artist, album, time and
+format of whatever is playing (from any app), and a slowly drifting clock when nothing is. It
+follows whichever DAC is playing; move the mouse to pick one (or add `?dac=<id>`). On a Linux
+machine with a monitor plugged in and no desktop (DietPi, Raspberry Pi OS Lite), this sets up
+cage and Chromium to show it from boot:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/linux/display.sh)"
+# a bridge on another machine:  … -- --url http://192.168.1.20:55500/now     remove: … -- --uninstall
+```
+
+---
+
 ## How it works
 
 | | macOS | Linux / Docker |
@@ -152,7 +246,7 @@ never touches that path.
 * **Volume** stays at 100% (bit-perfect). Use the DAC's or amplifier's volume. Mute works.
 
 `mandarin-dac-bridge --list` prints the DACs found and what each takes, and every other output it saw with why it was passed over. `mandarin-dac-bridge --diagnose` prints everything the machine reports about its sound devices. The page's API is
-`GET /api/dacs`. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
+`GET /api/dacs`, and `GET`/`POST /api/services` for Squeezebox and Spotify. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
 
 ### Settings (all optional)
 
@@ -166,6 +260,11 @@ never touches that path.
 | `BRIDGE_NAME_SUFFIX` | ` (Bridge)` | added to each DAC's name on the network |
 | `DATA_DIR` | `data/` beside the program | where `settings.json` lives |
 | `FFMPEG` | `ffmpeg` on the PATH, or Homebrew's | the decoder |
+| `SQUEEZELITE` | — | `1` starts with the Squeezebox player on (the page's switch, once used, wins) |
+| `LMS_SERVER` | found by itself | the Squeezebox server, `host` or `host:port` |
+| `SPOTIFY` | — | `1` starts with Spotify Connect on (Spotify Soloist, Linux) |
+| `SOLOIST_API_KEY` | — | your Soloist API key (or type it on the page) |
+| `SOLOIST` | downloaded by the page, or on the PATH | the soloist program |
 
 On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. In Docker, they go
 under `environment:` in `docker-compose.yml`.
@@ -179,6 +278,12 @@ under `environment:` in `docker-compose.yml`.
 * **The apps don't see "(Bridge)" devices.** Check that the bridge and the apps are on the same
   network. On a Mac, allow **mandarin-dac-bridge** under System Settings → Privacy & Security →
   Local Network. In Docker, check that you used `--network host`.
+* **The DAC doesn't show in Spotify.** Check *Connections* on the page: it says what Soloist is
+  waiting for (the key, a download, PulseAudio, a newer Linux). The phone and the bridge must be on
+  the same network, without client isolation on the Wi-Fi.
+* **No Squeezebox player in LMS.** Check *Connections* on the page: it says which server it's
+  connected to. If it's still looking, type the server's address there (broadcasts don't cross
+  subnets or VPNs).
 * **The Mac's volume for the DAC** is shown on the DAC's page. Set it to 100% in Audio MIDI Setup
   for bit-perfect playback.
 
@@ -196,7 +301,9 @@ dotnet publish src/MandarinDacBridge -c Release -r osx-arm64    # one native pro
 
 The end-to-end tests run the whole bridge in-process and drive it over real SOAP from two
 pretend apps: play, lockout, gapless, seek, pause, rate changes, DSD→DoP, resampling and UPnP
-events. They use a sink that plays in real time to a clock (`Audio/ClockSink.cs`), and on Linux
+events. A pretend Squeezebox server (gapless, stop, status) and a pretend Soloist (a script
+that plays a tone through the bridge's private PulseAudio, and a WebSocket in the test) drive the other two ways in, and a shared DAC is let go and taken
+back. They use a sink that plays in real time to a clock (`Audio/ClockSink.cs`), and on Linux
 also the real ALSA path.
 
 | File | What it does |

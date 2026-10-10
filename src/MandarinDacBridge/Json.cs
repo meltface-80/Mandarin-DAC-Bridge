@@ -12,6 +12,23 @@ internal sealed class BridgeView
     public string Host { get; set; } = "";
     public string Platform { get; set; } = "";
     public List<string> Others { get; set; } = [];
+    public ServicesView Services { get; set; } = new();
+}
+
+internal sealed class ServicesView
+{
+    public bool Squeezelite { get; set; }
+    public string LmsServer { get; set; } = "";
+    public bool Spotify { get; set; }
+    // Spotify Soloist: Linux on x86-64 or ARM; the key only as "set" (it is never sent back).
+    public bool SpotifyPossible { get; set; }
+    public bool SoloistKey { get; set; }
+    public string Soloist { get; set; } = "";
+    public string SoloistVersion { get; set; } = "";
+    public string SoloistExpires { get; set; } = "";     // yyyy-MM-dd
+    public string SoloistDownload { get; set; } = "";
+    public bool PulseAudio { get; set; }
+    public string RoonBridge { get; set; } = "";
 }
 
 internal sealed class DacView
@@ -41,6 +58,10 @@ internal sealed class DacView
     public string Holder { get; set; } = "";
     public NowPlaying? Player { get; set; }
     public ControlView? Control { get; set; }
+    public bool Share { get; set; }
+    public string? Squeezebox { get; set; }
+    public string? SqueezeboxId { get; set; }
+    public string? Spotify { get; set; }
 }
 
 internal sealed class ControlView
@@ -60,4 +81,6 @@ internal sealed record Health(bool Ok, string Version, int Dacs);
 [JsonSerializable(typeof(DacSettings))]
 [JsonSerializable(typeof(Health))]
 [JsonSerializable(typeof(List<DacDevice>))]
+[JsonSerializable(typeof(ServiceSettings))]
+[JsonSerializable(typeof(ServicesView))]
 internal sealed partial class BridgeJson : JsonSerializerContext;

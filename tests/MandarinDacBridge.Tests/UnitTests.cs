@@ -350,3 +350,123 @@ public class SsdpTests
         Assert.Equal(6, sent.Count);   // root, uuid, the device type and three services
     }
 }
+
+public class ConnectionTests
+{
+    [Fact]
+    public void Strm_SaysWhatToFetch_AndHow()
+    {
+        var head = Encoding.ASCII.GetBytes("GET /stream.mp3?player=02:aa:bb:cc:dd:ee HTTP/1.0\r\n\r\n");
+        var b = new byte[24 + head.Length];
+        b[0] = (byte)'s'; b[1] = (byte)'1'; b[2] = (byte)'p'; b[3] = (byte)'1'; b[4] = (byte)'3'; b[5] = (byte)'2'; b[6] = (byte)'1';
+        BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(18), 9000);
+        BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(20), 0xC0A80105);
+        head.CopyTo(b, 24);
+        var s = Slim.Strm.Parse(b)!;
+        Assert.Equal('s', s.Command);
+        Assert.Equal(9000, s.ServerPort);
+        Assert.Equal(0xC0A80105u, s.ServerIp);
+        Assert.Equal("/stream.mp3?player=02:aa:bb:cc:dd:ee", s.Path());
+        Assert.Equal("audio/L16;rate=44100;channels=2;endian=little", s.Mime());
+        Assert.Equal(new RawPcm("s16le", 44100, 2, 16), Sources.RawPcmOf(s.Mime()));
+        Assert.Equal(new RawPcm("s24be", 96000, 2, 24), Sources.RawPcmOf("audio/L24;rate=96000;channels=2"));
+        Assert.Equal("audio/wav", (s with { SampleSize = '?' }).Mime());
+        Assert.Equal("audio/flac", (s with { Format = 'f' }).Mime());
+        Assert.Equal("", (s with { Format = 'd' }).Mime());
+        Assert.Null(Slim.Strm.Parse(new byte[10]));
+    }
+
+    [Fact]
+    public void Discovery_ReadsTheServersAnswer()
+    {
+        var b = new List<byte>();
+        foreach (var (k, v) in new[] { ("NAME", "lms-box"), ("JSON", "9000") })
+        {
+            b.AddRange(Encoding.ASCII.GetBytes(k));
+            b.Add((byte)v.Length);
+            b.AddRange(Encoding.UTF8.GetBytes(v));
+        }
+        var t = Slim.SlimDiscovery.ParseTags(b.ToArray());
+        Assert.Equal("lms-box", t["NAME"]);
+        Assert.Equal("9000", t["JSON"]);
+        Assert.Equal(IPAddress.Parse("10.0.0.2"), Slim.SlimDiscovery.Parse("10.0.0.2")!.Ip);
+        Assert.Equal(3500, Slim.SlimDiscovery.Parse("10.0.0.2:3500")!.Port);
+        Assert.Null(Slim.SlimDiscovery.Parse(""));
+    }
+
+    [Fact]
+    public void PlayerMac_IsStable_AndLocallyAdministered()
+    {
+        var a = Slim.SlimPlayer.MacFor("host", "usb:1");
+        Assert.Equal(a, Slim.SlimPlayer.MacFor("host", "usb:1"));
+        Assert.NotEqual(a, Slim.SlimPlayer.MacFor("host", "usb:2"));
+        Assert.Equal(0x02, a[0] & 0x03);
+    }
+
+    [Fact]
+    public void LmsStatus_GivesTitleArtistCover()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""
+            {"result":{"mode":"play","time":12.5,"duration":"201.3","playlist_loop":[{"title":"Song","artist":"Artist","album":"Album","coverid":"abc123","duration":201.3}]}}
+            """);
+        var m = Slim.SlimPlayer.ParseStatus(doc.RootElement, "http://lms:9000", "02:aa:bb:cc:dd:ee")!;
+        Assert.Equal("Song", m.Title);
+        Assert.Equal("Artist", m.Artist);
+        Assert.Equal("http://lms:9000/music/abc123/cover.jpg", m.Art);
+        Assert.Equal(201.3, m.Duration, 3);
+        Assert.Equal(12.5, m.Position);
+
+        using var radio = System.Text.Json.JsonDocument.Parse("""{"result":{"remoteMeta":{"title":"Live","artwork_url":"/imageproxy/x/image.jpg"}}}""");
+        Assert.Equal("http://lms:9000/imageproxy/x/image.jpg", Slim.SlimPlayer.ParseStatus(radio.RootElement, "http://lms:9000", "m")!.Art);
+    }
+}
+
+public class SoloistTests
+{
+    [Fact]
+    public void Entity_GivesTitleArtistsAlbumCover()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""
+            {"uri":"spotify:track:1","entity_type":"track","decorations":{"identity":{"name":"Blue in Green"},
+             "visual_identity":{"cover":[{"url":"https://i/s","size":"small"},{"url":"https://i/d","size":"default"}]},
+             "parent":{"entity":{"decorations":{"identity":{"name":"Kind of Blue"}}}},
+             "creators":[{"decorations":{"identity":{"name":"Miles Davis"}}},{"entity":{"decorations":{"identity":{"name":"Bill Evans"}}}}],
+             "playback":{"duration_ms":337000}}}
+            """);
+        var m = Spotify.SoloistPlayer.Entity(doc.RootElement)!;
+        Assert.Equal("Blue in Green", m.Title);
+        Assert.Equal("Miles Davis, Bill Evans", m.Artist);
+        Assert.Equal("Kind of Blue", m.Album);
+        Assert.Equal("https://i/d", m.Art);     // large wanted; default is the best there
+        Assert.Equal(337, m.Duration);
+        using var empty = System.Text.Json.JsonDocument.Parse("""{"uri":"","entity_type":"unknown"}""");
+        Assert.Null(Spotify.SoloistPlayer.Entity(empty.RootElement));
+    }
+
+    [Fact]
+    public void Download_IsSpotifysOwnBuild_ForThisProcessor()
+    {
+        Assert.Equal("https://soloist-builds.spotifycdn.com/soloist_release_arm64.tar.gz", Spotify.SoloistDownload.Url("arm64"));
+        if (System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64)
+            Assert.Equal("x86_64", Spotify.SoloistDownload.Arch);
+    }
+}
+
+public class SoloistExpiryTests
+{
+    [Fact]
+    public void BuildDate_PlusNinetyDays()
+    {
+        Assert.Equal(new DateOnly(2027, 1, 8), Spotify.SoloistDownload.Expires("soloist 1.3.9.7 build 1791612060 (20261010) (g440165f200) (linux/x86_64)"));
+        Assert.Null(Spotify.SoloistDownload.Expires("soloist"));
+    }
+
+    [Fact]
+    public void LoaderErrors_AreSaidPlainly()
+    {
+        Assert.Equal("Soloist needs libatomic.so.1: sudo apt install libatomic1",
+            Spotify.SoloistDownload.Explain("/data/soloist/soloist: error while loading shared libraries: libatomic.so.1: cannot open shared object file: No such file or directory"));
+        Assert.StartsWith("Soloist needs a newer Linux", Spotify.SoloistDownload.Explain("soloist: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found"));
+        Assert.Equal("soloist 1.3.9.7", Spotify.SoloistDownload.Explain("soloist 1.3.9.7"));
+    }
+}

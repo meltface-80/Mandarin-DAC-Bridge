@@ -4,6 +4,9 @@
 //   /api/dacs               what the page shows (JSON)
 //   /api/dacs/<id>/settings POST { enabled, dsd, name }
 //   /api/dacs/<id>/release  POST: let another controller take the DAC now
+//   /api/services           GET, POST { squeezelite, lmsServer, spotify, soloistKey }: the ways in besides UPnP
+//   /api/services/soloist   POST: download Spotify Soloist from Spotify
+//   /now                    the now-playing screen, for a display beside the DAC
 //   /api/health
 //   /upnp/<id>/…            each DAC's UPnP device: description, SCPDs,
 //                           control (SOAP) and events (GENA)
@@ -103,6 +106,22 @@ internal static partial class Web
         // ---------------------------------------------------------------- API
         if (p == "/api/health") { await Json(ctx, 200, new Health(true, Config.Version, manager.Count), BridgeJson.Default.Health); return; }
         if (p == "/api/dacs" && method == "GET") { await Json(ctx, 200, manager.View(), BridgeJson.Default.BridgeView); return; }
+        if (p == "/api/services")
+        {
+            if (method == "GET") { await Json(ctx, 200, manager.Services(), BridgeJson.Default.ServicesView); return; }
+            if (method != "POST") { await Send(ctx, 405, "text/plain", "GET or POST"); return; }
+            ServiceSettings? sp;
+            try { sp = JsonSerializer.Deserialize(await Body(ctx, 4096), BridgeJson.Default.ServiceSettings); }
+            catch (Exception) { await Send(ctx, 400, "application/json", "{\"error\":\"bad JSON\"}"); return; }
+            await Json(ctx, 200, manager.SetServices(sp ?? new ServiceSettings()), BridgeJson.Default.ServicesView);
+            return;
+        }
+        if (p == "/api/services/soloist" && method == "POST")
+        {
+            _ = manager.DownloadSoloist();
+            await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
+            return;
+        }
         if ((m = ApiPath().Match(p)).Success && method == "POST")
         {
             var id = m.Groups[1].Value;
@@ -117,7 +136,7 @@ internal static partial class Web
 
         // ---------------------------------------------------------------- the page
         if (method is not ("GET" or "HEAD")) { await Send(ctx, 405, "text/plain", "not allowed"); return; }
-        var rel = p == "/" ? "index.html" : p.TrimStart('/');
+        var rel = p == "/" ? "index.html" : p is "/now" or "/now/" ? "now.html" : p.TrimStart('/');
         if (rel.Contains("..") || !SafePath().IsMatch(rel)) { await Send(ctx, 404, "text/plain", "not found"); return; }
         using var res = typeof(Web).Assembly.GetManifestResourceStream("Page/" + rel);
         if (res == null) { await Send(ctx, 404, "text/plain", "not found"); return; }

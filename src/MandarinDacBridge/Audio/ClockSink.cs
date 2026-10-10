@@ -12,10 +12,10 @@ internal sealed class ClockSink(bool busy = false) : ISink
     private int rate, channels;
     private long buffered, played;
     private double carry;
-    private bool paused, configured;
+    private bool paused, configured, shared;
 
-    public bool Exclusive => !busy;
-    public string Message => busy ? "another program has the DAC in exclusive mode" : "";
+    public bool Exclusive => !busy && !shared;
+    public string Message => busy ? "another program has the DAC in exclusive mode" : shared ? Sharing.Idle : "";
     public int HolderPid => busy ? 4242 : Environment.ProcessId;
     public event Action? StatusChanged;
     public event Action? Gone { add { } remove { } }
@@ -73,6 +73,21 @@ internal sealed class ClockSink(bool busy = false) : ISink
     public void Pause(bool on) { lock (gate) { Tick(); paused = on; } }
 
     public long Played { get { lock (gate) { Tick(); return played; } } }
+
+    public void Share(bool on)
+    {
+        lock (gate) { shared = on; configured = false; }
+        StatusChanged?.Invoke();
+    }
+
+    public bool Reclaim()
+    {
+        if (busy) return false;
+        bool was;
+        lock (gate) { was = shared; shared = false; }
+        if (was) StatusChanged?.Invoke();
+        return true;
+    }
 
     public void Dispose() { }
 }
