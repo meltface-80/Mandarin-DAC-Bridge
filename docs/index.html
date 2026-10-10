@@ -258,6 +258,11 @@
       <div class="card"><h3><span class="em">⏭️</span>Gapless</h3>
         <p>When an app sends the next track ahead of time, a track at the same rate follows with no gap. A
           different rate plays out first, then the DAC switches.</p></div>
+      <div class="card" id="volume"><h3><span class="em">🔊</span>The DAC's own volume</h3>
+        <p>Headphone DACs like the DragonFly have no knob: their volume is set from the computer and applied in the DAC,
+          so the stream stays bit-perfect. The apps' volume controls set it (UPnP, Spotify, Qobuz, LMS), and the DAC's
+          page has a slider. A DAC feeding an amplifier can be set to <b>Fixed</b>; one with no volume of its own plays
+          at 100%.</p></div>
       <div class="card"><h3><span class="em">📱</span>A page per DAC</h3>
         <p>Open <code>http://&lt;machine&gt;:55500</code> on any phone or computer: a tile per DAC, with its name
           and model. Tap one for its rates, depths, DSD and formats; the ✕ takes you back.</p></div>
@@ -398,8 +403,8 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
         <div class="sym">Mandarin</div>
         <h3>A zone like any renderer</h3>
         <p>Settings → Audio Devices → choose <b>"&lt;DAC&gt; (Bridge)"</b>. If Mandarin's own local output for that
-          DAC is switched on, switch it off: the bridge owns the DAC now. Volume stays at 100% for bit-perfect
-          playback; use the DAC's or amplifier's volume.</p>
+          DAC is switched on, switch it off: the bridge owns the DAC now. Mandarin's volume sets the DAC's own, where it
+          has one (<a href="#volume">Volume</a>).</p>
       </div>
     </div>
   </div>
@@ -418,8 +423,9 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
           "&lt;DAC&gt; (Bridge)", for Lyrion Music Server (LMS) — and for Roon, with <i>Settings → Setup → Squeezebox
           support</i> on. The bridge speaks the Squeezebox protocol itself rather than running squeezelite, because
           squeezelite would need the DAC to itself. The server is found by itself; type its address if it isn't.</p>
-        <p>FLAC, PCM, AIFF, MP3 and Ogg are taken as they come, gapless. DSD is converted by the server. In LMS, set
-          the player's volume control to <i>fixed at 100%</i> for bit-perfect playback.</p>
+        <p>FLAC, PCM, AIFF, MP3 and Ogg are taken as they come, gapless. DSD is converted by the server. LMS's volume
+          sets the DAC's own, where it has one; for a DAC feeding an amplifier, set the player's volume control in LMS to
+          <i>fixed at 100%</i>.</p>
       </div>
       <div class="info-card" id="spotify">
         <div class="sym">Spotify Connect · Linux</div>
@@ -436,7 +442,8 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
           · <b>PulseAudio</b> (<code>sudo apt install pulseaudio</code>; in the Docker image already).</p>
         <p>Soloist plays into a private PulseAudio with no sound card, only a pipe the bridge reads, so its sound takes
           the same exclusive path as everything else, at 44.1 kHz, paced by the DAC: nothing is resampled. If another
-          app has the DAC, Spotify is paused. The volume stays at 100%.</p>
+          app has the DAC, Spotify is paused. Spotify's volume sets the DAC's own, where it has one; otherwise it stays at
+          100%.</p>
         <p>Soloist takes the key only on its command line, so other accounts on the same machine could read it from
           the process list; on a machine you share, run the bridge in Docker. On a Mac, the Spotify app itself plays
           through the bridge instead (<a href="#mac-apps">below</a>).</p>

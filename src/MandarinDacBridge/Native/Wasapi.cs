@@ -126,6 +126,32 @@ internal partial interface IAudioClock
     [PreserveSig] int GetCharacteristics(out uint characteristics);
 }
 
+// The endpoint's volume: applied by the DAC itself where QueryHardwareSupport says so (in exclusive mode
+// Windows applies no volume of its own).
+[GeneratedComInterface]
+[Guid("5CDF2C82-841E-4546-9722-0CF74078229A")]
+internal partial interface IAudioEndpointVolume
+{
+    [PreserveSig] int RegisterControlChangeNotify(nint notify);
+    [PreserveSig] int UnregisterControlChangeNotify(nint notify);
+    [PreserveSig] int GetChannelCount(out uint count);
+    [PreserveSig] int SetMasterVolumeLevel(float db, nint context);
+    [PreserveSig] int SetMasterVolumeLevelScalar(float level, nint context);
+    [PreserveSig] int GetMasterVolumeLevel(out float db);
+    [PreserveSig] int GetMasterVolumeLevelScalar(out float level);
+    [PreserveSig] int SetChannelVolumeLevel(uint channel, float db, nint context);
+    [PreserveSig] int SetChannelVolumeLevelScalar(uint channel, float level, nint context);
+    [PreserveSig] int GetChannelVolumeLevel(uint channel, out float db);
+    [PreserveSig] int GetChannelVolumeLevelScalar(uint channel, out float level);
+    [PreserveSig] int SetMute(int mute, nint context);
+    [PreserveSig] int GetMute(out int mute);
+    [PreserveSig] int GetVolumeStepInfo(out uint step, out uint stepCount);
+    [PreserveSig] int VolumeStepUp(nint context);
+    [PreserveSig] int VolumeStepDown(nint context);
+    [PreserveSig] int QueryHardwareSupport(out uint mask);
+    [PreserveSig] int GetVolumeRange(out float minDb, out float maxDb, out float incrementDb);
+}
+
 internal static partial class Wasapi
 {
     public const int Render = 0;                    // eRender
@@ -146,6 +172,8 @@ internal static partial class Wasapi
     public static readonly Guid IidAudioClient = new("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
     public static readonly Guid IidRenderClient = new("F294ACFC-3146-4483-A7BF-ADDCA7C260E2");
     public static readonly Guid IidAudioClock = new("CD63314F-3FBA-4a1b-812C-EF96358728E7");
+    public static readonly Guid IidEndpointVolume = new("5CDF2C82-841E-4546-9722-0CF74078229A");
+    public const uint HardwareVolume = 1;           // ENDPOINT_HARDWARE_SUPPORT_VOLUME
 
     private static readonly Guid DeviceProps = new("a45c254e-df1c-4efd-8020-67d146a850e0");
     public static readonly PropertyKey FriendlyName = new(DeviceProps, 14);           // "Speakers (Topping D90)"

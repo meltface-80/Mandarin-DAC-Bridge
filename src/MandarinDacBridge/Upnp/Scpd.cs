@@ -82,7 +82,7 @@ internal static class Scpd
             new("PresetNameList", "string"),
             new("Mute", "boolean"),
             new("Volume", "ui2", Range: (0, 100, 1)),
-            new("VolumeDB", "i2", Range: (0, 0, 1)),
+            new("VolumeDB", "i2", Range: (-32767, 0, 1)),
             new("LastChange", "string", Evented: true),
             new("A_ARG_TYPE_Channel", "string", Allowed: ["Master"]),
             new("A_ARG_TYPE_InstanceID", "ui4"),

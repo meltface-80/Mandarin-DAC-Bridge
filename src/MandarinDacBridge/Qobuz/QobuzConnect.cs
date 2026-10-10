@@ -20,7 +20,8 @@ using System.Text.Json;
 
 namespace MandarinDacBridge.Qobuz;
 
-internal sealed record QobuzSpeaker(string Id, string Key, string Name, string DescriptionUrl, string Ip, int Port);
+// FixedVolume: the DAC has no volume of its own for the Qobuz app to set (it stays at 100%).
+internal sealed record QobuzSpeaker(string Id, string Key, string Name, string DescriptionUrl, string Ip, int Port, bool FixedVolume = true);
 
 internal sealed class QobuzConnect : IDisposable
 {
@@ -175,7 +176,7 @@ internal sealed class QobuzConnect : IDisposable
             sb.AppendLine($"    dlna_ip: {Q(s.Ip)}");
             sb.AppendLine($"    dlna_port: {s.Port}");
             sb.AppendLine($"    dlna_description_url: {Q(s.DescriptionUrl)}");
-            sb.AppendLine("    dlna_fixed_volume: true");
+            sb.AppendLine($"    dlna_fixed_volume: {(s.FixedVolume ? "true" : "false")}");
             sb.AppendLine($"    http_port: {WebPort + 1 + list.IndexOf(s)}");
             sb.AppendLine($"    proxy_port: {FirstProxyPort + list.IndexOf(s)}");
         }

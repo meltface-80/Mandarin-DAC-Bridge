@@ -108,6 +108,9 @@
   .btn { border: 1px solid var(--gold-dim); background: var(--wash); border-radius: 10px; padding: 7px 14px; cursor: pointer; font-size: 13.5px; flex: none; }
   .btn:hover { border-color: var(--gold); }
   .foot { margin-top: 22px; color: var(--muted); font-size: 12.5px; }
+  .vol { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .vol input[type=range] { width: 180px; max-width: 100%; accent-color: var(--gold); }
+  .vol output { font-family: var(--mono); font-size: 13px; min-width: 3.2em; text-align: right; }
   header .nowlink { color: var(--gold); text-decoration: none; font-size: 13px; border: 1px solid var(--gold-dim); border-radius: 999px; padding: 5px 12px; white-space: nowrap; }
   header .nowlink:hover { border-color: var(--gold); }
 
@@ -369,7 +372,10 @@ async function postServices(body) {
   refresh();
 }
 
+let volMoved = 0;   // when the volume slider last moved: the sheet isn't redrawn under it
+
 function renderSheet() {
+  if (Date.now() - volMoved < 1500) return;
   const d = data.dacs.find((x) => x.id === openId);
   if (!d) { closeSheet(); return; }
   const s = state(d), p = d.player || {}, c = d.control || {};
@@ -378,7 +384,7 @@ function renderSheet() {
   let dsd = [];
   if (d.dsdNative && d.dsdNative.length) dsd.push("Native DSD (" + d.dsdNative.map(kHz).join(", ") + ")");
   if (d.dopRates && d.dopRates.length) dsd.push("DoP up to " + dsdOf(Math.max(...d.dopRates)) + " if the DAC decodes DoP");
-  const vol = d.volume == null ? "" : `<dt>Mac volume</dt><dd>${Math.round(d.volume * 100)}%${d.volume < 0.999 ? ' <span class="hint">— set it to 100% in Audio MIDI Setup for bit-perfect</span>' : ""}</dd>`;
+  const vol = d.volumeAvailable || d.volume == null ? "" : `<dt>Mac volume</dt><dd>${Math.round(d.volume * 100)}%${d.volume < 0.999 ? ' <span class="hint">— set it to 100% in Audio MIDI Setup for bit-perfect</span>' : ""}</dd>`;
   const playing = p.transport && p.transport !== "STOPPED" && p.transport !== "NO_MEDIA_PRESENT";
   const blocked = c.blocked ? `<div class="meta">Kept ${esc(c.blocked.name)} out (${esc(c.blocked.action)}, ${Math.round((Date.now() - c.blocked.at) / 1000)} s ago)</div>` : "";
 
@@ -411,6 +417,17 @@ function renderSheet() {
     </dl>
 
     <h3>Settings</h3>
+    ${d.volumeAvailable ? `<div class="row">
+      <div><div class="lbl">Volume</div><div class="hint">${d.volumeMode === "fixed"
+        ? "Fixed: left where it is. The apps' volume controls don't change it."
+        : "The DAC's own volume, set in the DAC (still bit-perfect): by the apps' volume controls, and here."}</div></div>
+      <div class="vol">
+        ${d.volumeMode !== "fixed" && d.level != null ? `<input type="range" id="s-vol" min="0" max="100" step="1" value="${d.level}" aria-label="Volume"><output id="s-volv">${d.level}%</output>` : ""}
+        <div class="seg" role="group" aria-label="Volume control">
+          <button data-vol="dac" aria-pressed="${d.volumeMode !== "fixed"}">Apps</button><button data-vol="fixed" aria-pressed="${d.volumeMode === "fixed"}">Fixed</button>
+        </div>
+      </div>
+    </div>` : ""}
     <div class="row">
       <div><div class="lbl">Bridge this DAC</div><div class="hint">Off: the bridge lets go and the Mac or other apps can use it.</div></div>
       <button class="switch" role="switch" aria-checked="${d.enabled}" aria-label="Bridge this DAC" id="s-enabled"></button>
@@ -426,18 +443,33 @@ function renderSheet() {
       <button class="switch" role="switch" aria-checked="${!!d.share}" aria-label="Share when idle" id="s-share"></button>
     </div>
     ${c.owner && d.enabled ? `<div class="row"><div><div class="lbl">Hand over</div><div class="hint">Lets another app take this DAC now, even while ${esc(c.owner)} holds it.</div></div><button class="btn" id="s-release">Release</button></div>` : ""}
-    <div class="foot">Volume is fixed at 100% for bit-perfect playback: use the DAC's or amplifier's volume.</div>`;
+    <div class="foot">${d.volumeAvailable
+      ? "The volume is applied in the DAC itself, so playback stays bit-perfect."
+      : "This DAC has no volume of its own: the sound goes at 100%, bit-perfect. Use the amplifier's volume."}</div>`;
 
   $("#close").onclick = closeSheet;
   $("#s-enabled").onclick = () => post(`/api/dacs/${d.id}/settings`, { enabled: !d.enabled });
   $("#s-share").onclick = () => post(`/api/dacs/${d.id}/settings`, { share: !d.share });
   for (const b of document.querySelectorAll("[data-dsd]")) b.onclick = () => post(`/api/dacs/${d.id}/settings`, { dsd: b.dataset.dsd });
+  for (const b of document.querySelectorAll("[data-vol]")) b.onclick = () => post(`/api/dacs/${d.id}/settings`, { volume: b.dataset.vol });
+  const vs = $("#s-vol");
+  if (vs) {
+    let timer = 0;
+    const send = () => fetch(`/api/dacs/${d.id}/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ level: +vs.value }) }).catch(() => {});
+    vs.oninput = () => {
+      volMoved = Date.now();
+      $("#s-volv").textContent = vs.value + "%";
+      if (!timer) timer = setTimeout(() => { timer = 0; send(); }, 120);
+    };
+    vs.onchange = () => { volMoved = Date.now(); send(); };
+  }
   const r = $("#s-release");
   if (r) r.onclick = () => post(`/api/dacs/${d.id}/release`, {});
 }
 
 function openSheet(id) {
   openId = id;
+  volMoved = 0;
   renderSheet();
   $("#sheet").classList.add("open");
   document.body.style.overflow = "hidden";

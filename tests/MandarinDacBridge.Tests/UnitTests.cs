@@ -556,3 +556,49 @@ public class MacTests
         Assert.Equal(-8388608 << 8, Mac.MacSource.ToInt(-1.5f));
     }
 }
+
+public class VolumeTests
+{
+    [Fact]
+    public void TheCurve_IsAlsamixers_AndGoesBothWays()
+    {
+        // A wide range (the DragonFly's kind): steps that sound alike, 0 at the bottom, 100 at the top.
+        Assert.Equal(0, Audio.VolumeCurve.ToLevel(-127.5, -127.5, 0), 6);
+        Assert.Equal(1, Audio.VolumeCurve.ToLevel(0, -127.5, 0), 6);
+        foreach (var level in new[] { 0.0, 0.05, 0.25, 0.5, 0.75, 1 })
+            Assert.Equal(level, Audio.VolumeCurve.ToLevel(Audio.VolumeCurve.ToDb(level, -127.5, 0), -127.5, 0), 6);
+        Assert.InRange(Audio.VolumeCurve.ToDb(0.5, -127.5, 0), -18.5, -17.5);    // half way is about -18 dB
+        // A small range (24 dB or less): linear in dB.
+        Assert.Equal(-12, Audio.VolumeCurve.ToDb(0.5, -24, 0), 6);
+        // "Muted" at the bottom (ALSA's -99999.99 dB): no floor, and 0 is silence.
+        Assert.Equal(-99999.99, Audio.VolumeCurve.ToDb(0, -99999.99, 0), 6);
+        Assert.InRange(Audio.VolumeCurve.ToDb(0.5, -99999.99, 0), -18.1, -17.9);
+        // A Squeezebox server's gain in dB.
+        Assert.Equal(100, Audio.VolumeCurve.LevelOfGainDb(0));
+        Assert.Equal(24, Audio.VolumeCurve.LevelOfGainDb(-30));
+        Assert.Equal(0, Audio.VolumeCurve.LevelOfGainDb(double.NegativeInfinity));
+    }
+
+    [Fact]
+    public void Qobuz_SetsTheVolume_OnlyOfDacsThatHaveTheirOwn()
+    {
+        var yaml = Qobuz.QobuzConnect.Config([
+            new("dac-1", "usb:1", "A (Bridge)", "http://127.0.0.1:55500/upnp/dac-1/description.xml", "127.0.0.1", 55500, FixedVolume: false),
+            new("dac-2", "usb:2", "B (Bridge)", "http://127.0.0.1:55500/upnp/dac-2/description.xml", "127.0.0.1", 55500)
+        ]);
+        var a = yaml.IndexOf("A (Bridge)", StringComparison.Ordinal);
+        var b = yaml.IndexOf("B (Bridge)", StringComparison.Ordinal);
+        Assert.Contains("dlna_fixed_volume: false", yaml[a..b]);
+        Assert.Contains("dlna_fixed_volume: true", yaml[b..]);
+    }
+}
+
+public class AlsaVolumeTests
+{
+    [Fact]
+    public void ACardThatIsntThere_HasNoVolume_AndNothingBreaks()
+    {
+        if (!OperatingSystem.IsLinux() || !File.Exists("/usr/share/alsa/alsa.conf")) return;
+        Assert.Null(Audio.AlsaVolume.Open("hw:CARD=NoSuchDac,DEV=0"));
+    }
+}

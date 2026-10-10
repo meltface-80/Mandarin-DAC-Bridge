@@ -82,7 +82,7 @@ namespace MandarinDacBridge
                 return service switch
                 {
                     "AVTransport" => Control.AvtState(b.Renderer),
-                    "RenderingControl" => Control.RcsState(b.Renderer),
+                    "RenderingControl" => Control.RcsState(b),
                     _ => Control.CmsState(b)
                 };
             });

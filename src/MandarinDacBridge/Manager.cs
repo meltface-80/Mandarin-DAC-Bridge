@@ -26,6 +26,8 @@ internal sealed class DacSettings
     public string Name { get; set; } = "";
     // Let go of the DAC while nothing plays, for Roon Bridge or another player on this machine.
     public bool Share { get; set; }
+    // "dac": the apps (and the page) set the DAC's own volume, where it has one. "fixed": it is left alone.
+    public string Volume { get; set; } = "dac";
 }
 
 // The ways in besides UPnP (always on). Null: not chosen yet, the environment's default holds.
@@ -57,6 +59,9 @@ internal sealed class SettingsPatch
     public string? Dsd { get; set; }
     public string? Name { get; set; }
     public bool? Share { get; set; }
+    public string? Volume { get; set; }
+    // Not kept: the DAC's volume, set now (0–100).
+    public int? Level { get; set; }
 }
 
 internal sealed class Settings
@@ -80,7 +85,7 @@ internal sealed class Settings
         lock (gate)
         {
             var s = data.Dacs.GetValueOrDefault(id);
-            return s == null ? new DacSettings() : new DacSettings { Enabled = s.Enabled, Dsd = s.Dsd, Name = s.Name, Share = s.Share };
+            return s == null ? new DacSettings() : new DacSettings { Enabled = s.Enabled, Dsd = s.Dsd, Name = s.Name, Share = s.Share, Volume = s.Volume };
         }
     }
 
@@ -93,6 +98,7 @@ internal sealed class Settings
             if (p.Dsd is "auto" or "dop" or "pcm") s.Dsd = p.Dsd;
             if (p.Name != null) s.Name = p.Name.Trim()[..Math.Min(60, p.Name.Trim().Length)];
             if (p.Share is { } sh) s.Share = sh;
+            if (p.Volume is "dac" or "fixed") s.Volume = p.Volume;
             data.Dacs[id] = s;
             Save();
             return s;
@@ -152,8 +158,14 @@ internal sealed class Bridge : IDisposable
     public Arbiter Arbiter { get; }
     public event Action? Changed;
     public event Action? Gone;
+    // The DAC's volume moved (from an app, the page, or elsewhere on this machine): 0–100.
+    public event Action<int>? VolumeChanged;
     private bool wasExclusive;
     private readonly Timer shareTimer;
+    private int? level;
+
+    // The DAC's own volume (Audio/Volume.cs), where it has one.
+    public IDacVolume Volume { get; }
 
     public SlimPlayer? Slim { get; set; }
     public SoloistPlayer? Spotify { get; set; }
@@ -183,7 +195,46 @@ internal sealed class Bridge : IDisposable
         };
         Sink.Gone += () => ThreadPool.QueueUserWorkItem(_ => Gone?.Invoke());
         if (settings.For(Id).Share) { sharing = true; Sink.Share(true); }
-        shareTimer = new Timer(_ => ShareIfIdle(), null, 1000, 1000);
+        Volume = VolumeFactory.Create(dev, config);
+        if (Volume.Available)
+        {
+            level = Volume.Read();
+            Log($"volume: the DAC's own ({Volume.Control}){(level is { } l ? $", at {l}%" : "")}");
+        }
+        shareTimer = new Timer(_ => { ShareIfIdle(); RefreshVolume(); }, null, 1000, 1000);
+    }
+
+    // The apps set the DAC's own volume: it has one, and it isn't set to be left alone.
+    public bool VolumeOn => Volume.Available && settings.For(Id).Volume != "fixed";
+
+    // 0–100 while the volume is the apps' to set; null when it stays where it is (100 to the apps).
+    public int? Level => VolumeOn ? level : null;
+
+    public double? LevelDb => VolumeOn ? Volume.ReadDb() : null;
+
+    public bool SetLevel(int to)
+    {
+        if (!VolumeOn) return false;
+        to = Math.Clamp(to, 0, 100);
+        if (!Volume.Set(to)) { Log($"volume: couldn't set it to {to}%"); return false; }
+        Moved(Volume.Read() ?? to);
+        return true;
+    }
+
+    // Changed elsewhere too (alsamixer, the Mac's or Windows' own volume): followed every second.
+    private void RefreshVolume()
+    {
+        if (!VolumeOn) return;
+        try { if (Volume.Read() is { } v) Moved(v); }
+        catch (Exception) { /* the DAC is going */ }
+    }
+
+    private void Moved(int v)
+    {
+        if (v == level) return;
+        level = v;
+        VolumeChanged?.Invoke(v);
+        Notify();
     }
 
     public bool Idle => Renderer.Transport is "STOPPED" or "NO_MEDIA_PRESENT" && !Arbiter.Holding(false);
@@ -236,6 +287,7 @@ internal sealed class Bridge : IDisposable
     public void Dispose()
     {
         shareTimer.Dispose();
+        Volume.Dispose();
         Slim?.Dispose();
         Spotify?.Dispose();
         Caldera?.Dispose();
@@ -390,7 +442,7 @@ internal sealed class Manager(Config config) : IDisposable
     private List<Qobuz.QobuzSpeaker> QobuzSpeakers() =>
         Bridges().OrderBy(b => b.Dev.Key, StringComparer.Ordinal)
             .Select(b => new Qobuz.QobuzSpeaker(b.Id, b.Dev.Key, b.FriendlyName(),
-                $"http://127.0.0.1:{config.Port}/upnp/{b.Id}/description.xml", "127.0.0.1", config.Port))
+                $"http://127.0.0.1:{config.Port}/upnp/{b.Id}/description.xml", "127.0.0.1", config.Port, FixedVolume: !b.VolumeOn))
             .ToList();
 
     public async Task InstallQobuz()
@@ -583,6 +635,13 @@ internal sealed class Manager(Config config) : IDisposable
             if (b.Spotify != null) Connect(b, restartSpotify: true);
         }
         if (patch.Share is { } share && b != null) b.SetShare(share);
+        if (patch.Volume != null && b != null)
+        {
+            b.Log(b.VolumeOn ? "volume: the apps set the DAC's own volume" : "volume: left where it is (fixed)");
+            qobuz?.Changed();
+            b.Notify();
+        }
+        if (patch.Level is { } lv && b != null) b.SetLevel(lv);
         return s;
     }
 
@@ -610,7 +669,7 @@ internal sealed class Manager(Config config) : IDisposable
                 Id = dev.Id, Name = s.Name != "" ? s.Name : dev.Name, DeviceName = dev.Name, Manufacturer = dev.Manufacturer, Model = dev.Model,
                 Transport = dev.Transport, Usb = dev.Usb, Rates = dev.Rates, Bits = dev.Bits, Channels = dev.Channels, Formats = dev.Formats,
                 DsdNative = dev.DsdNative, DopRates = dev.DopRates, CurrentRate = dev.CurrentRate, Volume = dev.Volume,
-                Enabled = s.Enabled, Dsd = s.Dsd, Platform = config.Platform, Holder = holder, Share = s.Share
+                Enabled = s.Enabled, Dsd = s.Dsd, Platform = config.Platform, Holder = holder, Share = s.Share, VolumeMode = s.Volume
             };
             if (b != null)
             {
@@ -623,6 +682,9 @@ internal sealed class Manager(Config config) : IDisposable
                 v.Spotify = b.Spotify?.Status;
                 v.Caldera = b.Caldera?.Status;
                 v.Holder = b.Sink.Exclusive ? "" : holder;
+                v.VolumeAvailable = b.Volume.Available;
+                v.Level = b.Level;
+                v.LevelDb = b.Level != null ? b.LevelDb : null;
                 v.Player = b.Renderer.Now();
                 var active = b.Renderer.IsActive;
                 // Caldera plays to the DAC by itself: what it plays is shown, and who.

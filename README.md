@@ -171,7 +171,9 @@ The bridge speaks the Squeezebox protocol (SlimProto) itself instead of running 
 program, because squeezelite opens the DAC itself, and the bridge holds it. The server's stream
 goes through ffmpeg like a UPnP track. FLAC, PCM (WAV, AIFF, raw), MP3 and Ogg are taken as they
 come, and gapless: the bridge asks for the next track when it has read the current one. DSD is
-converted to PCM by the server. In LMS, set the player's volume control to *fixed at 100%*. Title,
+converted to PCM by the server. On a DAC with a volume of its own, LMS's volume sets the DAC's (see
+[Volume](#volume)); for a DAC feeding an amplifier, set the player's volume control in LMS to *fixed at
+100%*. Title,
 artist and cover come from LMS's JSON-RPC (Roon's Squeezebox support has none, so its tracks show
 just the format).
 
@@ -204,7 +206,9 @@ reader, so the DAC's clock sets the pace: nothing is resampled and nothing drift
 24-bit audio arrive unchanged. Soloist's WebSocket (on 127.0.0.1) tells the bridge what's playing
 (title, artists, album, cover, position) and when Spotify plays, pauses or stops. If another app has
 the DAC when Spotify starts, the bridge tells Soloist to pause, so the Spotify app shows it didn't
-play. The volume stays at 100% for bit-perfect playback: a change in the Spotify app is put back.
+play. On a DAC with a volume of its own, the Spotify app's volume sets the DAC's, and a change made
+elsewhere moves Spotify's slider too. On a DAC without one, Spotify's volume stays at 100%
+(bit-perfect): a change in the Spotify app is put back.
 
 Soloist takes the API key only on its command line, so other accounts on the same machine could read
 it from the process list. On a machine you share with others, run the bridge in Docker. On a Mac,
@@ -337,10 +341,31 @@ never touches that path.
   DAC, and keeps it for 10 seconds after it stops or pauses, so it doesn't lose the DAC between
   tracks. Status reads are open to every app. The DAC's page shows who is in control and who was
   kept out. **Release** hands the DAC over at once.
-* **Volume** stays at 100% (bit-perfect). Use the DAC's or amplifier's volume. Mute works.
+* **Volume.** See [below](#volume). Mute works.
 
 `mandarin-dac-bridge --list` prints the DACs found and what each takes, and every other output it saw with why it was passed over. `mandarin-dac-bridge --diagnose` prints everything the machine reports about its sound devices. The page's API is
 `GET /api/dacs`, and `GET`/`POST /api/services` for the optional connections. Each DAC's UPnP description is at `/upnp/<id>/description.xml`.
+
+### Volume
+
+Many USB DACs, headphone DACs above all (the AudioQuest DragonFly, for one), have no volume knob:
+the computer sets their volume, and the DAC applies it in its own chip, after the samples arrive.
+The stream stays bit-perfect. Where a DAC has such a volume, the bridge uses it:
+
+* the apps' volume controls set it: Audirvana, Mandarin and other UPnP controllers, the Spotify
+  app, the Qobuz app and LMS;
+* the DAC's page has a slider;
+* a change made elsewhere on the machine (alsamixer, the Mac's or Windows' own volume) shows up
+  on the page and in the apps.
+
+While another app is playing, a different app's volume change is refused, as for everything else.
+On the DAC's page, **Volume: Fixed** leaves the volume where it is, and the apps see 100: use it for
+a DAC feeding an amplifier with its own volume. A DAC without a volume of its own always plays at
+100% (the bridge never changes the samples to make it quieter): use the amplifier's volume.
+
+The DAC's volume is the ALSA mixer control alsamixer shows for the card (usually *PCM*) on Linux,
+Core Audio's device volume on a Mac, and the endpoint volume on Windows when the DAC applies it
+itself.
 
 ### Settings (all optional)
 
@@ -389,8 +414,8 @@ as user environment variables (`setx PORT 55501`) and sign in again. In Docker, 
   `mandarin-dac-bridge --loopback-test` checks the output itself.
 * **Qobuz doesn't list the DAC.** Check *Connections* on the page: it says whether QobuzProxy is
   installed, running and signed in.
-* **The Mac's volume for the DAC** is shown on the DAC's page. Set it to 100% in Audio MIDI Setup
-  for bit-perfect playback.
+* **The volume doesn't move, or there's no slider.** The DAC has no volume of its own that the
+  machine can set (or the DAC's page is set to *Fixed*). Use the amplifier's volume.
 
 ---
 

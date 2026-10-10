@@ -90,15 +90,17 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         return v.GetProperty("id").GetString()!;
     }
 
-    private static object Dev(string spec, int[]? dsdNative = null, int[]? rates = null) => new[]
+    private static object Dev(string spec, int[]? dsdNative = null, int[]? rates = null, int? volume = null)
     {
-        new Dictionary<string, object>
+        var d = new Dictionary<string, object>
         {
             ["key"] = "test:" + spec, ["name"] = "Test DAC", ["manufacturer"] = "ALSA", ["model"] = "null", ["transport"] = "USB",
             ["usb"] = "0000:0000", ["spec"] = spec, ["rates"] = rates ?? new[] { 44100, 48000, 88200, 96000, 176400, 192000 },
             ["bits"] = new[] { 16, 24, 32 }, ["channels"] = 2, ["formats"] = new[] { "S32_LE · 2 ch" }, ["dsdNative"] = dsdNative ?? Array.Empty<int>()
-        }
-    };
+        };
+        if (volume is { } v) d["testVolume"] = v;
+        return new[] { d };
+    }
 
     private async Task<JsonDocument> Dacs() => JsonDocument.Parse(await Http.GetStringAsync($"http://127.0.0.1:{port}/api/dacs"));
 
@@ -320,6 +322,9 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Contains("<title>DAC Bridge</title>", html);
         var font = await Http.GetByteArrayAsync($"http://127.0.0.1:{port}/fonts/manrope.woff2");
         Assert.True(font.Length > 10000);
+        // A DAC with no volume of its own: 100 to the apps, nothing to set on the page.
+        Assert.False((await Dac()).GetProperty("volumeAvailable").GetBoolean());
+        Assert.Equal("100", (await Soap(id, "RenderingControl", Rcs, "GetVolume", new() { ["InstanceID"] = "0", ["Channel"] = "Master" })).Out["CurrentVolume"]);
         using var post = await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"dsd\":\"dop\"}"));
         Assert.Equal("dop", (await Dac()).GetProperty("dsd").GetString());
         Assert.Equal(404, (int)(await Http.GetAsync($"http://127.0.0.1:{port}/../etc/passwd")).StatusCode);
@@ -330,6 +335,78 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
     {
         using var res = await Http.PostAsync($"http://127.0.0.1:{port}{path}", new StringContent(json, Encoding.UTF8, "application/json"));
         return JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
+    }
+
+    // ------------------------------------------------------------ the DAC's own volume
+
+    private const string Rcs = "urn:schemas-upnp-org:service:RenderingControl:1";
+
+    private async Task<string> Volume(string id) =>
+        (await Soap(id, "RenderingControl", Rcs, "GetVolume", new() { ["InstanceID"] = "0", ["Channel"] = "Master" })).Out["CurrentVolume"];
+
+    private Task<(int Status, string Text, Dictionary<string, string> Out)> SetVolume(string id, string v, string ua = Aud) =>
+        Soap(id, "RenderingControl", Rcs, "SetVolume", new() { ["InstanceID"] = "0", ["Channel"] = "Master", ["DesiredVolume"] = v }, ua);
+
+    [Fact]
+    public async Task Volume_IsTheDacsOwn_SetByTheAppsThePageAndTheServer_OrLeftFixed()
+    {
+        var id = await Start(Dev("clock", volume: 40));
+        var dac = await Dac();
+        Assert.True(dac.GetProperty("volumeAvailable").GetBoolean());
+        Assert.Equal("dac", dac.GetProperty("volumeMode").GetString());
+        Assert.Equal(40, dac.GetProperty("level").GetInt32());
+        Assert.Equal("40", await Volume(id));
+
+        // An app's volume control (UPnP) sets it; the page and the app both see it.
+        Assert.Equal(200, (await SetVolume(id, "25")).Status);
+        Assert.Equal("25", await Volume(id));
+        Assert.Equal(25, (await Dac()).GetProperty("level").GetInt32());
+        var db = (await Soap(id, "RenderingControl", Rcs, "GetVolumeDB", new() { ["InstanceID"] = "0", ["Channel"] = "Master" })).Out["CurrentVolume"];
+        Assert.True(int.Parse(db) < 0);
+        Assert.Contains("<errorCode>402</errorCode>", (await SetVolume(id, "loud")).Text);
+
+        // The page's slider.
+        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"level\":60}"));
+        Assert.Equal("60", await Volume(id));
+
+        // A Squeezebox server's volume (audg, "adjust" on): -30 dB, as a level on a 60 dB curve.
+        var lms = new TcpListener(IPAddress.Loopback, 0);
+        lms.Start();
+        try
+        {
+            await Post("/api/services", $"{{\"squeezelite\":true,\"lmsServer\":\"127.0.0.1:{((IPEndPoint)lms.LocalEndpoint).Port}\"}}");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            using var player = await lms.AcceptTcpClientAsync(cts.Token);
+            var s = player.GetStream();
+            var got = new System.Collections.Concurrent.ConcurrentQueue<(string Op, byte[] Data)>();
+            _ = ReadPlayer(s, got, cts.Token);
+            await Until(() => Task.FromResult(got.Any(x => x.Op == "HELO")));
+            static byte[] Audg(bool adjust, double db)
+            {
+                var b = new byte[18];
+                b[8] = (byte)(adjust ? 1 : 0);
+                uint g = (uint)Math.Round(65536 * Math.Pow(10, db / 20));
+                BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(10), g);
+                BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(14), g);
+                return b;
+            }
+            await ToPlayer(s, "audg", Audg(false, -30));     // the server's volume fixed at 100%: nothing changes
+            await Task.Delay(300);
+            Assert.Equal("60", await Volume(id));
+            await ToPlayer(s, "audg", Audg(true, -30));
+            await Until(async () => await Volume(id) == "24");
+        }
+        finally { lms.Stop(); }
+
+        // Fixed: left where it is; the apps see 100 and can't move it.
+        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"fixed\"}"));
+        dac = await Dac();
+        Assert.Equal("fixed", dac.GetProperty("volumeMode").GetString());
+        Assert.Equal(JsonValueKind.Null, dac.GetProperty("level").ValueKind);
+        Assert.Equal("100", await Volume(id));
+        Assert.Equal(200, (await SetVolume(id, "5")).Status);
+        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"dac\"}"));
+        Assert.Equal("24", await Volume(id));
     }
 
     // ------------------------------------------------------------ Squeezebox (a pretend Lyrion Music Server)

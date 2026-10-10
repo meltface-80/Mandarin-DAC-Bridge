@@ -87,6 +87,21 @@ internal sealed partial class Arbiter(TimeSpan grace, int mandarinPort)
         }
     }
 
+    // Volume and mute: refused while another app has the DAC, like a claim, but without taking it (turning the
+    // volume while nothing plays doesn't keep the other app out).
+    public string? Check(Caller caller, string action, bool active)
+    {
+        lock (gate)
+        {
+            if (Owner != null && Owner.Key != caller.Key && (active || Now - lastActive < grace.TotalMilliseconds))
+            {
+                LastBlocked = new Blocked(caller.Name, action, Now);
+                return $"Transport is locked: {Owner.Name} is using this DAC";
+            }
+            return null;
+        }
+    }
+
     public void Touch() { lock (gate) lastActive = Now; }
 
     public void Release() { lock (gate) { Owner = null; lastActive = 0; } }

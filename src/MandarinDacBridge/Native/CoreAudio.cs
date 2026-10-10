@@ -103,6 +103,9 @@ internal static unsafe partial class CoreAudio
     [LibraryImport(Lib, EntryPoint = "AudioObjectHasProperty")]
     public static partial byte HasProperty(uint obj, in PropertyAddress address);
 
+    [LibraryImport(Lib, EntryPoint = "AudioObjectIsPropertySettable")]
+    public static partial int IsPropertySettable(uint obj, in PropertyAddress address, byte* settable);
+
     [LibraryImport(Lib, EntryPoint = "AudioDeviceCreateIOProcID")]
     public static partial int CreateIOProcId(uint device,
         delegate* unmanaged<uint, void*, AudioBufferList*, void*, AudioBufferList*, void*, void*, int> proc, void* clientData, out IntPtr procId);

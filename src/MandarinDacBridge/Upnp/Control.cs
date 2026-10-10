@@ -2,6 +2,7 @@
 // events carry. Every request that changes something goes past the arbiter
 // first: a controller that doesn't own the DAC while it is in use is refused
 // with 705.
+using System.Globalization;
 using System.Text;
 
 namespace MandarinDacBridge.Upnp;
@@ -10,6 +11,9 @@ internal static class Control
 {
     private static readonly HashSet<string> Changes =
         ["SetAVTransportURI", "SetNextAVTransportURI", "Play", "Pause", "Stop", "Seek", "Next", "Previous", "SetPlayMode", "SetVolume", "SetMute", "SelectPreset"];
+
+    // Of those, the ones that don't take the DAC (refused only while another app has it).
+    private static readonly HashSet<string> Adjustments = ["SetVolume", "SetMute", "SelectPreset"];
 
     private static readonly string[] Mimes =
     [
@@ -75,8 +79,15 @@ internal static class Control
         };
     }
 
-    public static Dictionary<string, string> RcsState(Renderer r) =>
-        new() { ["Volume"] = "100", ["Mute"] = r.Muted ? "1" : "0", ["VolumeDB"] = "0", ["PresetNameList"] = "FactoryDefaults" };
+    public static Dictionary<string, string> RcsState(Bridge b) =>
+        new() { ["Volume"] = Volume(b), ["Mute"] = b.Renderer.Muted ? "1" : "0", ["VolumeDB"] = VolumeDb(b), ["PresetNameList"] = "FactoryDefaults" };
+
+    // The DAC's own volume while the apps set it; otherwise 100 (the stream is untouched either way).
+    private static string Volume(Bridge b) => (b.Level ?? 100).ToString(CultureInfo.InvariantCulture);
+
+    // In 1/256 dB, as RenderingControl has it.
+    private static string VolumeDb(Bridge b) =>
+        b.LevelDb is { } db ? ((int)Math.Round(Math.Clamp(db, -127.99, 0) * 256)).ToString(CultureInfo.InvariantCulture) : "0";
 
     public static Dictionary<string, string> CmsState(Bridge b) =>
         new() { ["SourceProtocolInfo"] = "", ["SinkProtocolInfo"] = b.ProtocolInfo(), ["CurrentConnectionIDs"] = "0" };
@@ -108,7 +119,7 @@ internal static class Control
         {
             var uri = action == "SetAVTransportURI" ? Arg("CurrentURI") : action == "SetNextAVTransportURI" ? Arg("NextURI") : null;
             var caller = b.Arbiter.Identify(ip, userAgent, uri);
-            var refusal = b.Arbiter.Claim(caller, action, r.IsActive);
+            var refusal = Adjustments.Contains(action) ? b.Arbiter.Check(caller, action, r.IsActive) : b.Arbiter.Claim(caller, action, r.IsActive);
             if (refusal != null)
             {
                 b.Log($"refused {caller.Name}'s {action}: {b.Arbiter.Owner?.Name} is using the DAC");
@@ -159,15 +170,19 @@ internal static class Control
             case "GetTransportSettings": return new() { ["PlayMode"] = "NORMAL", ["RecQualityMode"] = "NOT_IMPLEMENTED" };
             case "GetCurrentTransportActions": return new() { ["Actions"] = ActionsFor(r) };
 
-            // ---- RenderingControl: the volume is fixed at 100 (bit-perfect); mute works.
+            // ---- RenderingControl: the DAC's own volume, where it has one (set in the DAC: bit-perfect); else 100. Mute works.
             case "ListPresets": return new() { ["CurrentPresetNameList"] = "FactoryDefaults" };
             case "SelectPreset": return none;
             case "GetMute": return new() { ["CurrentMute"] = r.Muted ? "1" : "0" };
             case "SetMute": r.SetMute(Arg("DesiredMute").Trim().ToLowerInvariant() is "1" or "true" or "yes"); return none;
-            case "GetVolume": return new() { ["CurrentVolume"] = "100" };
-            case "SetVolume": b.Notify(); return none;
-            case "GetVolumeDB": return new() { ["CurrentVolume"] = "0" };
-            case "GetVolumeDBRange": return new() { ["MinValue"] = "0", ["MaxValue"] = "0" };
+            case "GetVolume": return new() { ["CurrentVolume"] = Volume(b) };
+            case "SetVolume":
+                if (!int.TryParse(Arg("DesiredVolume").Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var want) || want < 0 || want > 100)
+                    throw new UpnpException(402, "Invalid Args");
+                if (!b.SetLevel(want)) b.Notify();
+                return none;
+            case "GetVolumeDB": return new() { ["CurrentVolume"] = VolumeDb(b) };
+            case "GetVolumeDBRange": return new() { ["MinValue"] = b.Level != null ? "-32767" : "0", ["MaxValue"] = "0" };
 
             // ---- ConnectionManager
             case "GetProtocolInfo": return new() { ["Source"] = "", ["Sink"] = b.ProtocolInfo() };

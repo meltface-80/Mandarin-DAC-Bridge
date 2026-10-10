@@ -17,7 +17,9 @@
 // falls back to PulseAudio. "playing" starts the DAC (if the arbiter lets
 // Spotify have it: otherwise Soloist is told to pause, so the Spotify app
 // shows it didn't play); "paused" and "idle" pause and stop it. The volume
-// stays at 100%: bit-perfect, as for every other way in.
+// is the DAC's own, where it has one (set in the DAC: bit-perfect): Spotify's
+// slider moves it, and a change made elsewhere is passed back to Spotify.
+// Otherwise it stays at 100%.
 //
 // Each user brings their own Soloist API key (Spotify for Developers), and
 // Soloist itself: it may not be redistributed, so the bridge downloads it
@@ -75,6 +77,7 @@ internal sealed class SoloistPlayer : IDisposable
         liveName = "spotify/" + bridge.Id;
         caller = new Caller("spotify|" + bridge.Id, "Spotify", "127.0.0.1");
         Sources.RegisterLive(liveName, Open);
+        bridge.VolumeChanged += TellVolume;
         runner = new Thread(Run) { IsBackground = true, Name = "soloist " + bridge.Id };
         runner.Start();
     }
@@ -204,7 +207,7 @@ internal sealed class SoloistPlayer : IDisposable
         foreach (var a in new[]
                  {
                      "--device-name", bridge.FriendlyName(), "--api-key", s.ApiKey, "--data-dir", dataDir, "--cache-dir", cacheDir,
-                     "--initial-volume", "100", "--ws", "127.0.0.1:0"
+                     "--initial-volume", (bridge.Level ?? 100).ToString(System.Globalization.CultureInfo.InvariantCulture), "--ws", "127.0.0.1:0"
                  })
             psi.ArgumentList.Add(a);
         foreach (var (k, v) in PrivateEnvironment()) psi.Environment[k] = v;
@@ -452,7 +455,7 @@ internal sealed class SoloistPlayer : IDisposable
             case "playback_state":
                 if (m.TryGetProperty("item", out var item)) SetItem(item);
                 if (m.TryGetProperty("position", out var pos)) SetPosition(pos);
-                KeepVolume(m);
+                if (!bridge.VolumeOn) KeepVolume(m);
                 Apply(Str(m, "status"));
                 break;
             case "track_changed":
@@ -465,7 +468,7 @@ internal sealed class SoloistPlayer : IDisposable
                 if (m.TryGetProperty("position", out var p)) SetPosition(p);
                 break;
             case "volume_changed":
-                KeepVolume(m);
+                if (bridge.VolumeOn) TakeVolume(m); else KeepVolume(m);
                 break;
             case "error":
                 Log("Soloist: " + Str(m, "message"));
@@ -492,11 +495,31 @@ internal sealed class SoloistPlayer : IDisposable
         }
     }
 
-    // Bit-perfect: Spotify's volume stays at 100% (use the DAC's or the amplifier's).
+    // A DAC without a volume of its own: Spotify's stays at 100% (use the amplifier's), bit-perfect.
     private void KeepVolume(JsonElement m)
     {
         if (m.TryGetProperty("volume", out var v) && v.ValueKind == JsonValueKind.Number && v.GetInt32() != 100)
             _ = Command("{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":100}");
+    }
+
+    private int told = -1;     // the level last passed to Spotify (its echo is not a change)
+
+    // Spotify's slider moved: the DAC follows (unless another app has the DAC).
+    private void TakeVolume(JsonElement m)
+    {
+        if (!m.TryGetProperty("volume", out var v) || v.ValueKind != JsonValueKind.Number) return;
+        int level = Math.Clamp(v.GetInt32(), 0, 100);
+        if (level == told || level == bridge.Level) return;
+        if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) { TellVolume(bridge.Level ?? 100); return; }
+        bridge.SetLevel(level);
+    }
+
+    // The DAC's volume moved (the page, another app, the machine): Spotify's slider follows.
+    private void TellVolume(int level)
+    {
+        if (!bridge.VolumeOn || level == told) return;
+        told = level;
+        _ = Command($"{{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":{level}}}");
     }
 
     private void SetItem(JsonElement item)
@@ -566,6 +589,7 @@ internal sealed class SoloistPlayer : IDisposable
     public void Dispose()
     {
         stop.Cancel();
+        bridge.VolumeChanged -= TellVolume;
         Sources.UnregisterLive(liveName);
         runner.Join(TimeSpan.FromSeconds(8));
         if (Ours()) { try { bridge.Renderer.Stop().Wait(TimeSpan.FromSeconds(3)); } catch (Exception) { /* closing */ } }

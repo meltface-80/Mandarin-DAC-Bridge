@@ -84,6 +84,11 @@ internal sealed class DacView
     public string? SqueezeboxId { get; set; }
     public string? Spotify { get; set; }
     public string? Caldera { get; set; }
+    // The DAC's own volume: whether it has one, "dac" or "fixed", and where it is (0–100, dB) while the apps set it.
+    public bool VolumeAvailable { get; set; }
+    public string VolumeMode { get; set; } = "dac";
+    public int? Level { get; set; }
+    public double? LevelDb { get; set; }
 }
 
 internal sealed class ControlView

@@ -34,6 +34,8 @@ internal sealed class DacDevice
     public int[] DopRates { get; set; } = [];
     public int CurrentRate { get; set; }
     public double? Volume { get; set; }
+    // Tests only: a DAC with a volume control of its own, at this level.
+    public int? TestVolume { get; set; }
     public int HolderPid { get; set; }
     public string HolderName { get; set; } = "";
 }

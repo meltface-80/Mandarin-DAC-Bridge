@@ -361,8 +361,24 @@ internal sealed class SlimPlayer : IDisposable
                     try { tcp?.Close(); } catch (Exception) { /* reconnecting */ }
                 }
                 break;
-            // aude, audg (volume: fixed at 100%, bit-perfect), vers, display and the rest: nothing to do.
+            case "audg":
+                Gain(data);
+                break;
+            // aude, vers, display and the rest: nothing to do.
         }
+    }
+
+    // The server's volume: old gains (2 × 4), "adjust" (1: the player's volume is the server's to set), preamp, new
+    // gains (2 × 16.16). On a DAC with a volume of its own it goes to the DAC (bit-perfect); otherwise, or with the
+    // server's volume fixed at 100%, nothing changes. Not while another app has the DAC.
+    private void Gain(byte[] data)
+    {
+        if (data.Length < 18 || data[8] == 0 || !bridge.VolumeOn) return;
+        if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) return;
+        uint g = Math.Max(BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(10)), BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(14)));
+        double db = g == 0 ? double.NegativeInfinity : 20 * Math.Log10(g / 65536.0);
+        int level = Audio.VolumeCurve.LevelOfGainDb(db);
+        if (bridge.Level != level && bridge.SetLevel(level)) Log($"volume {level}% (from the server, {(g == 0 ? "silent" : $"{db:0.0} dB")})");
     }
 
     private void Stream(Strm s)
