@@ -45,6 +45,8 @@ internal sealed class ServiceSettings
     // The Music and Spotify apps on this Mac, through the DAC Bridge output, to this DAC (macOS).
     public bool? MacApps { get; set; }
     public string? MacDac { get; set; }
+    // Roon Bridge, downloaded from Roon Labs and run beside the bridge.
+    public bool? Roon { get; set; }
 }
 
 internal sealed class SettingsFile
@@ -112,7 +114,7 @@ internal sealed class Settings
             {
                 Squeezelite = data.Services.Squeezelite, LmsServer = data.Services.LmsServer, Spotify = data.Services.Spotify,
                 SoloistKey = data.Services.SoloistKey, Caldera = data.Services.Caldera, PlexToken = data.Services.PlexToken,
-                Qobuz = data.Services.Qobuz, MacApps = data.Services.MacApps, MacDac = data.Services.MacDac
+                Qobuz = data.Services.Qobuz, MacApps = data.Services.MacApps, MacDac = data.Services.MacDac, Roon = data.Services.Roon
             };
     }
 
@@ -128,6 +130,7 @@ internal sealed class Settings
             if (p.Qobuz is { } qb) data.Services.Qobuz = qb;
             if (p.MacApps is { } ma) data.Services.MacApps = ma;
             if (p.MacDac != null) data.Services.MacDac = p.MacDac;
+            if (p.Roon is { } rn) data.Services.Roon = rn;
             if (p.PlexToken != null) data.Services.PlexToken = p.PlexToken.Trim()[..Math.Min(512, p.PlexToken.Trim().Length)];
             Save();
         }
@@ -315,6 +318,9 @@ internal sealed class Manager(Config config) : IDisposable
     private Caldera.PlexLink? plexLink;
     private Qobuz.QobuzConnect? qobuz;
     private Mac.MacSource? mac;
+    private Roon.RoonRunner? roon;
+    private string roonDownload = "";
+    private int roonDownloading;
 
     public Settings Settings { get; } = new(config.DataDir);
     public event Action<Bridge>? Added;
@@ -331,6 +337,7 @@ internal sealed class Manager(Config config) : IDisposable
     {
         ConnectQobuz();
         ConnectMac();
+        ConnectRoon();
         Scan();
         timer = new Timer(_ => Scan(), null, config.ScanEvery, config.ScanEvery);
     }
@@ -406,6 +413,37 @@ internal sealed class Manager(Config config) : IDisposable
     public bool CalderaOn => Settings.Services().Caldera ?? config.Caldera;
     public bool QobuzOn => Settings.Services().Qobuz ?? config.Qobuz;
     public bool MacOn => OperatingSystem.IsMacOS() && (Settings.Services().MacApps ?? config.MacApps);
+    public bool RoonOn => Settings.Services().Roon ?? config.Roon;
+
+    // Roon Bridge beside the bridge, while switched on (Roon/RoonBridgeHost.cs).
+    private void ConnectRoon()
+    {
+        Roon.RoonRunner? drop = null;
+        lock (servicesGate)
+        {
+            if (RoonOn && roon == null) roon = new Roon.RoonRunner(config.DataDir);
+            else if (!RoonOn && roon != null) { drop = roon; roon = null; }
+        }
+        drop?.Dispose();
+    }
+
+    // Fetches Roon Bridge from Roon Labs (the page's Download), as RoPieee does.
+    public async Task DownloadRoon()
+    {
+        if (Interlocked.Exchange(ref roonDownloading, 1) == 1) return;
+        try
+        {
+            var v = await Roon.RoonDownload.Fetch(config.DataDir, m => roonDownload = m, CancellationToken.None);
+            roonDownload = "";
+            Log.Write($"Roon Bridge {v} from Roon Labs");
+        }
+        catch (Exception e)
+        {
+            roonDownload = "download failed: " + e.Message;
+            Log.Write("Roon Bridge: " + roonDownload);
+        }
+        finally { Volatile.Write(ref roonDownloading, 0); }
+    }
 
     // The Music and Spotify apps through the DAC Bridge output, while switched on (macOS).
     private void ConnectMac()
@@ -491,7 +529,8 @@ internal sealed class Manager(Config config) : IDisposable
                 b.Caldera = new Caldera.CalderaPlayer(b, config.DataDir, CalderaPort(b.Id), CalderaSetup);
                 b.Caldera.TokenRejected += () => { if (PlexToken != "") { Log.Write("Plex: the sign-in was refused; sign in again"); Settings.Apply(new ServiceSettings { PlexToken = "" }); } };
             }
-            b.ForceShare = b.Caldera != null;
+            // Caldera and Roon Bridge play to the DAC themselves: it is shared whenever nothing plays through the bridge.
+            b.ForceShare = b.Caldera != null || RoonOn;
         }
         dropSlim?.Dispose();
         dropSpotify?.Dispose();
@@ -520,6 +559,7 @@ internal sealed class Manager(Config config) : IDisposable
         }
         ConnectQobuz();
         ConnectMac();
+        ConnectRoon();
         return Services();
     }
 
@@ -600,7 +640,9 @@ internal sealed class Manager(Config config) : IDisposable
             QobuzStatus = qobuz?.Status ?? "", QobuzSignedIn = qobuz?.SignedIn ?? false, QobuzWebPort = Qobuz.QobuzConnect.WebPort,
             MacPossible = OperatingSystem.IsMacOS(), MacApps = MacOn,
             MacDriver = OperatingSystem.IsMacOS() && Native.CoreAudio.FindDevice(Mac.MacSource.LoopbackUid) != Native.CoreAudio.Unknown, MacDac = MacTarget()?.Id ?? "", MacStatus = mac?.Status ?? "",
-            RoonBridge = RoonBridge.Running()
+            RoonBridge = RoonBridge.Running(),
+            Roon = RoonOn, RoonPossible = Roon.RoonDownload.Package != null, RoonVersion = Roon.RoonDownload.Version(config.DataDir),
+            RoonDownload = roonDownload, RoonStatus = roon?.Status ?? ""
         };
     }
 
@@ -717,6 +759,7 @@ internal sealed class Manager(Config config) : IDisposable
         timer?.Dispose();
         qobuz?.Dispose();
         mac?.Dispose();
+        roon?.Dispose();
         foreach (var b in Bridges()) b.Dispose();
     }
 }
@@ -728,10 +771,10 @@ internal static class RoonBridge
     private static (long At, string Found) cache = (long.MinValue, "");
 
     // The Roon program running here ("RoonBridge"), or "" (also in Docker, which can't see the host's programs).
-    public static string Running()
+    public static string Running(bool fresh = false)
     {
         var c = cache;
-        if (Environment.TickCount64 - c.At < 10_000) return c.Found;
+        if (!fresh && Environment.TickCount64 - c.At < 10_000) return c.Found;
         var found = "";
         try
         {

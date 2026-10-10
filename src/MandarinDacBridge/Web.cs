@@ -9,6 +9,7 @@
 //   /api/services/caldera   POST: download Caldera Headless from Caldera
 //   /api/services/plex      POST: a code to sign in to Plex at plex.tv/link (for Caldera)
 //   /api/services/qobuz     POST: install QobuzProxy (Qobuz Connect) into a private Python environment
+//   /api/services/roon      POST: download Roon Bridge from Roon Labs
 //   /api/dacs/<id>/art      the cover of what Caldera or the Music app plays (fetched here: the Plex token stays here)
 //   /now                    the now-playing screen, for a display beside the DAC
 //   /api/health
@@ -129,6 +130,12 @@ internal static partial class Web
         if (p == "/api/services/caldera" && method == "POST")
         {
             _ = manager.DownloadCaldera();
+            await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
+            return;
+        }
+        if (p == "/api/services/roon" && method == "POST")
+        {
+            _ = manager.DownloadRoon();
             await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
             return;
         }

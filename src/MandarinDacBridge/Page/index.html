@@ -293,9 +293,15 @@ function renderConnections() {
     </div>` : ""}
     <div class="row">
       <div><div class="lbl">Roon Bridge</div>
-        <div class="hint">Runs beside the bridge, not inside it. Switch on <b>Share when idle</b> on a DAC to let Roon use it while nothing else plays.
-        <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#roon" target="_blank" rel="noopener">Installing it</a>.</div></div>
-      <div class="ctl"><span class="tag${sv.roonBridge ? " on" : ""}">${sv.roonBridge ? esc(sv.roonBridge) + " running" : "Not seen here"}</span></div>
+        <div class="hint">Roon plays to the DACs through <b>Roon Bridge</b>, Roon's own player, which the bridge downloads from Roon Labs
+          (as RoPieee does) and runs beside it. While it's on, each DAC is shared whenever nothing plays through the bridge.
+          In Roon: Settings → Audio, and enable the DACs under this machine's name.
+          <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#roon" target="_blank" rel="noopener">More</a>.
+          ${sv.roon ? "<br>" + roonState(sv) : sv.roonBridge ? "<br>" + esc(sv.roonBridge) + " is running on this machine." : ""}</div></div>
+      <div class="ctl">
+        ${sv.roon && sv.roonPossible && ((!sv.roonVersion && !sv.roonBridge) || sv.roonDownload) ? `<button class="btn" id="c-rdl"${sv.roonDownload && !sv.roonDownload.startsWith("download failed") ? " disabled" : ""}>${sv.roonVersion ? "Download again" : "Download Roon Bridge"}</button>` : ""}
+        <button class="switch" role="switch" aria-checked="${!!sv.roon}" aria-label="Roon Bridge" id="c-roon"></button>
+      </div>
     </div>
     <div class="row">
       <div><div class="lbl">Now-playing screen</div><div class="hint">For a monitor or TV beside the DAC: open <a href="/now">${esc(nowUrl)}</a> full-screen. Optional.</div></div>
@@ -309,11 +315,12 @@ function renderConnections() {
   if (key) key.onchange = () => { if (key.value.trim()) postServices({ soloistKey: key.value.trim() }); };
   $("#c-cal").onclick = () => postServices({ caldera: !sv.caldera });
   $("#c-qb").onclick = () => postServices({ qobuz: !sv.qobuz });
+  $("#c-roon").onclick = () => postServices({ roon: !sv.roon });
   const mac = $("#c-mac");
   if (mac) mac.onclick = () => postServices({ macApps: !sv.macApps });
   const mdac = $("#c-mdac");
   if (mdac) mdac.onchange = () => postServices({ macDac: mdac.value });
-  for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-qi", "/api/services/qobuz"]]) {
+  for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-qi", "/api/services/qobuz"], ["#c-rdl", "/api/services/roon"]]) {
     const b = $(sel);
     if (b) b.onclick = async () => {
       b.disabled = true;
@@ -333,6 +340,14 @@ function renderConnections() {
 function macState(sv) {
   if (!sv.macDriver) return `The DAC Bridge output isn't on this Mac yet. In Terminal, run<br><code>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/driver.sh)"</code><br>(it asks for your password; the Mac's sound stops for a few seconds). The first time something plays, macOS asks to allow Microphone access: that is how the bridge reads the DAC Bridge output back (it never listens to a microphone).`;
   return esc(sv.macStatus || "starting…");
+}
+
+// What's still needed for Roon Bridge, or how it is.
+function roonState(sv) {
+  if (!sv.roonPossible) return "Roon makes no Roon Bridge for this machine.";
+  if (sv.roonDownload) return esc(sv.roonDownload);
+  if (!sv.roonVersion && !sv.roonBridge) return "Not on this machine yet: <b>Download Roon Bridge</b> fetches Roon's own build from Roon Labs.";
+  return esc(sv.roonStatus || "starting…");
 }
 
 // What's still needed for Qobuz, or how it is.

@@ -488,16 +488,16 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
       </div>
       <div class="info-card" id="roon">
         <div class="sym">Roon Bridge</div>
-        <h3>Beside the bridge, sharing the DAC</h3>
-        <p>Roon Bridge can't be bundled (Roon's licence), and Roon Ready playback (RAAT) is Roon's own, so Roon Bridge
-          runs next to the bridge. Like RoPieee, this downloads Roon's own installer from Roon Labs and runs it:</p>
-        <div class="codebox"><button class="copy-btn" data-copy>Copy</button>
-<pre>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/linux/roon-bridge.sh)"</pre></div>
-        <p>On a Mac, install <a href="https://download.roonlabs.net/builds/RoonBridge.dmg">Roon Bridge for macOS</a>.
-          Then, on each DAC Roon should use, switch on <b>Share when idle</b>: the bridge lets go of the DAC whenever
-          nothing plays through it, so Roon can take it, and takes it back when an app plays to the bridge (once
-          Roon has let go). Or skip Roon Bridge: Roon's Squeezebox support plays to the bridge directly, with Roon's
-          Squeezebox limits.</p>
+        <h3>Downloaded from Roon Labs, run beside the bridge</h3>
+        <p>Switch on <b>Roon Bridge</b> under <i>Connections</i> and press <b>Download Roon Bridge</b>. Like RoPieee, the
+          bridge fetches Roon's own build from Roon Labs. On Linux and in Docker it's unpacked, checked with Roon's own
+          check, and run by the bridge (no root, no system service; it updates itself). On a Mac the app goes into
+          Applications and is opened; on Windows Roon's installer opens. Then in Roon: <i>Settings → Audio</i>, and enable
+          the DACs under this machine's name.</p>
+        <p>Roon Bridge plays to the DACs itself, so while it's on the bridge lets go of each DAC whenever nothing plays
+          through it, and takes it back when an app plays to the bridge (once Roon has let go). A Roon Bridge installed
+          separately is used as it is. Or skip Roon Bridge: Roon's Squeezebox support plays to the bridge directly, with
+          Roon's Squeezebox limits.</p>
       </div>
       <div class="info-card" id="display">
         <div class="sym">Now-playing screen</div>
@@ -608,6 +608,8 @@ docker compose down --rmi local --volumes</pre>
           <tr><td>QOBUZPROXY_SOURCE</td><td>GitHub release</td><td>Another place to install QobuzProxy from (a local copy, a fork).</td></tr>
           <tr><td>CALDERA</td><td>&mdash;</td><td><code>1</code> starts with Plex through Caldera Headless on (Linux).</td></tr>
           <tr><td>MAC_APPS</td><td>&mdash;</td><td><code>1</code> starts with the Music and Spotify apps on (macOS).</td></tr>
+          <tr><td>ROON_BRIDGE</td><td>&mdash;</td><td><code>1</code> starts with Roon Bridge on (downloaded from Roon Labs).</td></tr>
+          <tr><td>SOLOIST_VERBOSE</td><td>&mdash;</td><td><code>1</code> runs Spotify Soloist with its detailed log.</td></tr>
         </tbody>
       </table>
     </div>

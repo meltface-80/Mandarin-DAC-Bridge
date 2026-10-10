@@ -25,7 +25,7 @@ RUN dotnet publish src/MandarinDacBridge -c Release -o /out --nologo
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg pulseaudio libatomic1 python3 python3-venv \
+ && apt-get install -y --no-install-recommends ffmpeg pulseaudio libatomic1 python3 python3-venv bzip2 \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out/mandarin-dac-bridge /app/mandarin-dac-bridge

@@ -141,6 +141,50 @@ internal static partial class Libc
     // A named pipe (for Spotify Soloist's private sound server to write into).
     public static bool MakeFifo(string path) => MkFifo(path, 0x180 /* 0600 */) == 0;
 
+    [LibraryImport("libc", EntryPoint = "kill", SetLastError = true)]
+    private static partial int Kill(int pid, int signal);
+
+    // SIGTERM: asks a program to stop. SIGKILL: stops it.
+    public static bool Terminate(int pid) => Kill(pid, 15) == 0;
+    public static bool ForceStop(int pid) => Kill(pid, 9) == 0;
+
+    // Running (one that has ended but not yet been collected by its parent, a zombie, is not).
+    public static bool Alive(int pid)
+    {
+        try
+        {
+            var stat = File.ReadAllText($"/proc/{pid}/stat");
+            var state = stat[(stat.LastIndexOf(')') + 2)..];
+            return state.Length > 0 && state[0] is not ('Z' or 'X');
+        }
+        catch (Exception) { return false; }
+    }
+
+    // Every process started by this one, and by those (from /proc: the parent is the 4th field of stat,
+    // after the name in brackets, which can hold spaces).
+    public static List<int> Descendants(int root)
+    {
+        var parents = new Dictionary<int, List<int>>();
+        foreach (var dir in Directory.EnumerateDirectories("/proc"))
+        {
+            if (!int.TryParse(Path.GetFileName(dir), out var pid)) continue;
+            try
+            {
+                var stat = File.ReadAllText(Path.Combine(dir, "stat"));
+                var rest = stat[(stat.LastIndexOf(')') + 2)..].Split(' ');
+                if (rest.Length > 1 && int.TryParse(rest[1], out var ppid))
+                    (parents.TryGetValue(ppid, out var l) ? l : parents[ppid] = []).Add(pid);
+            }
+            catch (Exception) { /* gone */ }
+        }
+        var found = new List<int>();
+        var todo = new Queue<int>([root]);
+        while (todo.Count > 0)
+            foreach (var c in parents.GetValueOrDefault(todo.Dequeue()) ?? [])
+                if (!found.Contains(c)) { found.Add(c); todo.Enqueue(c); }
+        return found;
+    }
+
     // The calling thread at a real-time priority where the system allows it
     // (root, or a container with SYS_NICE). Best effort.
     public static bool FavourThisThread()

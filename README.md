@@ -280,21 +280,35 @@ it's given, at 44.1, 96 and 192 kHz. The driver is adapted from Arco's (Apache-2
 
 ### Roon Bridge, beside the bridge
 
-Roon Bridge can't be bundled with the bridge (Roon's licence), and Roon's own playback protocol
-(RAAT) is closed, so it can't play *through* the bridge. It can run *beside* it and share the
-DACs. Like RoPieee, this downloads Roon's own installer from Roon Labs and runs it (Linux):
+Roon plays through **Roon Bridge**, Roon's own player. It isn't shipped with the bridge: like
+RoPieee, the bridge downloads Roon's own build from Roon Labs the first time it's wanted. Switch on
+**Roon Bridge** under *Connections* (or set `ROON_BRIDGE=1`) and press **Download Roon Bridge**:
+
+* **Linux (and Docker):** Roon's build for this processor (x64, ARM64 or ARM32) is unpacked into
+  `DATA_DIR/roon`, checked with Roon's own `check.sh`, and run by the bridge as Roon's installer would
+  run it, with its data in `DATA_DIR/roon/data`. No root, no system service, and it runs inside the
+  Docker container. It updates itself. Unpacking needs `bzip2` (`sudo apt install bzip2`; it's in the
+  Docker image).
+* **Mac:** Roon's app is put into `~/Applications`, and the bridge opens it.
+* **Windows:** Roon's installer opens, to click through.
+
+Then in Roon, go to *Settings → Audio* and enable the DACs listed under this machine's name.
+
+Roon's playback protocol (RAAT) is its own, so Roon Bridge plays to the DACs itself rather than
+through the bridge. While it's on, every DAC is shared: the bridge lets go of a DAC whenever nothing
+plays through it (no app playing, none in its 10-second grace), so Roon Bridge can open it. When
+Audirvana, Mandarin, LMS, Spotify or Qobuz play to the bridge, it takes the DAC back, once Roon has let
+go of it. While Roon is playing, they are refused with *the DAC is held by another program*. The tile
+says *Shared · free for other players* or *Shared · RoonBridge is playing*. Switched off, Roon Bridge
+stops and the DACs are held again.
+
+A Roon Bridge installed separately is used as it is (the bridge doesn't start a second one). To
+install it system-wide on Linux yourself instead, or to share a DAC with any other player on the
+machine, switch on **Share when idle** on that DAC:
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/linux/roon-bridge.sh)"
 ```
-
-On a Mac, install [Roon Bridge for macOS](https://download.roonlabs.net/builds/RoonBridge.dmg).
-In Docker, install Roon Bridge on the host, not in the container. Then on each DAC Roon should
-use, switch on **Share when idle**. The bridge then lets go of that DAC whenever nothing plays through
-it (no app playing, none in its 10-second grace), so Roon Bridge can open it. When Audirvana,
-Mandarin, LMS or Spotify play to the bridge, it takes the DAC back, if Roon has let go of it.
-While Roon is playing, they are refused with *the DAC is held by another program*. The tile says
-*Shared · free for other players* or *Shared · RoonBridge is playing*.
 
 Or skip Roon Bridge: with the Squeezebox player on, Roon's Squeezebox support plays to the
 bridge directly (with Roon's limits for Squeezebox players, and not as Roon Ready).
@@ -389,6 +403,8 @@ itself.
 | `QOBUZPROXY_SOURCE` | the QobuzProxy release on GitHub | another place to install QobuzProxy from (a local copy, a fork) |
 | `CALDERA` | — | `1` starts with Plex through Caldera Headless on (Linux) |
 | `MAC_APPS` | — | `1` starts with the Music and Spotify apps on (macOS) |
+| `ROON_BRIDGE` | — | `1` starts with Roon Bridge on (downloaded from Roon Labs, run beside the bridge) |
+| `SOLOIST_VERBOSE` | — | `1` runs Spotify Soloist with its detailed log (in `DATA_DIR/soloist/<dac>/soloist.log`) |
 
 On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. On Windows, set them
 as user environment variables (`setx PORT 55501`) and sign in again. In Docker, they go under

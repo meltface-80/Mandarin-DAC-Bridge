@@ -49,6 +49,12 @@ internal sealed class ServicesView
     public bool MacDriver { get; set; }     // the DAC Bridge output is installed
     public string MacDac { get; set; } = "";
     public string MacStatus { get; set; } = "";
+    // Roon Bridge, from Roon Labs, run beside the bridge.
+    public bool Roon { get; set; }
+    public bool RoonPossible { get; set; }
+    public string RoonVersion { get; set; } = "";
+    public string RoonDownload { get; set; } = "";
+    public string RoonStatus { get; set; } = "";
     public string RoonBridge { get; set; } = "";
 }
 

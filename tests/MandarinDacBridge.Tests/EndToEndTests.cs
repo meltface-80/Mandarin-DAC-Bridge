@@ -409,6 +409,45 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal("24", await Volume(id));
     }
 
+    // ------------------------------------------------------------ Roon Bridge (a pretend one, as Roon's package lays it out)
+
+    [Fact]
+    public async Task RoonBridge_RunsBesideTheBridge_SharesTheDacs_AndStopsWithAllItStarted()
+    {
+        if (!OperatingSystem.IsLinux()) return;
+        await Start(Dev("clock"));
+        var data = hosts[^1].Manager.Settings.Dir;
+        var install = Path.Combine(data, "roon", "RoonBridge");
+        Directory.CreateDirectory(install);
+        File.WriteAllText(Path.Combine(install, "VERSION"), "207101683\n2.71 (build 1683) production\nproduction\n");
+        // Like Roon's start.sh: starts the real program and waits; a SIGTERM ends the script only.
+        var start = Path.Combine(install, "start.sh");
+        File.WriteAllText(start, """
+            #!/bin/sh
+            echo "$ROON_DATAROOT|$ROON_ID_DIR" > "$ROON_DATAROOT/env"
+            sleep 300 &
+            echo $! > "$ROON_DATAROOT/child"
+            wait
+
+            """);
+        File.SetUnixFileMode(start, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
+        await Post("/api/services", "{\"roon\":true}");
+        await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonStatus").GetString()!.StartsWith("running · 2.71 (build 1683)"));
+        var root = Path.Combine(data, "roon", "data");
+        await Until(() => Task.FromResult(File.Exists(Path.Combine(root, "child"))));
+        Assert.Equal($"{root}|{root}", File.ReadAllText(Path.Combine(root, "env")).Trim());
+        int child = int.Parse(File.ReadAllText(Path.Combine(root, "child")).Trim());
+        Assert.True(Native.Libc.Alive(child));
+        // Shared while nothing plays through the bridge, so Roon can open the DAC.
+        await Until(async () => !(await Dac()).GetProperty("exclusive").GetBoolean());
+
+        // Switched off: the script and what it started stop; the DAC is held again.
+        await Post("/api/services", "{\"roon\":false}");
+        await Until(() => Task.FromResult(!Native.Libc.Alive(child)), 10000);
+        await Until(async () => (await Dac()).GetProperty("exclusive").GetBoolean());
+    }
+
     // ------------------------------------------------------------ Squeezebox (a pretend Lyrion Music Server)
 
     // server → player: length (2) · opcode · payload
