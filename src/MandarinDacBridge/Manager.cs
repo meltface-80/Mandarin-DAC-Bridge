@@ -4,8 +4,17 @@
 // Looked for every few seconds, so a DAC plugged in later appears by itself
 // (and on the network a moment after), and one unplugged goes. A DAC can be
 // switched off on its page: the bridge lets go of it and stops offering it.
+//
+// Besides UPnP, each bridge can be a Squeezebox player (Slim/) and a Spotify
+// Connect speaker through Spotify Soloist (Spotify/), switched on for all DACs
+// on the page. A DAC
+// set to "share when idle" is let go whenever nothing plays, so Roon Bridge
+// (or any player on this machine) can use it in between.
+using System.Diagnostics;
 using System.Text.Json;
 using MandarinDacBridge.Audio;
+using MandarinDacBridge.Slim;
+using MandarinDacBridge.Spotify;
 using MandarinDacBridge.Upnp;
 
 namespace MandarinDacBridge;
@@ -15,11 +24,28 @@ internal sealed class DacSettings
     public bool Enabled { get; set; } = true;
     public string Dsd { get; set; } = "auto";
     public string Name { get; set; } = "";
+    // Let go of the DAC while nothing plays, for Roon Bridge or another player on this machine.
+    public bool Share { get; set; }
+}
+
+// The ways in besides UPnP (always on). Null: not chosen yet, the environment's default holds.
+internal sealed class ServiceSettings
+{
+    public bool? Squeezelite { get; set; }
+    public string? LmsServer { get; set; }
+    public bool? Spotify { get; set; }
+    // Secret: written here (settings.json, readable by its owner only), never sent back to the page.
+    public string? SoloistKey { get; set; }
+    public bool? Caldera { get; set; }
+    public bool? Qobuz { get; set; }
+    // Secret, like the Soloist key: the Plex token Caldera plays with.
+    public string? PlexToken { get; set; }
 }
 
 internal sealed class SettingsFile
 {
     public Dictionary<string, DacSettings> Dacs { get; set; } = new();
+    public ServiceSettings Services { get; set; } = new();
 }
 
 internal sealed class SettingsPatch
@@ -27,6 +53,7 @@ internal sealed class SettingsPatch
     public bool? Enabled { get; set; }
     public string? Dsd { get; set; }
     public string? Name { get; set; }
+    public bool? Share { get; set; }
 }
 
 internal sealed class Settings
@@ -35,8 +62,11 @@ internal sealed class Settings
     private readonly object gate = new();
     private readonly SettingsFile data;
 
+    public string Dir { get; }
+
     public Settings(string dir)
     {
+        Dir = dir;
         file = Path.Combine(dir, "settings.json");
         try { data = JsonSerializer.Deserialize(File.ReadAllText(file), BridgeJson.Default.SettingsFile) ?? new(); }
         catch (Exception) { data = new(); }
@@ -47,7 +77,7 @@ internal sealed class Settings
         lock (gate)
         {
             var s = data.Dacs.GetValueOrDefault(id);
-            return s == null ? new DacSettings() : new DacSettings { Enabled = s.Enabled, Dsd = s.Dsd, Name = s.Name };
+            return s == null ? new DacSettings() : new DacSettings { Enabled = s.Enabled, Dsd = s.Dsd, Name = s.Name, Share = s.Share };
         }
     }
 
@@ -59,11 +89,48 @@ internal sealed class Settings
             if (p.Enabled is { } e) s.Enabled = e;
             if (p.Dsd is "auto" or "dop" or "pcm") s.Dsd = p.Dsd;
             if (p.Name != null) s.Name = p.Name.Trim()[..Math.Min(60, p.Name.Trim().Length)];
+            if (p.Share is { } sh) s.Share = sh;
             data.Dacs[id] = s;
-            try { File.WriteAllText(file, JsonSerializer.Serialize(data, BridgeJson.Default.SettingsFile)); }
-            catch (Exception e2) { Log.Write("settings: " + e2.Message); }
+            Save();
             return s;
         }
+    }
+
+    public ServiceSettings Services()
+    {
+        lock (gate)
+            return new ServiceSettings
+            {
+                Squeezelite = data.Services.Squeezelite, LmsServer = data.Services.LmsServer, Spotify = data.Services.Spotify,
+                SoloistKey = data.Services.SoloistKey, Caldera = data.Services.Caldera, PlexToken = data.Services.PlexToken,
+                Qobuz = data.Services.Qobuz
+            };
+    }
+
+    public void Apply(ServiceSettings p)
+    {
+        lock (gate)
+        {
+            if (p.Squeezelite is { } q) data.Services.Squeezelite = q;
+            if (p.LmsServer != null) data.Services.LmsServer = p.LmsServer.Trim()[..Math.Min(200, p.LmsServer.Trim().Length)];
+            if (p.Spotify is { } sp) data.Services.Spotify = sp;
+            if (p.SoloistKey != null) data.Services.SoloistKey = p.SoloistKey.Trim()[..Math.Min(512, p.SoloistKey.Trim().Length)];
+            if (p.Caldera is { } c) data.Services.Caldera = c;
+            if (p.Qobuz is { } qb) data.Services.Qobuz = qb;
+            if (p.PlexToken != null) data.Services.PlexToken = p.PlexToken.Trim()[..Math.Min(512, p.PlexToken.Trim().Length)];
+            Save();
+        }
+    }
+
+    private void Save()
+    {
+        try
+        {
+            File.WriteAllText(file, JsonSerializer.Serialize(data, BridgeJson.Default.SettingsFile));
+            // It can hold the Soloist API key: its owner's only.
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+        }
+        catch (Exception e) { Log.Write("settings: " + e.Message); }
     }
 }
 
@@ -81,6 +148,13 @@ internal sealed class Bridge : IDisposable
     public event Action? Changed;
     public event Action? Gone;
     private bool wasExclusive;
+    private readonly Timer shareTimer;
+
+    public SlimPlayer? Slim { get; set; }
+    public SoloistPlayer? Spotify { get; set; }
+    public Caldera.CalderaPlayer? Caldera { get; set; }
+    // On while something else on this machine (Caldera) plays to the DAC by itself: the DAC is shared when idle.
+    public bool ForceShare { get; set; }
 
     public Bridge(DacDevice dev, Config config, Settings settings)
     {
@@ -103,7 +177,35 @@ internal sealed class Bridge : IDisposable
             Notify();
         };
         Sink.Gone += () => ThreadPool.QueueUserWorkItem(_ => Gone?.Invoke());
+        if (settings.For(Id).Share) { sharing = true; Sink.Share(true); }
+        shareTimer = new Timer(_ => ShareIfIdle(), null, 1000, 1000);
     }
+
+    public bool Idle => Renderer.Transport is "STOPPED" or "NO_MEDIA_PRESENT" && !Arbiter.Holding(false);
+
+    // Shared: let go of the DAC once nothing plays (and no app is in its grace).
+    private void ShareIfIdle()
+    {
+        if (!(settings.For(Id).Share || ForceShare) || !Sink.Exclusive || !Idle) return;
+        Log("idle: letting go of the DAC for other players (shared)");
+        Sink.Share(true);
+    }
+
+    private bool sharing;
+
+    public void SetShare(bool on)
+    {
+        if (on || ForceShare) { sharing = true; ShareIfIdle(); }
+        else if (sharing)
+        {
+            sharing = false;
+            Sink.Share(false);
+            Log("not shared: holding the DAC again");
+        }
+    }
+
+    // The share setting as it stands (after Caldera was switched on or off).
+    public void ApplyShare() => SetShare(settings.For(Id).Share);
 
     public void Log(string m) => MandarinDacBridge.Log.Write($"[{Dev.Name}] {m}");
     public void Notify() => Changed?.Invoke();
@@ -122,12 +224,16 @@ internal sealed class Bridge : IDisposable
         return (s.Name != "" ? s.Name : Dev.Name) + config.NameSuffix;
     }
 
-    public string ProtocolInfo() => Control.ProtocolInfo(Dev.Rates);
+    public string ProtocolInfo() => Control.ProtocolInfo(Dev.Rates, Dev.Bits);
 
     public Advert Advert => new(Udn, $"/upnp/{Id}/description.xml");
 
     public void Dispose()
     {
+        shareTimer.Dispose();
+        Slim?.Dispose();
+        Spotify?.Dispose();
+        Caldera?.Dispose();
         try { Renderer.Halt().Wait(TimeSpan.FromSeconds(6)); } catch (Exception) { /* closing anyway */ }
         Renderer.Dispose();
         Sink.Dispose();
@@ -143,6 +249,14 @@ internal sealed class Manager(Config config) : IDisposable
     private int scanning;
     private string error = "";
     private List<string> skipped = [];
+    private readonly object servicesGate = new();
+    private string soloistDownload = "";
+    private int downloading;
+    private string calderaDownload = "";
+    private int calderaDownloading;
+    private readonly Dictionary<string, int> calderaPorts = new();
+    private Caldera.PlexLink? plexLink;
+    private Qobuz.QobuzConnect? qobuz;
 
     public Settings Settings { get; } = new(config.DataDir);
     public event Action<Bridge>? Added;
@@ -157,6 +271,7 @@ internal sealed class Manager(Config config) : IDisposable
 
     public void Start()
     {
+        ConnectQobuz();
         Scan();
         timer = new Timer(_ => Scan(), null, config.ScanEvery, config.ScanEvery);
     }
@@ -216,6 +331,191 @@ internal sealed class Manager(Config config) : IDisposable
         };
         b.Start();
         Added?.Invoke(b);
+        Connect(b);
+        qobuz?.Changed();
+    }
+
+    // ------------------------------------------------------------ Squeezebox and Spotify
+
+    public bool SqueezeliteOn => Settings.Services().Squeezelite ?? config.Squeezelite;
+    public string LmsServer => Settings.Services().LmsServer ?? config.LmsServer;
+    public bool SpotifyOn => Settings.Services().Spotify ?? config.Spotify;
+    private string SoloistKey => Settings.Services().SoloistKey is { Length: > 0 } k ? k : config.SoloistKey;
+
+    private SoloistSetup Soloist() => new(config.FindSoloist(), Config.FindPulseAudio(), SoloistKey);
+
+    public bool CalderaOn => Settings.Services().Caldera ?? config.Caldera;
+    public bool QobuzOn => Settings.Services().Qobuz ?? config.Qobuz;
+
+    // One QobuzProxy for all the DACs, while Qobuz is switched on.
+    private void ConnectQobuz()
+    {
+        Qobuz.QobuzConnect? drop = null;
+        lock (servicesGate)
+        {
+            if (QobuzOn && qobuz == null)
+            {
+                qobuz = new Qobuz.QobuzConnect(config.DataDir, QobuzSpeakers);
+                for (int i = 0; i < 64; i++) Arbiter.StreamPorts[Qobuz.QobuzConnect.FirstProxyPort + i] = "Qobuz";
+            }
+            else if (!QobuzOn && qobuz != null) { drop = qobuz; qobuz = null; Arbiter.StreamPorts.Clear(); }
+        }
+        drop?.Dispose();
+    }
+
+    private List<Qobuz.QobuzSpeaker> QobuzSpeakers() =>
+        Bridges().OrderBy(b => b.Dev.Key, StringComparer.Ordinal)
+            .Select(b => new Qobuz.QobuzSpeaker(b.Id, b.Dev.Key, b.FriendlyName(),
+                $"http://127.0.0.1:{config.Port}/upnp/{b.Id}/description.xml", "127.0.0.1", config.Port))
+            .ToList();
+
+    public async Task InstallQobuz()
+    {
+        Qobuz.QobuzConnect? q;
+        lock (servicesGate) q = qobuz;
+        if (q == null) return;
+        await q.InstallProxy();
+    }
+    private string PlexToken => Settings.Services().PlexToken ?? "";
+    private Caldera.CalderaSetup CalderaSetup() =>
+        new(Caldera.CalderaDownload.Program(config.DataDir), Caldera.CalderaDownload.Home(config.DataDir), PlexToken);
+
+    // Each DAC's Caldera answers Plex on its own port: 32500, 32501, …
+    private int CalderaPort(string id)
+    {
+        lock (calderaPorts)
+        {
+            if (calderaPorts.TryGetValue(id, out var p)) return p;
+            p = 32500;
+            while (calderaPorts.ContainsValue(p)) p++;
+            return calderaPorts[id] = p;
+        }
+    }
+
+    // Starts or stops a bridge's Squeezebox player and Spotify speaker, as switched on the page.
+    private void Connect(Bridge b, bool restartSpotify = false, bool restartCaldera = false)
+    {
+        SlimPlayer? dropSlim = null;
+        SoloistPlayer? dropSpotify = null;
+        Caldera.CalderaPlayer? dropCaldera = null;
+        lock (servicesGate)
+        {
+            if (Get(b.Id) != b) return;
+            if (SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer);
+            else if (!SqueezeliteOn && b.Slim != null) { dropSlim = b.Slim; b.Slim = null; }
+            if ((!SpotifyOn || restartSpotify) && b.Spotify != null) { dropSpotify = b.Spotify; b.Spotify = null; }
+            if (SpotifyOn && b.Spotify == null)
+            {
+                b.Spotify = new SoloistPlayer(b, config.DataDir, config.Port, Soloist);
+                b.Spotify.Expired += () => { if (config.FindSoloist().StartsWith(config.SoloistDir)) _ = DownloadSoloist(); };
+            }
+            if ((!CalderaOn || restartCaldera) && b.Caldera != null) { dropCaldera = b.Caldera; b.Caldera = null; }
+            if (CalderaOn && b.Caldera == null)
+            {
+                b.Caldera = new Caldera.CalderaPlayer(b, config.DataDir, CalderaPort(b.Id), CalderaSetup);
+                b.Caldera.TokenRejected += () => { if (PlexToken != "") { Log.Write("Plex: the sign-in was refused; sign in again"); Settings.Apply(new ServiceSettings { PlexToken = "" }); } };
+            }
+            b.ForceShare = b.Caldera != null;
+        }
+        dropSlim?.Dispose();
+        dropSpotify?.Dispose();
+        dropCaldera?.Dispose();
+        if (dropCaldera != null && b.Caldera == null) lock (calderaPorts) calderaPorts.Remove(b.Id);
+        b.ApplyShare();
+        b.Notify();
+    }
+
+    public ServicesView SetServices(ServiceSettings patch)
+    {
+        bool lmsChanged = patch.LmsServer != null && patch.LmsServer.Trim() != LmsServer;
+        bool keyChanged = patch.SoloistKey != null && patch.SoloistKey.Trim() != SoloistKey;
+        bool plexChanged = patch.PlexToken != null && patch.PlexToken.Trim() != PlexToken;
+        Settings.Apply(patch);
+        foreach (var b in Bridges())
+        {
+            // A new server: the players start again, to find it.
+            if (lmsChanged && b.Slim != null)
+            {
+                SlimPlayer? old;
+                lock (servicesGate) { old = b.Slim; b.Slim = null; }
+                old?.Dispose();
+            }
+            Connect(b, restartSpotify: keyChanged, restartCaldera: plexChanged);
+        }
+        ConnectQobuz();
+        return Services();
+    }
+
+    // Fetches Caldera Headless from Caldera (the page's Download), then starts the players again.
+    public async Task DownloadCaldera()
+    {
+        if (Interlocked.Exchange(ref calderaDownloading, 1) == 1) return;
+        try
+        {
+            calderaDownload = "downloading from Caldera…";
+            var v = await Caldera.CalderaDownload.Fetch(config.DataDir, CancellationToken.None);
+            calderaDownload = "";
+            Log.Write($"Caldera Headless {v} downloaded");
+            foreach (var b in Bridges()) if (b.Caldera != null) Connect(b, restartCaldera: true);
+        }
+        catch (Exception e)
+        {
+            calderaDownload = "download failed: " + e.Message;
+            Log.Write("Caldera Headless: " + calderaDownload);
+        }
+        finally { Volatile.Write(ref calderaDownloading, 0); }
+    }
+
+    // Signing in to Plex: a code for plex.tv/link; the token, once there, goes to the Caldera players.
+    public async Task LinkPlex()
+    {
+        plexLink ??= new Caldera.PlexLink("mandarin-dac-bridge-" + Devices.IdOf(config.Hostname), token =>
+        {
+            Log.Write("Plex: signed in");
+            SetServices(new ServiceSettings { PlexToken = token });
+        });
+        await plexLink.Start();
+    }
+
+    public string? CalderaArt(string id) => Get(id)?.Caldera?.ArtUrl is { Length: > 0 } u ? u : null;
+
+    // Fetches Spotify Soloist from Spotify (the page's Download, or an expired build), then starts the speakers again.
+    public async Task DownloadSoloist()
+    {
+        if (Interlocked.Exchange(ref downloading, 1) == 1) return;
+        try
+        {
+            soloistDownload = "downloading from Spotify…";
+            var path = await SoloistDownload.Fetch(config.SoloistDir, CancellationToken.None);
+            soloistDownload = "";
+            Log.Write($"Spotify Soloist downloaded: {SoloistDownload.Version(path)}");
+            foreach (var b in Bridges()) if (b.Spotify != null) Connect(b, restartSpotify: true);
+        }
+        catch (Exception e)
+        {
+            soloistDownload = "download failed: " + e.Message;
+            Log.Write("Spotify Soloist: " + soloistDownload);
+        }
+        finally { Volatile.Write(ref downloading, 0); }
+    }
+
+    public ServicesView Services()
+    {
+        var soloist = config.FindSoloist();
+        return new ServicesView
+        {
+            Squeezelite = SqueezeliteOn, LmsServer = LmsServer, Spotify = SpotifyOn,
+            SoloistKey = SoloistKey != "", Soloist = soloist, SoloistVersion = SoloistDownload.Version(soloist),
+            SoloistExpires = SoloistDownload.Expires(SoloistDownload.Version(soloist))?.ToString("yyyy-MM-dd") ?? "",
+            SoloistDownload = soloistDownload, PulseAudio = Config.FindPulseAudio() != "",
+            SpotifyPossible = OperatingSystem.IsLinux() && SoloistDownload.Arch != null,
+            Caldera = CalderaOn, CalderaPossible = OperatingSystem.IsLinux() && Caldera.CalderaDownload.Arch != null,
+            CalderaVersion = Caldera.CalderaDownload.Version(config.DataDir), CalderaDownload = calderaDownload,
+            PlexSignedIn = PlexToken != "", PlexCode = plexLink?.Code ?? "", PlexMessage = plexLink?.Message ?? "",
+            Qobuz = QobuzOn, QobuzInstalled = qobuz?.Installed ?? false, QobuzInstall = qobuz?.Install ?? "",
+            QobuzStatus = qobuz?.Status ?? "", QobuzSignedIn = qobuz?.SignedIn ?? false, QobuzWebPort = Qobuz.QobuzConnect.WebPort,
+            RoonBridge = RoonBridge.Running()
+        };
     }
 
     private void CloseBridge(string id)
@@ -227,6 +527,7 @@ internal sealed class Manager(Config config) : IDisposable
         }
         Removed?.Invoke(b);
         b.Dispose();
+        qobuz?.Changed();
     }
 
     public DacSettings SetSettings(string id, SettingsPatch patch)
@@ -240,7 +541,14 @@ internal sealed class Manager(Config config) : IDisposable
             if (on && b == null) Open(dev);
             if (!on) CloseBridge(id);
         }
-        if (patch.Name != null && b != null && s.Enabled) Renamed?.Invoke(b);
+        if (patch.Name != null && b != null && s.Enabled)
+        {
+            Renamed?.Invoke(b);
+            qobuz?.Changed();
+            b.Slim?.Renamed();
+            if (b.Spotify != null) Connect(b, restartSpotify: true);
+        }
+        if (patch.Share is { } share && b != null) b.SetShare(share);
         return s;
     }
 
@@ -268,7 +576,7 @@ internal sealed class Manager(Config config) : IDisposable
                 Id = dev.Id, Name = s.Name != "" ? s.Name : dev.Name, DeviceName = dev.Name, Manufacturer = dev.Manufacturer, Model = dev.Model,
                 Transport = dev.Transport, Usb = dev.Usb, Rates = dev.Rates, Bits = dev.Bits, Channels = dev.Channels, Formats = dev.Formats,
                 DsdNative = dev.DsdNative, DopRates = dev.DopRates, CurrentRate = dev.CurrentRate, Volume = dev.Volume,
-                Enabled = s.Enabled, Dsd = s.Dsd, Platform = config.Platform, Holder = holder
+                Enabled = s.Enabled, Dsd = s.Dsd, Platform = config.Platform, Holder = holder, Share = s.Share
             };
             if (b != null)
             {
@@ -276,13 +584,20 @@ internal sealed class Manager(Config config) : IDisposable
                 v.DsdMode = b.DsdMode();
                 v.Exclusive = b.Sink.Exclusive;
                 v.Waiting = b.Sink.Exclusive ? "" : b.Sink.Message;
+                v.Squeezebox = b.Slim?.Status;
+                v.SqueezeboxId = b.Slim?.Mac;
+                v.Spotify = b.Spotify?.Status;
+                v.Caldera = b.Caldera?.Status;
                 v.Holder = b.Sink.Exclusive ? "" : holder;
                 v.Player = b.Renderer.Now();
                 var active = b.Renderer.IsActive;
+                // Caldera plays to the DAC by itself: what it plays is shown, and who.
+                var caldera = !active && b.Caldera?.Holding == true ? b.Caldera.Now : null;
+                if (caldera != null) v.Player = caldera;
                 var blocked = b.Arbiter.LastBlocked;
                 v.Control = new ControlView
                 {
-                    Owner = b.Arbiter.Owner?.Name,
+                    Owner = caldera != null ? "Plex (Caldera)" : b.Arbiter.Owner?.Name,
                     Locked = b.Arbiter.Holding(active),
                     Blocked = blocked != null && Arbiter.Now - blocked.At < 5 * 60 * 1000 ? blocked : null
                 };
@@ -295,7 +610,7 @@ internal sealed class Manager(Config config) : IDisposable
         {
             Dacs = list.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList(),
             Error = err, Version = Config.Version, Host = config.Hostname, Platform = config.Platform,
-            Others = Others()
+            Others = Others(), Services = Services()
         };
     }
 
@@ -304,6 +619,38 @@ internal sealed class Manager(Config config) : IDisposable
     public void Dispose()
     {
         timer?.Dispose();
+        qobuz?.Dispose();
         foreach (var b in Bridges()) b.Dispose();
+    }
+}
+
+// Roon Bridge (or Roon Server) on this machine: shown on the page, so "share when idle" makes sense.
+internal static class RoonBridge
+{
+    private static readonly string[] Names = ["RoonBridge", "RAATServer", "RoonServer", "RoonAppliance"];
+    private static (long At, string Found) cache = (long.MinValue, "");
+
+    // The Roon program running here ("RoonBridge"), or "" (also in Docker, which can't see the host's programs).
+    public static string Running()
+    {
+        var c = cache;
+        if (Environment.TickCount64 - c.At < 10_000) return c.Found;
+        var found = "";
+        try
+        {
+            foreach (var p in Process.GetProcesses())
+            {
+                using (p)
+                {
+                    string name;
+                    try { name = p.ProcessName; } catch (Exception) { continue; }
+                    var n = Names.FirstOrDefault(x => name.StartsWith(x, StringComparison.OrdinalIgnoreCase));
+                    if (n != null) { found = n is "RAATServer" ? "RoonBridge" : n; break; }
+                }
+            }
+        }
+        catch (Exception) { /* not allowed to look */ }
+        cache = (Environment.TickCount64, found);
+        return found;
     }
 }

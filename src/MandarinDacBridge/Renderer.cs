@@ -12,6 +12,11 @@
 // The position is the DAC's own clock: the sink counts the frames it has
 // played; "marks" say at which frame each track began, so the track shown
 // changes when the DAC reaches it, not when it was decoded.
+//
+// UPnP is one way in; the Squeezebox player (Slim/) and Spotify Connect
+// (Spotify/) drive the same transport, and follow it through Reached,
+// Decoded and Finished. What they know about a track that the URL doesn't
+// say (the title from Lyrion, Spotify's position) goes in Track.Live.
 using System.Text.RegularExpressions;
 using MandarinDacBridge.Audio;
 
@@ -31,12 +36,17 @@ internal sealed class Track(string uri, string meta)
     public double Duration { get; set; }
     public TrackInfo? Info { get; set; }
     public bool Taken { get; set; }
+    public LiveMeta? Live { get; set; }
 }
+
+// What a Squeezebox server or Spotify says is playing. Position (when given)
+// was so at At (ms) and runs on from there while the track plays.
+internal sealed record LiveMeta(string Title, string Artist, string Album, string Art, double Duration, double? Position = null, long At = 0);
 
 internal sealed record Mark(long Frame, Track Track, double Offset, TrackInfo? Info);
 
 internal sealed record NowPlaying(string Transport, string Status, string Error, string Title, string Artist, string Album,
-    long Position, long Duration, string Format, string Physical, bool Muted);
+    long Position, long Duration, string Format, string Physical, bool Muted, string Art = "");
 
 internal sealed class Renderer : IDisposable
 {
@@ -59,6 +69,8 @@ internal sealed class Renderer : IDisposable
     private readonly List<Mark> marks = [];
     private Mark? mark;                  // the one being heard
     private double pendingOffset;        // a seek while stopped
+    private Track? reached;              // the last track Reached was raised for
+    private int expectNext;              // the run whose next track is on its way (asked for on Decoded)
 
     public string Transport { get; private set; } = "NO_MEDIA_PRESENT";
     public string Status { get; private set; } = "OK";
@@ -67,6 +79,12 @@ internal sealed class Renderer : IDisposable
     public Track? Next { get; private set; }
     public bool Muted { get; private set; }
     public event Action? Changed;
+    // The DAC has begun to play this track.
+    public event Action<Track>? Reached;
+    // This track has been read to its end (the next can be sent now, for gapless; see ExpectNext).
+    public event Action<Track>? Decoded;
+    // Everything has played out (false), or playing failed (true).
+    public event Action<bool>? Finished;
 
     public Renderer(ISink sink, string ffmpeg, Func<DacTraits> dac, Arbiter arbiter, Action<string> log)
     {
@@ -75,7 +93,12 @@ internal sealed class Renderer : IDisposable
         this.dac = dac;
         this.arbiter = arbiter;
         this.log = log;
-        sink.StatusChanged += () => Changed?.Invoke();
+        sink.StatusChanged += () =>
+        {
+            // A DAC let go of (shared, or taken by another program) has to be set up again.
+            if (!sink.Exclusive) lock (gate) fmt = null;
+            Changed?.Invoke();
+        };
         clock = new Timer(_ => OnClock(), null, 100, 100);
     }
 
@@ -101,7 +124,7 @@ internal sealed class Renderer : IDisposable
 
     // ------------------------------------------------------------ the transport
 
-    public async Task SetUri(string uri, string meta)
+    public async Task<Track> SetUri(string uri, string meta)
     {
         if (uri == "") throw new UpnpException(714, "Illegal MIME-type");
         bool was = IsActive;
@@ -118,22 +141,30 @@ internal sealed class Renderer : IDisposable
         }
         Changed?.Invoke();
         if (was) await Play();
+        lock (gate) return Current!;
     }
 
-    public Task SetNext(string uri, string meta)
+    public Task<Track?> SetNext(string uri, string meta)
     {
-        lock (gate) Next = uri == "" ? null : MakeTrack(uri, meta);
+        Track? t;
+        lock (gate) t = Next = uri == "" ? null : MakeTrack(uri, meta);
         Changed?.Invoke();
-        return Task.CompletedTask;
+        return Task.FromResult(t);
     }
 
     public Task Play()
     {
-        if (!sink.Exclusive) throw new UpnpException(701, "The DAC is held by another program: " + (sink.Message == "" ? "waiting for it" : sink.Message));
+        if (!sink.Exclusive)
+        {
+            // A shared DAC (let go while idle) is taken back now, if nothing else has it.
+            if (!sink.Reclaim()) throw new UpnpException(701, "The DAC is held by another program: " + (sink.Message == "" ? "waiting for it" : sink.Message));
+            lock (gate) fmt = null;
+        }
         lock (gate)
         {
             if (Transport == "PAUSED_PLAYBACK" && feeding == run && feeding != 0)
             {
+                if (Current?.Live is { Position: not null } l) Current.Live = l with { At = Arbiter.Now };
                 sink.Pause(false);
                 Transport = fmt != null && marks.Count > 0 ? "PLAYING" : "TRANSITIONING";
             }
@@ -151,6 +182,8 @@ internal sealed class Renderer : IDisposable
         {
             if (!IsActive) return Task.CompletedTask;
             sink.Pause(true);
+            // A position given by the server stops where it is.
+            if (Current?.Live is { Position: { } lp } l) Current.Live = l with { Position = lp + Math.Max(0, Arbiter.Now - l.At) / 1000.0, At = Arbiter.Now };
             Transport = "PAUSED_PLAYBACK";
         }
         Changed?.Invoke();
@@ -217,6 +250,7 @@ internal sealed class Renderer : IDisposable
         Error = "";
         Transport = paused ? "PAUSED_PLAYBACK" : "TRANSITIONING";
         mark = new Mark(0, track, offset, track.Info);
+        reached = null;
         if (!paused) sink.Pause(false);
         cts?.Dispose();
         cts = new CancellationTokenSource();
@@ -248,7 +282,7 @@ internal sealed class Renderer : IDisposable
         while (t != null)
         {
             ct.ThrowIfCancellationRequested();
-            if (t.Mime == "") t.Mime = ContentType(t.Uri, ct);
+            if (t.Mime == "" && !Sources.IsLive(t.Uri)) t.Mime = ContentType(t.Uri, ct);
             IPcmSource src;
             try
             {
@@ -276,15 +310,17 @@ internal sealed class Renderer : IDisposable
                     var physical = sink.Configure(info.Rate, info.Channels);
                     lock (gate) { fmt = (info.Rate, info.Channels, physical); written = 0; marks.Clear(); }
                 }
+                Track? now = null;
                 lock (gate)
                 {
                     if (Stale(r)) return;
                     var m = new Mark(written, t, off, info);
                     marks.Add(m);
-                    if (t == first) Announce(m);
+                    if (t == first) { Announce(m); now = NewlyReached(); }
                     if (Transport == "TRANSITIONING") Transport = "PLAYING";
                 }
                 Changed?.Invoke();
+                if (now != null) Reached?.Invoke(now);
                 Pump(src, info, ct);
             }
             finally
@@ -293,6 +329,7 @@ internal sealed class Renderer : IDisposable
                 src.Dispose();
             }
             if (Stale(r)) return;
+            Decoded?.Invoke(t);
             t = AwaitNext(r, ct);
             off = 0;
         }
@@ -305,11 +342,18 @@ internal sealed class Renderer : IDisposable
         }
         arbiter.Touch();
         Changed?.Invoke();
+        Finished?.Invoke(false);
     }
+
+    // Called from a Decoded handler that has just asked for the next track (a
+    // Squeezebox server sends it only then): it is waited for until the DAC
+    // has almost nothing left, rather than half a second.
+    public void ExpectNext() => Volatile.Write(ref expectNext, Volatile.Read(ref run));
 
     // The next track once this one is decoded: given already, or given while this one plays out.
     private Track? AwaitNext(int r, CancellationToken ct)
     {
+        double least = Volatile.Read(ref expectNext) == r ? 0.05 : 0.5;
         for (;;)
         {
             if (Stale(r)) return null;
@@ -317,9 +361,9 @@ internal sealed class Renderer : IDisposable
             {
                 if (Next is { Taken: false } n) { n.Taken = true; return n; }
                 double left = fmt is { } f ? (written - sink.Played) / (double)f.Rate : 0;
-                if (left < 0.5) return null;
+                if (left < least) return null;
             }
-            ct.WaitHandle.WaitOne(100);
+            ct.WaitHandle.WaitOne(least < 0.5 ? 10 : 100);
             ct.ThrowIfCancellationRequested();
         }
     }
@@ -364,16 +408,26 @@ internal sealed class Renderer : IDisposable
     private void OnClock()
     {
         bool changed = false;
+        Track? now = null;
         lock (gate)
         {
             if (marks.Count == 0) return;
             long played = sink.Played;
             Mark? m = null;
             foreach (var x in marks) if (x.Frame <= played) m = x;
-            if (m != null && m != mark) changed = Announce(m);
+            if (m != null && m != mark) { changed = Announce(m); now = NewlyReached(); }
         }
         if (IsActive) arbiter.Touch();
         if (changed) Changed?.Invoke();
+        if (now != null) Reached?.Invoke(now);
+    }
+
+    // The track being heard, the first time it is. With gate held.
+    private Track? NewlyReached()
+    {
+        if (mark == null || mark.Track == reached) return null;
+        reached = mark.Track;
+        return reached;
     }
 
     // The DAC has reached this mark's track. With gate held.
@@ -405,6 +459,7 @@ internal sealed class Renderer : IDisposable
             mark = null;
         }
         Changed?.Invoke();
+        Finished?.Invoke(true);
     }
 
     // The Content-Type a URL answers with, when nothing else says (raw L16/L24 needs it).
@@ -436,9 +491,26 @@ internal sealed class Renderer : IDisposable
         {
             var t = Current;
             var i = mark?.Info ?? t?.Info;
-            return new NowPlaying(Transport, Status, Error, t?.Didl.Title ?? "", t?.Didl.Artist ?? "", t?.Didl.Album ?? "",
-                (long)Math.Round(PositionUnlocked()), (long)Math.Round(t?.Duration ?? 0), i != null ? Describe(i) : "", fmt?.Physical ?? "", Muted);
+            var live = t?.Live;
+            double duration = live?.Duration > 0 ? live.Duration : t?.Duration ?? 0;
+            double position = PositionUnlocked();
+            if (live?.Position is { } lp)
+            {
+                position = lp + (Transport == "PLAYING" ? Math.Max(0, Arbiter.Now - live.At) / 1000.0 : 0);
+                if (duration > 0 && position > duration) position = duration;
+            }
+            return new NowPlaying(Transport, Status, Error, Pick(live?.Title, t?.Didl.Title), Pick(live?.Artist, t?.Didl.Artist), Pick(live?.Album, t?.Didl.Album),
+                (long)Math.Round(position), (long)Math.Round(duration), i != null ? Describe(i) : "", fmt?.Physical ?? "", Muted, Pick(live?.Art, t?.Didl.Art));
         }
+    }
+
+    private static string Pick(string? a, string? b) => !string.IsNullOrEmpty(a) ? a : b ?? "";
+
+    // Live details for the track playing now (Squeezebox server, Spotify).
+    public void SetLive(Track t, LiveMeta meta)
+    {
+        t.Live = meta;
+        Changed?.Invoke();
     }
 
     private double PositionUnlocked()

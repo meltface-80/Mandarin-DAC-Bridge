@@ -84,7 +84,7 @@ namespace MandarinDacBridge
                 };
             });
             Ssdp = new Ssdp(config.Port, config.BindIp,
-                $"{(OperatingSystem.IsMacOS() ? "macOS" : "Linux")}/{Environment.OSVersion.Version} UPnP/1.0 MandarinDacBridge/{Config.Version}",
+                $"{(OperatingSystem.IsMacOS() ? "macOS" : OperatingSystem.IsWindows() ? "Windows" : "Linux")}/{Environment.OSVersion.Version} UPnP/1.0 MandarinDacBridge/{Config.Version}",
                 () => Manager.Bridges().Select(b => b.Advert));
 
             Manager.Added += b =>

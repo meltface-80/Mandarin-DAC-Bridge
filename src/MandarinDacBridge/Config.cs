@@ -9,6 +9,13 @@
 //   MANDARIN_PORT        Mandarin's own port, to recognise its streams (3500)
 //   BRIDGE_ALL_OUTPUTS   1 = offer every output, not only USB DACs
 //   BRIDGE_NAME_SUFFIX   added to each DAC's name on the network (" (Bridge)")
+//   SQUEEZELITE          1 = each DAC is a Squeezebox player too (also a switch on the page)
+//   LMS_SERVER           the Squeezebox server (Lyrion, Roon) to use, instead of looking for one
+//   SPOTIFY              1 = each DAC is a Spotify Connect speaker too, through Spotify Soloist (Linux; also on the page)
+//   SOLOIST_API_KEY      your Soloist API key (or typed on the page; kept in settings.json, never shown again)
+//   SOLOIST              the soloist program (else on the PATH, or downloaded by the page into DATA_DIR/soloist)
+//   CALDERA              1 = each DAC is a Plex player too, through Caldera Headless (Linux; also on the page)
+//   QOBUZ                1 = each DAC is a Qobuz Connect speaker too, through QobuzProxy (also on the page)
 using System.Reflection;
 
 namespace MandarinDacBridge;
@@ -26,9 +33,17 @@ internal sealed class Config
     public int MandarinPort { get; init; } = 3500;
     public bool AllOutputs { get; init; }
     public string NameSuffix { get; init; } = " (Bridge)";
+    // Defaults for the page's switches (the page's choice, once made, is kept in settings.json).
+    public bool Squeezelite { get; init; }
+    public string LmsServer { get; init; } = "";
+    public bool Spotify { get; init; }
+    public string Soloist { get; init; } = "";
+    public string SoloistKey { get; init; } = "";
+    public bool Caldera { get; init; }
+    public bool Qobuz { get; init; }
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
-    public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : "other";
+    public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : "other";
     // Tests: DACs given rather than found (JSON), and played to a clock rather than a device.
     public string? TestDevices { get; init; }
     public bool TestSink { get; init; }
@@ -47,6 +62,13 @@ internal sealed class Config
             MandarinPort = int.TryParse(Env("MANDARIN_PORT"), out var mp) ? mp : 3500,
             AllOutputs = Env("BRIDGE_ALL_OUTPUTS") == "1",
             NameSuffix = Environment.GetEnvironmentVariable("BRIDGE_NAME_SUFFIX") ?? " (Bridge)",
+            Squeezelite = Env("SQUEEZELITE") == "1",
+            LmsServer = Env("LMS_SERVER") ?? "",
+            Spotify = Env("SPOTIFY") == "1",
+            Soloist = Env("SOLOIST") ?? "",
+            SoloistKey = Env("SOLOIST_API_KEY") ?? "",
+            Caldera = Env("CALDERA") == "1",
+            Qobuz = Env("QOBUZ") == "1",
             TestDevices = Env("BRIDGE_TEST_DEVICES"),
             TestSink = Env("BRIDGE_TEST_SINK") is "fake" or "busy",
             TestSinkBusy = Env("BRIDGE_TEST_SINK") == "busy"
@@ -55,17 +77,48 @@ internal sealed class Config
         return c;
     }
 
-    // ffmpeg on the PATH, else where Homebrew puts it (launchd's PATH is short).
-    private static string FindFfmpeg()
+    // Where the page's Download puts Spotify Soloist.
+    public string SoloistDir => Path.Combine(DataDir, "soloist");
+
+    // soloist as set, else downloaded by the page, else on the PATH; "" if none.
+    public string FindSoloist() =>
+        Soloist != "" ? (File.Exists(Soloist) ? Soloist : "") : Find("soloist", [SoloistDir]);
+
+    // The PulseAudio server, which gives Soloist a private sound server to play into.
+    public static string FindPulseAudio() => Find("pulseaudio", []);
+
+    // A program in these folders, then on the PATH, then where package managers put it ("" if nowhere).
+    // On Windows with .exe, and winget's, Scoop's and Chocolatey's folders.
+    internal static string Find(string name, string[] first)
     {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries)
-                     .Concat(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]))
+        var exe = OperatingSystem.IsWindows() ? name + ".exe" : name;
+        foreach (var dir in first.Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+                     .Concat(Common()))
         {
-            var f = Path.Combine(dir, "ffmpeg");
-            if (File.Exists(f)) return f;
+            try
+            {
+                var f = Path.Combine(dir.Trim('"'), exe);
+                if (File.Exists(f)) return f;
+            }
+            catch (ArgumentException) { /* a broken PATH entry */ }
         }
-        return "ffmpeg";
+        return "";
     }
+
+    private static IEnumerable<string> Common()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return [Path.Combine(local, "Microsoft", "WinGet", "Links"), Path.Combine(home, "scoop", "shims"), @"C:\ProgramData\chocolatey\bin",
+                    @"C:\ffmpeg\bin", Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin"), AppContext.BaseDirectory];
+        }
+        return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
+    }
+
+    // ffmpeg on the PATH, else where Homebrew (launchd's PATH is short) or winget put it.
+    private static string FindFfmpeg() => Find("ffmpeg", []) is { Length: > 0 } f ? f : "ffmpeg";
 }
 
 internal static class Log

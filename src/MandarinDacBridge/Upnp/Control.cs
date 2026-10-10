@@ -18,10 +18,15 @@ internal static class Control
         "audio/mpeg", "audio/mp3", "audio/aac", "audio/ogg", "audio/x-ogg", "audio/opus", "application/ogg"
     ];
 
-    // What the renderer says it plays: what ffmpeg reads, DSD, and raw PCM at the DAC's rates.
-    public static string ProtocolInfo(int[] rates)
+    // What the renderer says it plays: what ffmpeg reads, DSD, and raw PCM at the DAC's rates. FLAC
+    // also says the DAC's best (sampleRate, bitsPerSample), which controllers that pick a stream
+    // quality from it read (QobuzProxy: hi-res only when it's said).
+    public static string ProtocolInfo(int[] rates, int[]? bits = null)
     {
         var o = Mimes.Select(m => $"http-get:*:{m}:*").ToList();
+        int maxRate = rates.Length > 0 ? rates.Max() : 192000;
+        int maxBits = bits is { Length: > 0 } ? Math.Min(32, bits.Max()) : 24;
+        o.Insert(0, $"http-get:*:audio/flac:sampleRate={maxRate};bitsPerSample={Math.Max(16, maxBits)}");
         foreach (var r in rates.Length > 0 ? rates : [44100, 48000, 88200, 96000, 176400, 192000])
             foreach (var b in new[] { 16, 24 })
                 o.Add($"http-get:*:audio/L{b};rate={r};channels=2:{(b == 16 ? "DLNA.ORG_PN=LPCM" : "*")}");

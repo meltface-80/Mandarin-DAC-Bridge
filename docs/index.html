@@ -172,6 +172,7 @@
     <a href="#mac">Mac</a>
     <a href="#docker">Docker</a>
     <a href="#apps">Audirvana &amp; Mandarin</a>
+    <a href="#more">More</a>
     <a href="#remove">Uninstall</a>
     <a href="#settings">Settings</a>
     <a href="#trouble">Troubleshooting</a>
@@ -184,7 +185,8 @@
   <h1>Mandarin <span>DAC Bridge</span></h1>
   <p class="tag">Audirvana and Mandarin, sharing your USB DACs. The bridge holds each DAC exclusively,
      switches it to every track's own sample rate, plays the samples untouched, and offers it on your network
-     as a UPnP renderer, so either app can play to it, but never both at once.</p>
+     as a UPnP renderer, so either app can play to it, but never both at once. Optionally also as a Squeezebox
+     player and a Spotify Connect speaker (Spotify Soloist), beside Roon Bridge, with a now-playing screen.</p>
   <div class="badges">
     <span class="badge">v1.0.0</span>
     <span class="badge plain">macOS 14+ · macOS 27</span>
@@ -192,6 +194,8 @@
     <span class="badge plain">Bit-perfect</span>
     <span class="badge plain">DSD as DoP</span>
     <span class="badge plain">UPnP / DLNA</span>
+    <span class="badge plain">Squeezebox</span>
+    <span class="badge plain">Spotify Connect</span>
     <span class="badge plain">.NET 10</span>
     <span class="badge plain">MIT</span>
   </div>
@@ -369,6 +373,68 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
   </div>
 </section>
 
+<section id="more">
+  <div class="wrap">
+    <h2>More ways to play</h2>
+    <p class="lead">UPnP is always on. These are optional, and go through the same exclusive, rate-switched path and
+      the same one-app-at-a-time rule: whatever is playing keeps the others out until it stops.</p>
+    <div class="info-cards">
+      <div class="info-card" id="squeezebox">
+        <div class="sym">Squeezebox · squeezelite</div>
+        <h3>Lyrion Music Server, and Roon</h3>
+        <p>Switch on <b>Squeezebox</b> under <i>Connections</i> on the bridge's page. Each DAC then becomes a player,
+          "&lt;DAC&gt; (Bridge)", for Lyrion Music Server (LMS) — and for Roon, with <i>Settings → Setup → Squeezebox
+          support</i> on. The bridge speaks the Squeezebox protocol itself rather than running squeezelite, because
+          squeezelite would need the DAC to itself. The server is found by itself; type its address if it isn't.</p>
+        <p>FLAC, PCM, AIFF, MP3 and Ogg are taken as they come, gapless. DSD is converted by the server. In LMS, set
+          the player's volume control to <i>fixed at 100%</i> for bit-perfect playback.</p>
+      </div>
+      <div class="info-card" id="spotify">
+        <div class="sym">Spotify Connect · Linux</div>
+        <h3>Through Spotify Soloist</h3>
+        <p><a href="https://developer.spotify.com/documentation/soloist">Spotify Soloist</a> is Spotify's own Spotify
+          Connect client for Linux. Switch on <b>Spotify Connect</b> on the bridge's page and each DAC appears in the
+          Spotify app's device list. It needs:</p>
+        <p>· <b>Your own Soloist API key</b>, made at <a href="https://developer.spotify.com/dashboard/soloist">Spotify
+          for Developers</a> (needs Premium), typed on the page. It is never shown again.<br>
+          · <b>Soloist</b>, which may not be passed around: <b>Download Soloist</b> on the page fetches Spotify's own
+          build for the machine. A build lasts 90 days; the page shows until when.<br>
+          · <b>Linux with glibc 2.38 or later</b> (Debian 13, Ubuntu 24.04, Raspberry Pi OS trixie), or the Docker
+          image on anything older. There is no Soloist for macOS.<br>
+          · <b>PulseAudio</b> (<code>sudo apt install pulseaudio</code>; in the Docker image already).</p>
+        <p>Soloist plays into a private PulseAudio with no sound card, only a pipe the bridge reads, so its sound takes
+          the same exclusive path as everything else, at 44.1 kHz, paced by the DAC: nothing is resampled. If another
+          app has the DAC, Spotify is paused. The volume stays at 100%.</p>
+      </div>
+      <div class="info-card" id="roon">
+        <div class="sym">Roon Bridge</div>
+        <h3>Beside the bridge, sharing the DAC</h3>
+        <p>Roon Bridge can't be bundled (Roon's licence), and Roon Ready playback (RAAT) is Roon's own, so Roon Bridge
+          runs next to the bridge. Like RoPieee, this downloads Roon's own installer from Roon Labs and runs it:</p>
+        <div class="codebox"><button class="copy-btn" data-copy>Copy</button>
+<pre>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/linux/roon-bridge.sh)"</pre></div>
+        <p>On a Mac, install <a href="https://download.roonlabs.net/builds/RoonBridge.dmg">Roon Bridge for macOS</a>.
+          Then, on each DAC Roon should use, switch on <b>Share when idle</b>: the bridge lets go of the DAC whenever
+          nothing plays through it, so Roon can take it, and takes it back when an app plays to the bridge (once
+          Roon has let go). Or skip Roon Bridge: Roon's Squeezebox support plays to the bridge directly, with Roon's
+          Squeezebox limits.</p>
+      </div>
+      <div class="info-card" id="display">
+        <div class="sym">Now-playing screen</div>
+        <h3>A monitor beside the DAC</h3>
+        <p>Open <code>http://&lt;machine&gt;:<span class="port">55500</span>/now</code> full-screen on any screen: cover,
+          title, artist, album, time and format of what's playing, from any app, and a clock when nothing is. It follows
+          whichever DAC is playing, or one you pick (move the mouse). On a Linux machine with a monitor plugged in and
+          no desktop, this sets it up to start at boot:</p>
+        <div class="codebox"><button class="copy-btn" data-copy>Copy</button>
+<pre>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/linux/display.sh)"
+<span class="c"># the bridge on another machine:  … display.sh)" -- --url http://192.168.1.20:55500/now</span>
+<span class="c"># remove it again:                 … display.sh)" -- --uninstall</span></pre></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="remove">
   <div class="wrap">
     <h2>Uninstall</h2>
@@ -428,8 +494,9 @@ docker compose down --rmi local --volumes</pre>
   <div class="wrap">
     <h2>Settings</h2>
     <p class="lead">None are needed. On a DAC's page you can switch the bridge off for that DAC (it lets go and the
-      machine can use it), choose how DSD files go (Auto, DoP or PCM), and hand the DAC over to another app at once
-      (Release). The rest are environment variables.</p>
+      machine can use it), choose how DSD files go (Auto, DoP or PCM), share it with other players while idle, and hand
+      the DAC over to another app at once (Release). Squeezebox and Spotify are switched on under <i>Connections</i>.
+      The rest are environment variables.</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Variable</th><th>Default</th><th>What it does</th></tr></thead>
@@ -441,6 +508,11 @@ docker compose down --rmi local --volumes</pre>
           <tr><td>BRIDGE_ALL_OUTPUTS</td><td>&mdash;</td><td><code>1</code> also offers non-USB outputs.</td></tr>
           <tr><td>BRIDGE_NAME_SUFFIX</td><td>" (Bridge)"</td><td>Added to each DAC's name on the network.</td></tr>
           <tr><td>DATA_DIR</td><td>data/</td><td>Where <code>settings.json</code> lives (<code>/data</code> in Docker).</td></tr>
+          <tr><td>SQUEEZELITE</td><td>&mdash;</td><td><code>1</code> starts with Squeezebox on (the page's switch, once used, wins).</td></tr>
+          <tr><td>LMS_SERVER</td><td>&mdash;</td><td>The Squeezebox server's address, if it isn't found by itself.</td></tr>
+          <tr><td>SPOTIFY</td><td>&mdash;</td><td><code>1</code> starts with Spotify Connect on (Spotify Soloist, Linux).</td></tr>
+          <tr><td>SOLOIST_API_KEY</td><td>&mdash;</td><td>Your Soloist API key, instead of typing it on the page.</td></tr>
+          <tr><td>SOLOIST</td><td>downloaded</td><td>Where the soloist program is, if not downloaded by the page.</td></tr>
         </tbody>
       </table>
     </div>

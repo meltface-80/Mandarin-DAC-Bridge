@@ -5,7 +5,7 @@ services:
     image: mandarin-dac-bridge
     container_name: mandarin-dac-bridge
     restart: unless-stopped
-    # UPnP discovery is multicast: the container must be on the host's network.
+    # UPnP, Squeezebox and Spotify discovery are multicast/broadcast: the container must be on the host's network.
     network_mode: host
     # The host's sound devices: handed over, openable (privileged), and
     # mounted so a DAC plugged in later is found too.
@@ -21,6 +21,10 @@ services:
     environment:
       - TZ=Europe/London
       # - BRIDGE_IP=192.168.1.20     # only if the machine has several networks
+      # Squeezebox and Spotify can be switched on on the page instead:
+      # - SQUEEZELITE=1               # each DAC is a Squeezebox player (Lyrion, Roon)
+      # - LMS_SERVER=192.168.1.30     # the server, if it isn't found by itself
+      # - SPOTIFY=1                   # each DAC is a Spotify Connect speaker (Spotify Soloist: download it on the page)
 
 volumes:
   dac-bridge-data:

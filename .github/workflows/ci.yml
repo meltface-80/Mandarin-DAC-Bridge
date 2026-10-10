@@ -7,11 +7,45 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, rid: linux-x64 }
+          - { os: macos-latest, rid: osx-arm64 }
+          - { os: windows-latest, rid: win-x64 }
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64
+      - name: ffmpeg (and on Linux ALSA and PulseAudio)
+        shell: bash
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64 pulseaudio pulseaudio-utils clang zlib1g-dev ;;
+            macOS)   brew install ffmpeg ;;
+            Windows) choco install ffmpeg -y --no-progress ;;
+          esac
       - run: dotnet test -c Release
+      # The native program each platform gets, and its own sound-device code run for real
+      # (Core Audio on macOS, WASAPI on Windows, ALSA on Linux): it must list and diagnose without failing.
+      - name: Native AOT build
+        run: dotnet publish src/MandarinDacBridge -c Release -r ${{ matrix.rid }} -o out
+      - name: Smoke run
+        shell: bash
+        run: |
+          exe=out/mandarin-dac-bridge; [ "$RUNNER_OS" = Windows ] && exe=out/mandarin-dac-bridge.exe
+          "$exe" --version
+          "$exe" --list
+          "$exe" --diagnose
+      - name: PowerShell scripts parse
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($f in 'tools/windows/install.ps1', 'tools/windows/uninstall.ps1') {
+            $errors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errors) | Out-Null
+            if ($errors) { $errors | ForEach-Object { Write-Error "$f: $_" }; exit 1 }
+          }

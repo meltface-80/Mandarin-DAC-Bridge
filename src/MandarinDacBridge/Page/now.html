@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Now Playing</title>
+<meta name="description" content="Mandarin DAC Bridge: what each DAC is playing, for a screen beside it.">
+<link rel="icon" href="icon.png">
+<style>
+  @font-face { font-family: "Manrope"; src: url("fonts/manrope.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+  @font-face { font-family: "Young Serif"; src: url("fonts/young-serif.woff2") format("woff2"); font-display: swap; }
+  /* A screen across the room: always dark, so it doesn't light the room up. */
+  :root {
+    --bg: #0e0f11; --text: #ecebe6; --muted: #9a9ca1; --faint: #5d6066; --gold: #c9a45c; --line: rgba(255,255,255,.12);
+    --sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --serif: "Young Serif", Georgia, serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--text); overflow: hidden; }
+  body { font-family: var(--sans); -webkit-font-smoothing: antialiased; cursor: none; }
+  body.pointer { cursor: default; }
+
+  .wash { position: fixed; inset: -10%; background-size: cover; background-position: center; filter: blur(70px) saturate(1.2) brightness(.35);
+    opacity: 0; transition: opacity 1.2s, background-image 1.2s; }
+  .wash.on { opacity: 1; }
+
+  .stage { position: relative; height: 100%; display: grid; grid-template-columns: minmax(0, 46vh) minmax(0, 1fr); align-items: center;
+    gap: 6vh; padding: 8vh 7vw; max-width: 1800px; margin: 0 auto; }
+  .art { width: 100%; aspect-ratio: 1; border-radius: 1.6vh; background: #1b1d21 center / cover no-repeat; box-shadow: 0 3vh 8vh rgba(0,0,0,.55);
+    display: grid; place-items: center; overflow: hidden; }
+  .art svg { width: 34%; height: 34%; stroke: var(--faint); fill: none; stroke-width: 1.4; }
+  .art.has svg { display: none; }
+  .info { min-width: 0; display: flex; flex-direction: column; gap: 1.4vh; }
+  .src { font-size: 1.9vh; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); font-weight: 700; display: flex; gap: 1.2vh; align-items: center; }
+  .src .dot { width: 1.1vh; height: 1.1vh; border-radius: 50%; background: var(--gold); flex: none; }
+  .src .dot.paused { background: transparent; border: 2px solid var(--gold); }
+  .title { font-family: var(--serif); font-weight: 400; font-size: 6.4vh; line-height: 1.12; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .artist { font-size: 3.4vh; font-weight: 600; overflow-wrap: anywhere; }
+  .album { font-size: 2.6vh; color: var(--muted); overflow-wrap: anywhere; }
+  .bar { margin-top: 3vh; height: .7vh; border-radius: 1vh; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--text); border-radius: 1vh; transition: width .9s linear; }
+  .times { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 1.9vh; color: var(--muted); }
+  .fmt { margin-top: 1.6vh; font-family: var(--mono); font-size: 2vh; color: var(--muted); }
+  .fmt b { color: var(--text); font-weight: 500; }
+
+  .idle { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 2vh;
+    text-align: center; padding: 6vh; transition: transform 60s linear; }
+  .idle .clock { font-family: var(--serif); font-size: 16vh; line-height: 1; }
+  .idle .date { font-size: 2.8vh; color: var(--muted); }
+  .idle .dacs { margin-top: 3vh; font-size: 2vh; color: var(--faint); }
+  body.is-idle .stage, body.is-idle .wash { display: none; }
+  body.is-idle .idle { display: flex; }
+
+  .pick { position: fixed; top: 2vh; right: 2vh; display: none; gap: 1vh; }
+  body.pointer .pick { display: flex; }
+  .pick select { font: inherit; font-size: 14px; background: #1b1d21; color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; }
+  .pick a { font-size: 14px; color: var(--muted); align-self: center; text-decoration: none; padding: 6px 10px; }
+
+  /* Portrait screens: art above the words. */
+  @media (max-aspect-ratio: 1/1) {
+    .stage { grid-template-columns: 1fr; grid-template-rows: auto auto; align-content: center; gap: 4vh; padding: 6vh 7vw; }
+    .art { width: min(100%, 52vh); margin: 0 auto; }
+    .info { text-align: center; }
+    .src { justify-content: center; }
+    .title { font-size: 4.6vh; }
+  }
+  @media (prefers-reduced-motion: reduce) { .bar i, .wash, .idle { transition: none; } }
+</style>
+</head>
+<body class="is-idle">
+<div class="wash" id="wash"></div>
+<main class="stage">
+  <div class="art" id="art" role="img" aria-label="Cover">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/></svg>
+  </div>
+  <div class="info">
+    <div class="src"><span class="dot" id="dot"></span><span id="src"></span></div>
+    <h1 class="title" id="title"></h1>
+    <div class="artist" id="artist"></div>
+    <div class="album" id="album"></div>
+    <div class="bar" id="bar-wrap"><i id="bar"></i></div>
+    <div class="times" id="times"><span id="pos"></span><span id="dur"></span></div>
+    <div class="fmt" id="fmt"></div>
+  </div>
+</main>
+<div class="idle" id="idle">
+  <div class="clock" id="clock"></div>
+  <div class="date" id="date"></div>
+  <div class="dacs" id="idle-dacs"></div>
+</div>
+<div class="pick">
+  <select id="pick" aria-label="Which DAC"></select>
+  <a href="/">Bridge</a>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const time = (s) => { s = Math.max(0, Math.round(s || 0)); const h = Math.floor(s / 3600), m = Math.floor(s / 60) % 60;
+  return (h ? h + ":" + String(m).padStart(2, "0") : m) + ":" + String(s % 60).padStart(2, "0"); };
+
+// ?dac=<id> keeps the screen on one DAC; otherwise it follows whichever is playing.
+const params = new URLSearchParams(location.search);
+let fixed = params.get("dac") || "";
+let shown = null, at = 0, lastArt = null;
+
+function choose(dacs) {
+  if (fixed) return dacs.find((d) => d.id === fixed) || null;
+  const live = (d) => d.player && ["PLAYING", "TRANSITIONING"].includes(d.player.transport);
+  const paused = (d) => d.player && d.player.transport === "PAUSED_PLAYBACK";
+  return dacs.find((d) => shown && d.id === shown.id && (live(d) || paused(d)))   // stay on the one shown while it's in use
+      || dacs.find(live) || dacs.find(paused) || null;
+}
+
+function setArt(url) {
+  if (url === lastArt) return;
+  lastArt = url;
+  const art = $("#art"), wash = $("#wash");
+  if (!url) { art.style.backgroundImage = ""; art.classList.remove("has"); wash.classList.remove("on"); return; }
+  const img = new Image();
+  img.onload = () => {
+    if (lastArt !== url) return;
+    const css = `url("${url.replace(/"/g, "%22")}")`;
+    art.style.backgroundImage = css; art.classList.add("has");
+    wash.style.backgroundImage = css; wash.classList.add("on");
+  };
+  img.onerror = () => { if (lastArt === url) { art.style.backgroundImage = ""; art.classList.remove("has"); wash.classList.remove("on"); } };
+  img.src = url;
+}
+
+function render(d, dacs) {
+  document.body.classList.toggle("is-idle", !d);
+  $("#idle-dacs").textContent = dacs.filter((x) => x.enabled).map((x) => x.name).join("  ·  ");
+  if (!d) { shown = null; setArt(""); return; }
+  const p = d.player, who = d.control && d.control.owner;
+  shown = { id: d.id, position: p.position, duration: p.duration, playing: p.transport === "PLAYING" };
+  at = Date.now();
+  $("#dot").className = "dot" + (p.transport === "PAUSED_PLAYBACK" ? " paused" : "");
+  $("#src").textContent = [p.transport === "PAUSED_PLAYBACK" ? "Paused" : "Now playing", who, d.name].filter(Boolean).join("  ·  ");
+  $("#title").textContent = p.title || (who === "Spotify" ? "Spotify" : "Untitled");
+  $("#artist").textContent = p.artist || "";
+  $("#album").textContent = p.album || "";
+  $("#fmt").innerHTML = p.format ? `<b>${escapeHtml(p.format)}</b>${p.physical ? "  →  " + escapeHtml(p.physical) : ""}` : "";
+  $("#bar-wrap").style.visibility = $("#times").style.visibility = p.duration ? "visible" : "hidden";
+  setArt(p.art || "");
+  tick();
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+// Between reads, the position runs on by itself.
+function tick() {
+  const now = new Date();
+  $("#clock").textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  $("#date").textContent = now.toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  if (!shown) return;
+  let pos = shown.position + (shown.playing ? (Date.now() - at) / 1000 : 0);
+  if (shown.duration) pos = Math.min(pos, shown.duration);
+  $("#pos").textContent = time(pos);
+  $("#dur").textContent = shown.duration ? time(shown.duration) : "";
+  $("#bar").style.width = shown.duration ? (100 * pos / shown.duration).toFixed(2) + "%" : "0";
+}
+
+function fillPicker(dacs) {
+  const sel = $("#pick");
+  const opts = [["", "Whichever is playing"]].concat(dacs.map((d) => [d.id, d.name]));
+  const key = opts.map((o) => o.join("=")).join("|");
+  if (sel.dataset.key !== key) {
+    sel.innerHTML = opts.map(([v, t]) => `<option value="${escapeHtml(v)}">${escapeHtml(t)}</option>`).join("");
+    sel.dataset.key = key;
+  }
+  sel.value = fixed;
+}
+$("#pick").onchange = (e) => {
+  fixed = e.target.value;
+  const u = new URL(location.href);
+  if (fixed) u.searchParams.set("dac", fixed); else u.searchParams.delete("dac");
+  history.replaceState(null, "", u);
+  refresh();
+};
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/dacs", { cache: "no-store" });
+    const data = await r.json();
+    fillPicker(data.dacs);
+    render(choose(data.dacs), data.dacs);
+  } catch (e) { /* the bridge restarting: try again shortly */ }
+}
+
+// The pointer (and the DAC picker) shows when the mouse moves, and hides again.
+let hide;
+document.addEventListener("pointermove", () => {
+  document.body.classList.add("pointer");
+  clearTimeout(hide);
+  hide = setTimeout(() => document.body.classList.remove("pointer"), 4000);
+});
+
+// The idle clock drifts slowly, so nothing stays burnt into the screen.
+setInterval(() => {
+  $("#idle").style.transform = `translate(${Math.round((Math.random() - .5) * 8)}vw, ${Math.round((Math.random() - .5) * 8)}vh)`;
+}, 60000);
+
+refresh();
+setInterval(refresh, 1000);
+setInterval(tick, 250);
+</script>
+</body>
+</html>

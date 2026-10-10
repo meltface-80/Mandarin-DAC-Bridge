@@ -17,7 +17,7 @@ internal sealed class AlsaSink(string device) : ISink
     private readonly ManualResetEventSlim running = new(true);   // reset while paused
     private IntPtr pcm;
     private int format, sampleBytes, devChannels, srcChannels, rate;
-    private bool configured, canPause, hwPaused, disposed;
+    private bool configured, canPause, hwPaused, disposed, shared, started;
     private long written;
     private byte[] scratch = new byte[1 << 16];
     private Thread? opener;
@@ -30,6 +30,17 @@ internal sealed class AlsaSink(string device) : ISink
 
     public void Start()
     {
+        lock (gate)
+        {
+            started = true;
+            if (shared) { Message = Sharing.Idle; return; }
+        }
+        StartHolding();
+    }
+
+    private void StartHolding()
+    {
+        if (opener is { IsAlive: true }) return;
         opener = new Thread(Hold) { IsBackground = true, Name = "alsa-open " + device };
         opener.Start();
     }
@@ -39,12 +50,13 @@ internal sealed class AlsaSink(string device) : ISink
     {
         int failures = 0;
         string last = "";
-        while (!disposed)
+        while (!disposed && !shared)
         {
             int err;
             lock (gate)
             {
-                if (disposed) return;
+                if (disposed || shared) return;
+                if (pcm != IntPtr.Zero) return;
                 err = Alsa.Open(out pcm, device, Alsa.StreamPlayback, Alsa.NonBlock);
                 if (err >= 0)
                 {
@@ -232,6 +244,47 @@ internal sealed class AlsaSink(string device) : ISink
                 running.Set();
             }
         }
+    }
+
+    public void Share(bool on)
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            shared = on;
+            if (on)
+            {
+                if (pcm != IntPtr.Zero) { Alsa.Drop(pcm); Alsa.Close(pcm); pcm = IntPtr.Zero; }
+                configured = false;
+                Exclusive = false;
+                HolderPid = 0;
+                Message = Sharing.Idle;
+                running.Set();
+            }
+        }
+        if (!on && started) StartHolding();
+        StatusChanged?.Invoke();
+    }
+
+    public bool Reclaim()
+    {
+        lock (gate)
+        {
+            if (disposed) return false;
+            if (pcm != IntPtr.Zero) return true;
+            int err = Alsa.Open(out pcm, device, Alsa.StreamPlayback, Alsa.NonBlock);
+            if (err < 0)
+            {
+                pcm = IntPtr.Zero;
+                Message = err == Alsa.EBUSY ? "another program is using the DAC" : Alsa.StrError(err);
+                return false;
+            }
+            Exclusive = true;
+            Message = "";
+            HolderPid = Environment.ProcessId;
+        }
+        StatusChanged?.Invoke();
+        return true;
     }
 
     public long Played { get { lock (gate) return PlayedLocked(); } }

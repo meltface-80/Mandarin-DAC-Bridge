@@ -108,6 +108,26 @@
   .btn { border: 1px solid var(--gold-dim); background: var(--wash); border-radius: 10px; padding: 7px 14px; cursor: pointer; font-size: 13.5px; flex: none; }
   .btn:hover { border-color: var(--gold); }
   .foot { margin-top: 22px; color: var(--muted); font-size: 12.5px; }
+  header .nowlink { color: var(--gold); text-decoration: none; font-size: 13px; border: 1px solid var(--gold-dim); border-radius: 999px; padding: 5px 12px; white-space: nowrap; }
+  header .nowlink:hover { border-color: var(--gold); }
+
+  /* Connections: the ways in besides UPnP */
+  .conn { margin-top: 30px; }
+  .conn h2 { font-size: 11.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); font-weight: 700; margin-bottom: 10px; }
+  .conn .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 4px 20px; }
+  .conn .row:first-of-type { border-top: 0; }
+  .conn .row:last-child { border-bottom: 0; }
+  .conn .row > div:first-child { min-width: 0; }
+  .conn input[type=text], .conn input[type=password] { font: inherit; font-size: 13.5px; color: var(--text); background: var(--bg-deep); border: 1px solid var(--line);
+    border-radius: 10px; padding: 7px 10px; width: 220px; max-width: 100%; }
+  .conn input[type=text]:focus, .conn input[type=password]:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .conn .ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .tag { font-size: 12px; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .tag.on { border-color: var(--gold); color: var(--gold); }
+  .hint a { color: var(--gold); }
+  .conn .hint { overflow-wrap: anywhere; }
+  .conn .code { font-family: var(--mono); font-size: 15px; letter-spacing: .12em; color: var(--gold); }
+  @media (max-width: 520px) { .conn .row { flex-direction: column; align-items: stretch; } .conn .ctl { justify-content: flex-start; } }
   @media (max-width: 520px) {
     header { padding-top: 24px; flex-wrap: wrap; }
     header .host { margin-left: 0; text-align: left; width: 100%; }
@@ -126,6 +146,7 @@
     <div class="sub">Mandarin · exclusive, bit-perfect USB DACs</div>
   </div>
   <div class="host" id="host"></div>
+  <a class="nowlink" href="/now" title="A now-playing screen, for a display beside the DAC">Now Playing ↗</a>
 </header>
 
 <main>
@@ -139,6 +160,11 @@
     <summary>Other sound devices seen, not bridged</summary>
     <ul id="others-list"></ul>
   </details>
+
+  <section class="conn" aria-labelledby="conn-h">
+    <h2 id="conn-h">Connections</h2>
+    <div class="panel" id="conn"></div>
+  </section>
 </main>
 
 <div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="d-name">
@@ -156,8 +182,11 @@ const time = (s) => { s = Math.max(0, Math.round(s || 0)); return Math.floor(s /
 let data = { dacs: [] };
 let openId = null;
 
+const SHARED = "shared: let go while idle, for other players";
+
 function state(d) {
   if (!d.enabled) return { cls: "off", text: "Not bridged · left to the Mac" };
+  if (!d.exclusive && d.share) return d.holder ? { cls: "wait", text: `Shared · ${d.holder} is playing` } : { cls: "ok", text: "Shared · free for other players" };
   if (!d.exclusive) return { cls: "wait", text: d.holder ? `Waiting · ${d.holder} has the DAC` : "Waiting for the DAC" };
   const p = d.player || {}, who = d.control && d.control.owner;
   if (p.transport === "PLAYING" || p.transport === "TRANSITIONING") return { cls: "play", text: `${who ? who + " · " : ""}${p.format || "Playing"}` };
@@ -186,6 +215,136 @@ function renderTiles() {
   b.hidden = !data.error;
   b.textContent = data.error || "";
   $("#host").textContent = data.host ? `${data.host} · v${data.version}` : "";
+  renderConnections();
+}
+
+// The ways in: UPnP (always), Squeezebox, Spotify Connect, Roon Bridge alongside, and the display.
+function renderConnections() {
+  const sv = data.services;
+  if (!sv) return;
+  const el = $("#conn");
+  if (el.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;   // don't redraw under typing
+  const sq = data.dacs.map((d) => d.squeezebox).filter(Boolean);
+  const sp = data.dacs.map((d) => d.spotify).filter(Boolean);
+  const nowUrl = `${location.protocol}//${location.host}/now`;
+  el.innerHTML = `
+    <div class="row">
+      <div><div class="lbl">UPnP / DLNA</div><div class="hint">Audirvana, Mandarin, BubbleUPnP, JRiver… choose “${esc((data.dacs[0] && data.dacs[0].upnpName) || "<DAC> (Bridge)")}”.</div></div>
+      <div class="ctl"><span class="tag on">Always on</span></div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Squeezebox (squeezelite)</div>
+        <div class="hint">Each DAC becomes a player for Lyrion Music Server, or for Roon with its Squeezebox support switched on.
+        ${sv.squeezelite && sq.length ? "<br>" + esc(sq[0]) : ""}</div></div>
+      <div class="ctl">
+        ${sv.squeezelite ? `<input type="text" id="c-lms" placeholder="Server: found by itself" value="${esc(sv.lmsServer)}" aria-label="Squeezebox server address">` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.squeezelite}" aria-label="Squeezebox" id="c-sq"></button>
+      </div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Spotify Connect</div>
+        <div class="hint">${!sv.spotifyPossible
+          ? `Through Spotify Soloist, Spotify's own Connect client, which runs on Linux only. <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#spotify" target="_blank" rel="noopener">More</a>.`
+          : `Each DAC appears in Spotify's device list, through <b>Spotify Soloist</b> (Spotify's own Connect client; Premium).
+             You need your own <a href="https://developer.spotify.com/dashboard/soloist" target="_blank" rel="noopener">Soloist API key</a>.
+             ${sv.spotify ? "<br>" + spotifyState(sv, sp) : ""}`}</div></div>
+      <div class="ctl">
+        ${sv.spotify && sv.spotifyPossible ? `<input type="password" id="c-key" autocomplete="off" placeholder="${sv.soloistKey ? "API key set ✓ (type to replace)" : "Soloist API key"}" aria-label="Soloist API key">
+          ${!sv.soloist || sv.soloistDownload || (sv.soloistExpires && sv.soloistExpires <= new Date().toISOString().slice(0, 10)) ? `<button class="btn" id="c-dl"${sv.soloistDownload.startsWith("downloading") ? " disabled" : ""}>${sv.soloist ? "Download again" : "Download Soloist"}</button>` : ""}` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.spotify}" aria-label="Spotify Connect" id="c-sp"></button>
+      </div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Qobuz Connect</div>
+        <div class="hint">Each DAC appears in the Qobuz app's device list, through <b>QobuzProxy</b>, in hi-res up to what the DAC takes.
+          ${sv.qobuz ? "<br>" + qobuzState(sv) : ""}</div></div>
+      <div class="ctl">
+        ${sv.qobuz && (!sv.qobuzInstalled || sv.qobuzInstall) ? `<button class="btn" id="c-qi"${sv.qobuzInstall && !sv.qobuzInstall.startsWith("install failed") ? " disabled" : ""}>${sv.qobuzInstalled ? "Install again" : "Install QobuzProxy"}</button>` : ""}
+        ${sv.qobuz && sv.qobuzInstalled && !sv.qobuzSignedIn ? `<a class="btn" style="text-decoration:none;color:inherit" target="_blank" rel="noopener" href="${location.protocol}//${location.hostname}:${sv.qobuzWebPort}/">Sign in to Qobuz</a>` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.qobuz}" aria-label="Qobuz Connect" id="c-qb"></button>
+      </div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Plex · Caldera Headless</div>
+        <div class="hint">${!sv.calderaPossible
+          ? "Caldera Headless runs on Linux only."
+          : `Each DAC becomes a Plex player for Plexamp, Plex for iOS and the Plex web app, through <b>Caldera Headless</b>. Caldera plays to the DAC itself, bit-perfect, and shares it with the bridge: whoever plays first has it.
+             ${sv.caldera ? "<br>" + calderaState(sv, data.dacs.map((d) => d.caldera).filter(Boolean)) : ""}`}</div></div>
+      <div class="ctl">
+        ${sv.caldera && sv.calderaPossible && (!sv.calderaVersion || sv.calderaDownload) ? `<button class="btn" id="c-cdl"${sv.calderaDownload.startsWith("downloading") ? " disabled" : ""}>${sv.calderaVersion ? "Download again" : "Download Caldera"}</button>` : ""}
+        ${sv.caldera && sv.calderaPossible && !sv.plexSignedIn && !sv.plexCode ? `<button class="btn" id="c-plex">Sign in to Plex</button>` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.caldera}" aria-label="Plex through Caldera Headless" id="c-cal"></button>
+      </div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Roon Bridge</div>
+        <div class="hint">Runs beside the bridge, not inside it. Switch on <b>Share when idle</b> on a DAC to let Roon use it while nothing else plays.
+        <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#roon" target="_blank" rel="noopener">Installing it</a>.</div></div>
+      <div class="ctl"><span class="tag${sv.roonBridge ? " on" : ""}">${sv.roonBridge ? esc(sv.roonBridge) + " running" : "Not seen here"}</span></div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Now-playing screen</div><div class="hint">For a monitor or TV beside the DAC: open <a href="/now">${esc(nowUrl)}</a> full-screen. Optional.</div></div>
+      <div class="ctl"><a class="btn" href="/now" style="text-decoration:none;color:inherit">Open</a></div>
+    </div>`;
+  $("#c-sq").onclick = () => postServices({ squeezelite: !sv.squeezelite });
+  $("#c-sp").onclick = () => postServices({ spotify: !sv.spotify });
+  const lms = $("#c-lms");
+  if (lms) lms.onchange = () => postServices({ lmsServer: lms.value });
+  const key = $("#c-key");
+  if (key) key.onchange = () => { if (key.value.trim()) postServices({ soloistKey: key.value.trim() }); };
+  $("#c-cal").onclick = () => postServices({ caldera: !sv.caldera });
+  $("#c-qb").onclick = () => postServices({ qobuz: !sv.qobuz });
+  for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-qi", "/api/services/qobuz"]]) {
+    const b = $(sel);
+    if (b) b.onclick = async () => {
+      b.disabled = true;
+      try { await fetch(url, { method: "POST" }); } catch (e) { /* next refresh */ }
+      refresh();
+    };
+  }
+  const dl = $("#c-dl");
+  if (dl) dl.onclick = async () => {
+    dl.disabled = true;
+    try { await fetch("/api/services/soloist", { method: "POST" }); } catch (e) { /* next refresh */ }
+    refresh();
+  };
+}
+
+// What's still needed for Qobuz, or how it is.
+function qobuzState(sv) {
+  if (sv.qobuzInstall) return esc(sv.qobuzInstall);
+  if (!sv.qobuzInstalled) return "QobuzProxy isn't installed yet: <b>Install QobuzProxy</b> fetches it from GitHub into a private Python environment (Python 3.10 or later needed).";
+  return esc(sv.qobuzStatus || "starting…");
+}
+
+// What's still needed for Caldera, or how it is.
+function calderaState(sv, statuses) {
+  const parts = [];
+  if (sv.calderaDownload) parts.push(esc(sv.calderaDownload));
+  else if (!sv.calderaVersion) parts.push("Caldera isn't on this machine yet: <b>Download Caldera</b> fetches it from Caldera.");
+  else parts.push("Caldera Headless " + esc(sv.calderaVersion) + " (it updates itself)");
+  if (sv.plexCode) parts.push(`Go to <a href="https://plex.tv/link" target="_blank" rel="noopener">plex.tv/link</a> and enter <b class="code">${esc(sv.plexCode)}</b>`);
+  else if (!sv.plexSignedIn) parts.push("Sign in to Plex." + (sv.plexMessage ? " " + esc(sv.plexMessage) : ""));
+  if (statuses.length) parts.push(esc(statuses[0]));
+  return parts.join("<br>");
+}
+
+// What's still needed for Spotify, or how it is.
+function spotifyState(sv, statuses) {
+  const parts = [];
+  if (sv.soloistDownload) parts.push(esc(sv.soloistDownload));
+  else if (!sv.soloist) parts.push("Soloist isn't on this machine yet: <b>Download Soloist</b> fetches it from Spotify.");
+  else parts.push(esc(sv.soloistVersion.replace(/ \(g[0-9a-f]+\).*$/, "")) + (sv.soloistExpires ? ` · this build lasts until ${esc(sv.soloistExpires)}` : ""));
+  if (!sv.soloistKey) parts.push("Type your Soloist API key.");
+  if (!sv.pulseAudio) parts.push("Needs PulseAudio: <code>sudo apt install pulseaudio</code> (it's in the Docker image).");
+  if (statuses.length) parts.push(esc(statuses[0]));
+  return parts.join("<br>");
+}
+
+async function postServices(body) {
+  try { await fetch("/api/services", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); } catch (e) { /* next refresh */ }
+  if (document.activeElement) document.activeElement.blur();
+  refresh();
 }
 
 function renderSheet() {
@@ -208,11 +367,12 @@ function renderSheet() {
 
     <div class="now">
       <div class="line1"><span class="dot ${s.cls}"></span><span>${esc(s.cls === "play" ? "Playing" + (c.owner ? " · " + c.owner : "") : s.text)}</span></div>
+      ${d.enabled && !d.exclusive && d.share && !d.holder ? `<div class="meta">Shared: free for other players until an app plays here.</div>` : ""}
       ${playing && (p.title || p.artist) ? `<div class="meta">${esc(p.title)}${p.artist ? " — " + esc(p.artist) : ""}${p.duration ? ` · ${time(p.position)} / ${time(p.duration)}` : ""}</div>` : ""}
       ${playing && p.format ? `<div class="fmt">${esc(p.format)}${p.physical ? " → DAC " + esc(p.physical) : ""}</div>` : ""}
       ${c.owner && d.enabled ? `<div class="meta">In control: ${esc(c.owner)}${c.locked ? " (others are kept out)" : ""}</div>` : ""}
       ${blocked}
-      ${d.enabled && !d.exclusive && d.waiting ? `<div class="warn">${esc(d.waiting)}. ${d.platform === "darwin" ? "In Audirvana, choose <b>" + esc(d.upnpName || d.name) + "</b> as the output (UPnP) instead of the DAC itself; the bridge takes the DAC as soon as it is let go." : "Switch the DAC off in the other program; the bridge takes it as soon as it is free."}</div>` : ""}
+      ${d.enabled && !d.exclusive && d.waiting && d.waiting !== SHARED && !d.share ? `<div class="warn">${esc(d.waiting)}. ${d.platform === "darwin" ? "In Audirvana, choose <b>" + esc(d.upnpName || d.name) + "</b> as the output (UPnP) instead of the DAC itself; the bridge takes the DAC as soon as it is let go." : "Switch the DAC off in the other program; the bridge takes it as soon as it is free."}</div>` : ""}
     </div>
 
     <h3>Capabilities</h3>
@@ -225,7 +385,7 @@ function renderSheet() {
       ${d.currentRate ? `<dt>Running at</dt><dd>${kHz(d.currentRate)}</dd>` : ""}
       ${vol}
       <dt>Formats</dt><dd><ul class="formats">${(d.formats || []).map((f) => `<li>${esc(f)}</li>`).join("") || "<li>—</li>"}</ul></dd>
-      ${d.upnpName ? `<dt>On the network</dt><dd>${esc(d.upnpName)}</dd>` : ""}
+      ${d.upnpName ? `<dt>On the network</dt><dd>${esc(d.upnpName)} <span class="hint">· UPnP</span>${d.squeezebox ? `<br><span class="hint">Squeezebox: ${esc(d.squeezebox)} (${esc(d.squeezeboxId)})</span>` : ""}${d.spotify ? `<br><span class="hint">Spotify: ${esc(d.spotify)}</span>` : ""}${d.caldera ? `<br><span class="hint">Plex (Caldera): ${esc(d.caldera)}</span>` : ""}</dd>` : ""}
     </dl>
 
     <h3>Settings</h3>
@@ -239,11 +399,16 @@ function renderSheet() {
         ${["auto", "dop", "pcm"].map((m) => `<button data-dsd="${m}" aria-pressed="${d.dsd === m}">${m === "auto" ? "Auto" : m.toUpperCase()}</button>`).join("")}
       </div>
     </div>
+    <div class="row">
+      <div><div class="lbl">Share when idle</div><div class="hint">Lets go of the DAC whenever nothing plays through the bridge, so Roon Bridge or another player on this machine can use it. Taken back when an app plays here.</div></div>
+      <button class="switch" role="switch" aria-checked="${!!d.share}" aria-label="Share when idle" id="s-share"></button>
+    </div>
     ${c.owner && d.enabled ? `<div class="row"><div><div class="lbl">Hand over</div><div class="hint">Lets another app take this DAC now, even while ${esc(c.owner)} holds it.</div></div><button class="btn" id="s-release">Release</button></div>` : ""}
     <div class="foot">Volume is fixed at 100% for bit-perfect playback: use the DAC's or amplifier's volume.</div>`;
 
   $("#close").onclick = closeSheet;
   $("#s-enabled").onclick = () => post(`/api/dacs/${d.id}/settings`, { enabled: !d.enabled });
+  $("#s-share").onclick = () => post(`/api/dacs/${d.id}/settings`, { share: !d.share });
   for (const b of document.querySelectorAll("[data-dsd]")) b.onclick = () => post(`/api/dacs/${d.id}/settings`, { dsd: b.dataset.dsd });
   const r = $("#s-release");
   if (r) r.onclick = () => post(`/api/dacs/${d.id}/release`, {});

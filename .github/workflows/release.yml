@@ -1,4 +1,5 @@
-# Builds Mandarin DAC Bridge for every platform and attaches it to a GitHub
+# Builds Mandarin DAC Bridge for every platform (macOS, Linux, Windows; x64
+# and ARM) and attaches it to a GitHub
 # Release. On GitHub: Releases → Draft a new release → tag v1.0.0 → Publish.
 # A few minutes later the installer's link (releases/latest/download/…)
 # serves the new build.
@@ -32,6 +33,8 @@ jobs:
           - { os: macos-latest, rid: osx-x64 }
           - { os: ubuntu-latest, rid: linux-x64 }
           - { os: ubuntu-24.04-arm, rid: linux-arm64 }
+          - { os: windows-latest, rid: win-x64 }
+          - { os: windows-11-arm, rid: win-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -49,11 +52,16 @@ jobs:
       - name: Native AOT build
         run: dotnet publish src/MandarinDacBridge -c Release -r ${{ matrix.rid }} -p:Version=${{ env.VERSION }} -o out
       - name: Package
+        if: runner.os != 'Windows'
         run: tar -czf mandarin-dac-bridge-${{ matrix.rid }}.tar.gz -C out mandarin-dac-bridge
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path out/mandarin-dac-bridge.exe -DestinationPath mandarin-dac-bridge-${{ matrix.rid }}.zip
       - uses: actions/upload-artifact@v4
         with:
           name: mandarin-dac-bridge-${{ matrix.rid }}
-          path: mandarin-dac-bridge-${{ matrix.rid }}.tar.gz
+          path: mandarin-dac-bridge-${{ matrix.rid }}.*
 
   release:
     needs: build
@@ -65,4 +73,6 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
-          files: mandarin-dac-bridge-*.tar.gz
+          files: |
+            mandarin-dac-bridge-*.tar.gz
+            mandarin-dac-bridge-*.zip

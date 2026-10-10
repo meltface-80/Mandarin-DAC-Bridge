@@ -32,7 +32,7 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
     private readonly Shared* sh = (Shared*)NativeMemory.AllocZeroed((nuint)sizeof(Shared));
     private uint dev;
     private IntPtr procId;
-    private bool haveHog, configured, paused, ioRunning, disposed;
+    private bool haveHog, configured, paused, ioRunning, disposed, shared;
     private int rate;
     private int myPid;
     private Timer? watch;
@@ -69,17 +69,19 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
                 return;
             }
             bool was = haveHog;
+            var before = Message;
             int owner = CoreAudio.HogOwner(dev);
             if (owner != myPid)
             {
                 if (ioRunning) StopIo();
-                haveHog = owner == -1 && TakeHog();
+                // Shared: not taken back here, only when the bridge is asked to play (Reclaim).
+                haveHog = !shared && owner == -1 && TakeHog();
             }
             else haveHog = true;
             int holder = haveHog ? myPid : CoreAudio.HogOwner(dev);
-            changed = was != haveHog || holder != HolderPid;
+            Message = haveHog ? "" : shared && holder <= 0 ? Sharing.Idle : "another program has the DAC in exclusive mode";
+            changed = was != haveHog || holder != HolderPid || before != Message;
             HolderPid = holder;
-            Message = haveHog ? "" : "another program has the DAC in exclusive mode";
         }
         if (changed) StatusChanged?.Invoke();
     }
@@ -278,6 +280,44 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
             else Volatile.Write(ref s->UnderrunFlag, 1);
         }
         return 0;
+    }
+
+    public void Share(bool on)
+    {
+        lock (gate)
+        {
+            if (disposed) return;
+            shared = on;
+            if (on && haveHog)
+            {
+                StopIo();
+                ResetRing();
+                configured = false;
+                // Hog mode is a toggle: setting it again gives it back.
+                if (CoreAudio.HogOwner(dev) == myPid) CoreAudio.Set(dev, CoreAudio.DeviceHogMode, CoreAudio.ScopeGlobal, myPid);
+                haveHog = false;
+                HolderPid = 0;
+                Message = Sharing.Idle;
+            }
+        }
+        if (!on) Check();
+        StatusChanged?.Invoke();
+    }
+
+    public bool Reclaim()
+    {
+        lock (gate)
+        {
+            if (disposed || dev == CoreAudio.Unknown) return false;
+            if (haveHog) return true;
+            int owner = CoreAudio.HogOwner(dev);
+            haveHog = owner == myPid || (owner == -1 && TakeHog());
+            if (!haveHog) { Message = "another program has the DAC in exclusive mode"; return false; }
+            HolderPid = myPid;
+            Message = "";
+        }
+        StatusChanged?.Invoke();
+        return true;
     }
 
     public void Dispose()
