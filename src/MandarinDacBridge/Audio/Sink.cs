@@ -53,7 +53,8 @@ internal static class SinkFactory
         if (config.TestSink) return new ClockSink(busy: config.TestSinkBusy);
         if (OperatingSystem.IsMacOS()) return new CoreAudioSink(dev.Spec);
         if (OperatingSystem.IsLinux()) return new AlsaSink(dev.Spec);
-        throw new PlatformNotSupportedException("only macOS and Linux are supported");
+        if (OperatingSystem.IsWindows()) return new WasapiSink(dev.Spec);
+        throw new PlatformNotSupportedException("only macOS, Windows and Linux are supported");
     }
 }
 

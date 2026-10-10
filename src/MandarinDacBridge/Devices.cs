@@ -8,6 +8,7 @@
 //   macOS  Core Audio: the physical formats (rate ranges, bits, integer or
 //          float), the nominal rates, the transport (USB) and which process
 //          has the DAC in hog mode.
+//   Windows the MMDevice API and WASAPI exclusive mode (DevicesWindows.cs).
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -274,7 +275,12 @@ internal static partial class Devices
             }
             catch (Exception e) { devices = []; error = "Core Audio: " + e.Message; }
         }
-        else { devices = []; error = "only macOS and Linux are supported"; }
+        else if (OperatingSystem.IsWindows())
+        {
+            try { devices = ListWindows(config.AllOutputs, skipped); }
+            catch (Exception e) { devices = []; error = "Windows audio: " + e.Message; }
+        }
+        else { devices = []; error = "only macOS, Windows and Linux are supported"; }
         foreach (var d in devices)
         {
             d.Id = IdOf(d.Key);
@@ -305,6 +311,7 @@ internal static partial class Devices
                 catch (Exception e) { o.AppendLine($"  ! {e.GetType().Name}: {e.Message}"); }
             }
         }
+        else if (OperatingSystem.IsWindows()) o.Append(DiagnoseWindows());
         else if (OperatingSystem.IsLinux())
         {
             o.AppendLine("\n/proc/asound/cards:\n" + Read("/proc/asound/cards"));

@@ -43,7 +43,7 @@ internal sealed class Config
     public bool Qobuz { get; init; }
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
-    public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : "other";
+    public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : "other";
     // Tests: DACs given rather than found (JSON), and played to a clock rather than a device.
     public string? TestDevices { get; init; }
     public bool TestSink { get; init; }
@@ -87,28 +87,38 @@ internal sealed class Config
     // The PulseAudio server, which gives Soloist a private sound server to play into.
     public static string FindPulseAudio() => Find("pulseaudio", []);
 
-    private static string Find(string name, string[] first)
+    // A program in these folders, then on the PATH, then where package managers put it ("" if nowhere).
+    // On Windows with .exe, and winget's, Scoop's and Chocolatey's folders.
+    internal static string Find(string name, string[] first)
     {
-        foreach (var dir in first.Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries))
-                     .Concat(["/usr/local/bin", "/usr/bin"]))
+        var exe = OperatingSystem.IsWindows() ? name + ".exe" : name;
+        foreach (var dir in first.Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+                     .Concat(Common()))
         {
-            var f = Path.Combine(dir, name);
-            if (File.Exists(f)) return f;
+            try
+            {
+                var f = Path.Combine(dir.Trim('"'), exe);
+                if (File.Exists(f)) return f;
+            }
+            catch (ArgumentException) { /* a broken PATH entry */ }
         }
         return "";
     }
 
-    // ffmpeg on the PATH, else where Homebrew puts it (launchd's PATH is short).
-    private static string FindFfmpeg()
+    private static IEnumerable<string> Common()
     {
-        foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries)
-                     .Concat(["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]))
+        if (OperatingSystem.IsWindows())
         {
-            var f = Path.Combine(dir, "ffmpeg");
-            if (File.Exists(f)) return f;
+            var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            return [Path.Combine(local, "Microsoft", "WinGet", "Links"), Path.Combine(home, "scoop", "shims"), @"C:\ProgramData\chocolatey\bin",
+                    @"C:\ffmpeg\bin", Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin"), AppContext.BaseDirectory];
         }
-        return "ffmpeg";
+        return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
     }
+
+    // ffmpeg on the PATH, else where Homebrew (launchd's PATH is short) or winget put it.
+    private static string FindFfmpeg() => Find("ffmpeg", []) is { Length: > 0 } f ? f : "ffmpeg";
 }
 
 internal static class Log
