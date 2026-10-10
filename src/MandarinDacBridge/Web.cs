@@ -8,6 +8,7 @@
 //   /api/services/soloist   POST: download Spotify Soloist from Spotify
 //   /api/services/caldera   POST: download Caldera Headless from Caldera
 //   /api/services/plex      POST: a code to sign in to Plex at plex.tv/link (for Caldera)
+//   /api/services/plex/signout  POST: forget the Plex sign-in
 //   /api/services/qobuz     POST: install QobuzProxy (Qobuz Connect) into a private Python environment
 //   /api/services/roon      POST: download Roon Bridge from Roon Labs
 //   /api/dacs/<id>/art      the cover of what Caldera or the Music app plays (fetched here: the Plex token stays here)
@@ -143,6 +144,12 @@ internal static partial class Web
         {
             _ = manager.InstallQobuz();
             await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
+            return;
+        }
+        if (p == "/api/services/plex/signout" && method == "POST")
+        {
+            manager.SignOutPlex();
+            await Json(ctx, 200, manager.Services(), BridgeJson.Default.ServicesView);
             return;
         }
         if (p == "/api/services/plex" && method == "POST")

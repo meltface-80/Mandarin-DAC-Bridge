@@ -42,6 +42,8 @@ internal sealed class ServiceSettings
     public bool? Qobuz { get; set; }
     // Secret, like the Soloist key: the Plex token Caldera plays with.
     public string? PlexToken { get; set; }
+    // Whose it is (their Plex username): shown on the page.
+    public string? PlexAccount { get; set; }
     // The Music and Spotify apps on this Mac, through the DAC Bridge output, to this DAC (macOS).
     public bool? MacApps { get; set; }
     public string? MacDac { get; set; }
@@ -113,7 +115,7 @@ internal sealed class Settings
             return new ServiceSettings
             {
                 Squeezelite = data.Services.Squeezelite, LmsServer = data.Services.LmsServer, Spotify = data.Services.Spotify,
-                SoloistKey = data.Services.SoloistKey, Caldera = data.Services.Caldera, PlexToken = data.Services.PlexToken,
+                SoloistKey = data.Services.SoloistKey, Caldera = data.Services.Caldera, PlexToken = data.Services.PlexToken, PlexAccount = data.Services.PlexAccount,
                 Qobuz = data.Services.Qobuz, MacApps = data.Services.MacApps, MacDac = data.Services.MacDac, Roon = data.Services.Roon
             };
     }
@@ -132,6 +134,7 @@ internal sealed class Settings
             if (p.MacDac != null) data.Services.MacDac = p.MacDac;
             if (p.Roon is { } rn) data.Services.Roon = rn;
             if (p.PlexToken != null) data.Services.PlexToken = p.PlexToken.Trim()[..Math.Min(512, p.PlexToken.Trim().Length)];
+            if (p.PlexAccount != null) data.Services.PlexAccount = p.PlexAccount.Trim()[..Math.Min(200, p.PlexAccount.Trim().Length)];
             Save();
         }
     }
@@ -335,6 +338,7 @@ internal sealed class Manager(Config config) : IDisposable
 
     public void Start()
     {
+        if (PlexToken != "" && (Settings.Services().PlexAccount ?? "") == "") _ = LookUpPlexAccount(PlexToken);
         ConnectQobuz();
         ConnectMac();
         ConnectRoon();
@@ -545,7 +549,10 @@ internal sealed class Manager(Config config) : IDisposable
         bool lmsChanged = patch.LmsServer != null && patch.LmsServer.Trim() != LmsServer;
         bool keyChanged = patch.SoloistKey != null && patch.SoloistKey.Trim() != SoloistKey;
         bool plexChanged = patch.PlexToken != null && patch.PlexToken.Trim() != PlexToken;
+        // A new Plex sign-in: whose it is is looked up again (shown on the page, so a wrong account is plain to see).
+        if (plexChanged) patch.PlexAccount = "";
         Settings.Apply(patch);
+        if (plexChanged && PlexToken != "") _ = LookUpPlexAccount(PlexToken);
         foreach (var b in Bridges())
         {
             // A new server: the players start again, to find it.
@@ -583,10 +590,36 @@ internal sealed class Manager(Config config) : IDisposable
         finally { Volatile.Write(ref calderaDownloading, 0); }
     }
 
+    private string PlexClientId => "mandarin-dac-bridge-" + Devices.IdOf(config.Hostname);
+
+    private async Task LookUpPlexAccount(string token)
+    {
+        var who = await Caldera.PlexLink.Account(token, PlexClientId);
+        if (who == "" || PlexToken != token) return;
+        Settings.Apply(new ServiceSettings { PlexAccount = who });
+        Log.Write($"Plex: signed in as {who}");
+        foreach (var b in Bridges()) b.Notify();
+    }
+
+    // Signing out of Plex: the token is forgotten (here and in Caldera's settings), the Caldera players wait for
+    // a new sign-in.
+    public void SignOutPlex()
+    {
+        plexLink?.Cancel();
+        SetServices(new ServiceSettings { PlexToken = "" });
+        try
+        {
+            var players = Path.Combine(Caldera.CalderaDownload.Home(config.DataDir), "players");
+            if (Directory.Exists(players)) Directory.Delete(players, true);
+        }
+        catch (Exception e) { Log.Write("Plex: couldn't clear Caldera's settings: " + e.Message); }
+        Log.Write("Plex: signed out");
+    }
+
     // Signing in to Plex: a code for plex.tv/link; the token, once there, goes to the Caldera players.
     public async Task LinkPlex()
     {
-        plexLink ??= new Caldera.PlexLink("mandarin-dac-bridge-" + Devices.IdOf(config.Hostname), token =>
+        plexLink ??= new Caldera.PlexLink(PlexClientId, token =>
         {
             Log.Write("Plex: signed in");
             SetServices(new ServiceSettings { PlexToken = token });
@@ -635,7 +668,8 @@ internal sealed class Manager(Config config) : IDisposable
             SpotifyPossible = OperatingSystem.IsLinux() && SoloistDownload.Arch != null,
             Caldera = CalderaOn, CalderaPossible = OperatingSystem.IsLinux() && Caldera.CalderaDownload.Arch != null,
             CalderaVersion = Caldera.CalderaDownload.Version(config.DataDir), CalderaDownload = calderaDownload,
-            PlexSignedIn = PlexToken != "", PlexCode = plexLink?.Code ?? "", PlexMessage = plexLink?.Message ?? "",
+            PlexSignedIn = PlexToken != "", PlexAccount = PlexToken != "" ? Settings.Services().PlexAccount ?? "" : "",
+            PlexCode = plexLink?.Code ?? "", PlexMessage = plexLink?.Message ?? "",
             Qobuz = QobuzOn, QobuzInstalled = qobuz?.Installed ?? false, QobuzInstall = qobuz?.Install ?? "",
             QobuzStatus = qobuz?.Status ?? "", QobuzSignedIn = qobuz?.SignedIn ?? false, QobuzWebPort = Qobuz.QobuzConnect.WebPort,
             MacPossible = OperatingSystem.IsMacOS(), MacApps = MacOn,

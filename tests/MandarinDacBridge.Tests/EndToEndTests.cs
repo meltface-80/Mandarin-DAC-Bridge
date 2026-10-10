@@ -736,7 +736,12 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
                 var token = c.Request.Headers["X-Plex-Token"] ?? c.Request.QueryString["X-Plex-Token"] ?? "";
                 tokensSeen.Enqueue(token);
                 byte[] body;
-                if (c.Request.Url!.AbsolutePath == "/library/metadata/42")
+                if (c.Request.Url!.AbsolutePath == "/api/v2/user")
+                {
+                    c.Response.ContentType = "application/json";
+                    body = Encoding.UTF8.GetBytes("""{"id":1,"username":"miles","email":"miles@example.com"}""");
+                }
+                else if (c.Request.Url!.AbsolutePath == "/library/metadata/42")
                 {
                     c.Response.ContentType = "application/json";
                     body = Encoding.UTF8.GetBytes("""
@@ -779,6 +784,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
             """);
         File.SetUnixFileMode(program, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
+        Caldera.PlexLink.PlexTv = $"http://127.0.0.1:{plexPort}";      // plex.tv, played by the pretend server
         using (var res = await Http.PostAsync($"http://127.0.0.1:{port}/api/services",
                    new StringContent("{\"caldera\":true,\"plexToken\":\"plex-token-1\"}", Encoding.UTF8, "application/json")))
         {
@@ -819,11 +825,22 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3 }, await Http.GetByteArrayAsync($"http://127.0.0.1:{port}{art}"));
         Assert.All(tokensSeen, t => Assert.Equal("plex-token-1", t));
         Assert.DoesNotContain("plex-token-1", await Http.GetStringAsync($"http://127.0.0.1:{port}/api/dacs"));
+        // Whose sign-in it is, on the page.
+        await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("plexAccount").GetString() == "miles");
+
+        // Signed out: the token is forgotten, here and in Caldera's settings; the player waits for a new sign-in.
+        var so = JsonDocument.Parse(await (await Http.PostAsync($"http://127.0.0.1:{port}/api/services/plex/signout", null)).Content.ReadAsStringAsync()).RootElement;
+        Assert.False(so.GetProperty("plexSignedIn").GetBoolean());
+        Assert.Equal("", so.GetProperty("plexAccount").GetString());
+        Assert.DoesNotContain("plex-token-1", File.ReadAllText(Path.Combine(data, "settings.json")));
+        Assert.False(Directory.Exists(Path.Combine(data, "caldera", "players")) && Directory.EnumerateFiles(Path.Combine(data, "caldera", "players"), "set-args", SearchOption.AllDirectories).Any());
+        await Until(async () => (await Dac()).GetProperty("caldera").GetString()!.Contains("needs a Plex sign-in"));
 
         // Switched off: Caldera stops, the DAC is held again.
         await Post("/api/services", "{\"caldera\":false}");
         await Until(async () => (await Dac()).GetProperty("exclusive").GetBoolean());
         plex.Stop();
+        Caldera.PlexLink.PlexTv = "https://plex.tv";
     }
 
     // ------------------------------------------------------------ Qobuz Connect through QobuzProxy (a pretend one)

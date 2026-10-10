@@ -35,6 +35,7 @@ internal sealed class ServicesView
     public string CalderaDownload { get; set; } = "";
     public bool PlexSignedIn { get; set; }
     public string PlexCode { get; set; } = "";
+    public string PlexAccount { get; set; } = "";
     public string PlexMessage { get; set; } = "";
     // Qobuz Connect through QobuzProxy.
     public bool Qobuz { get; set; }
