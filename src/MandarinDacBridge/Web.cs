@@ -6,6 +6,10 @@
 //   /api/dacs/<id>/release  POST: let another controller take the DAC now
 //   /api/services           GET, POST { squeezelite, lmsServer, spotify, soloistKey }: the ways in besides UPnP
 //   /api/services/soloist   POST: download Spotify Soloist from Spotify
+//   /api/services/caldera   POST: download Caldera Headless from Caldera
+//   /api/services/plex      POST: a code to sign in to Plex at plex.tv/link (for Caldera)
+//   /api/services/qobuz     POST: install QobuzProxy (Qobuz Connect) into a private Python environment
+//   /api/dacs/<id>/art      the cover of what Caldera plays (fetched with the Plex token, kept here)
 //   /now                    the now-playing screen, for a display beside the DAC
 //   /api/health
 //   /upnp/<id>/…            each DAC's UPnP device: description, SCPDs,
@@ -122,6 +126,38 @@ internal static partial class Web
             await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
             return;
         }
+        if (p == "/api/services/caldera" && method == "POST")
+        {
+            _ = manager.DownloadCaldera();
+            await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
+            return;
+        }
+        if (p == "/api/services/qobuz" && method == "POST")
+        {
+            _ = manager.InstallQobuz();
+            await Json(ctx, 202, manager.Services(), BridgeJson.Default.ServicesView);
+            return;
+        }
+        if (p == "/api/services/plex" && method == "POST")
+        {
+            await manager.LinkPlex();
+            await Json(ctx, 200, manager.Services(), BridgeJson.Default.ServicesView);
+            return;
+        }
+        if ((m = ArtPath().Match(p)).Success && method == "GET")
+        {
+            if (manager.CalderaArt(m.Groups[1].Value) is not { } art) { await Send(ctx, 404, "text/plain", "no cover"); return; }
+            try
+            {
+                using var cover = await Sources.Http.GetAsync(art, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
+                if (!cover.IsSuccessStatusCode) { await Send(ctx, 502, "text/plain", "no cover"); return; }
+                ctx.Response.ContentType = cover.Content.Headers.ContentType?.MediaType is { } t && t.StartsWith("image/") ? t : "image/jpeg";
+                ctx.Response.Headers.CacheControl = "max-age=3600";
+                await cover.Content.CopyToAsync(ctx.Response.Body, ctx.RequestAborted);
+            }
+            catch (Exception) { /* the page asks again */ }
+            return;
+        }
         if ((m = ApiPath().Match(p)).Success && method == "POST")
         {
             var id = m.Groups[1].Value;
@@ -150,4 +186,5 @@ internal static partial class Web
     [GeneratedRegex(@"^/upnp/([\w-]+)/(\w+)/(scpd\.xml|control|event)$")] private static partial Regex ServicePath();
     [GeneratedRegex(@"^/api/dacs/([\w-]+)/(settings|release)$")] private static partial Regex ApiPath();
     [GeneratedRegex(@"^[\w./-]+$")] private static partial Regex SafePath();
+    [GeneratedRegex(@"^/api/dacs/([\w-]+)/art$")] private static partial Regex ArtPath();
 }

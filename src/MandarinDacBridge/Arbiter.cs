@@ -20,6 +20,9 @@ internal sealed record Blocked(string Name, string Action, long At);
 
 internal sealed partial class Arbiter(TimeSpan grace, int mandarinPort)
 {
+    // Stream ports that say who is sending (QobuzProxy's audio proxies, one per speaker).
+    public static readonly System.Collections.Concurrent.ConcurrentDictionary<int, string> StreamPorts = new();
+
     private readonly object gate = new();
     private readonly Dictionary<string, string> names = new();
     private long lastActive;
@@ -50,6 +53,7 @@ internal sealed partial class Arbiter(TimeSpan grace, int mandarinPort)
     {
         if (!Uri.TryCreate(uri, UriKind.Absolute, out var u)) return "";
         if (u.Port == mandarinPort) return "Mandarin";
+        if (StreamPorts.TryGetValue(u.Port, out var who)) return who;
         if (u.AbsolutePath.Contains("audirvana", StringComparison.OrdinalIgnoreCase)) return "Audirvana";
         return "";
     }

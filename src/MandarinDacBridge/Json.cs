@@ -28,6 +28,21 @@ internal sealed class ServicesView
     public string SoloistExpires { get; set; } = "";     // yyyy-MM-dd
     public string SoloistDownload { get; set; } = "";
     public bool PulseAudio { get; set; }
+    // Caldera Headless: Linux; the Plex token only as "signed in".
+    public bool Caldera { get; set; }
+    public bool CalderaPossible { get; set; }
+    public string CalderaVersion { get; set; } = "";
+    public string CalderaDownload { get; set; } = "";
+    public bool PlexSignedIn { get; set; }
+    public string PlexCode { get; set; } = "";
+    public string PlexMessage { get; set; } = "";
+    // Qobuz Connect through QobuzProxy.
+    public bool Qobuz { get; set; }
+    public bool QobuzInstalled { get; set; }
+    public string QobuzInstall { get; set; } = "";
+    public string QobuzStatus { get; set; } = "";
+    public bool QobuzSignedIn { get; set; }
+    public int QobuzWebPort { get; set; }
     public string RoonBridge { get; set; } = "";
 }
 
@@ -62,6 +77,7 @@ internal sealed class DacView
     public string? Squeezebox { get; set; }
     public string? SqueezeboxId { get; set; }
     public string? Spotify { get; set; }
+    public string? Caldera { get; set; }
 }
 
 internal sealed class ControlView

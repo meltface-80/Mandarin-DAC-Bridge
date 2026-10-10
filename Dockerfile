@@ -9,6 +9,10 @@
 # redistributed: the page's Download button fetches it from Spotify into
 # /data. PulseAudio is here for it: each DAC's Soloist plays into a private
 # PulseAudio server with no sound card, only a pipe the bridge reads.
+#
+# Qobuz Connect (optional) is QobuzProxy, which is Python: the page's Install
+# puts it in a private Python environment in /data. Caldera Headless
+# (optional) is downloaded by the page too.
 
 # Built ahead of time (Native AOT) to one program: no .NET in the final image.
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -21,7 +25,7 @@ RUN dotnet publish src/MandarinDacBridge -c Release -o /out --nologo
 
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ffmpeg pulseaudio libatomic1 \
+ && apt-get install -y --no-install-recommends ffmpeg pulseaudio libatomic1 python3 python3-venv \
  && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=build /out/mandarin-dac-bridge /app/mandarin-dac-bridge

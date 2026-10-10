@@ -14,6 +14,8 @@
 //   SPOTIFY              1 = each DAC is a Spotify Connect speaker too, through Spotify Soloist (Linux; also on the page)
 //   SOLOIST_API_KEY      your Soloist API key (or typed on the page; kept in settings.json, never shown again)
 //   SOLOIST              the soloist program (else on the PATH, or downloaded by the page into DATA_DIR/soloist)
+//   CALDERA              1 = each DAC is a Plex player too, through Caldera Headless (Linux; also on the page)
+//   QOBUZ                1 = each DAC is a Qobuz Connect speaker too, through QobuzProxy (also on the page)
 using System.Reflection;
 
 namespace MandarinDacBridge;
@@ -37,6 +39,8 @@ internal sealed class Config
     public bool Spotify { get; init; }
     public string Soloist { get; init; } = "";
     public string SoloistKey { get; init; } = "";
+    public bool Caldera { get; init; }
+    public bool Qobuz { get; init; }
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
     public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : "other";
@@ -63,6 +67,8 @@ internal sealed class Config
             Spotify = Env("SPOTIFY") == "1",
             Soloist = Env("SOLOIST") ?? "",
             SoloistKey = Env("SOLOIST_API_KEY") ?? "",
+            Caldera = Env("CALDERA") == "1",
+            Qobuz = Env("QOBUZ") == "1",
             TestDevices = Env("BRIDGE_TEST_DEVICES"),
             TestSink = Env("BRIDGE_TEST_SINK") is "fake" or "busy",
             TestSinkBusy = Env("BRIDGE_TEST_SINK") == "busy"

@@ -126,6 +126,7 @@
   .tag.on { border-color: var(--gold); color: var(--gold); }
   .hint a { color: var(--gold); }
   .conn .hint { overflow-wrap: anywhere; }
+  .conn .code { font-family: var(--mono); font-size: 15px; letter-spacing: .12em; color: var(--gold); }
   @media (max-width: 520px) { .conn .row { flex-direction: column; align-items: stretch; } .conn .ctl { justify-content: flex-start; } }
   @media (max-width: 520px) {
     header { padding-top: 24px; flex-wrap: wrap; }
@@ -254,6 +255,28 @@ function renderConnections() {
       </div>
     </div>
     <div class="row">
+      <div><div class="lbl">Qobuz Connect</div>
+        <div class="hint">Each DAC appears in the Qobuz app's device list, through <b>QobuzProxy</b>, in hi-res up to what the DAC takes.
+          ${sv.qobuz ? "<br>" + qobuzState(sv) : ""}</div></div>
+      <div class="ctl">
+        ${sv.qobuz && (!sv.qobuzInstalled || sv.qobuzInstall) ? `<button class="btn" id="c-qi"${sv.qobuzInstall && !sv.qobuzInstall.startsWith("install failed") ? " disabled" : ""}>${sv.qobuzInstalled ? "Install again" : "Install QobuzProxy"}</button>` : ""}
+        ${sv.qobuz && sv.qobuzInstalled && !sv.qobuzSignedIn ? `<a class="btn" style="text-decoration:none;color:inherit" target="_blank" rel="noopener" href="${location.protocol}//${location.hostname}:${sv.qobuzWebPort}/">Sign in to Qobuz</a>` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.qobuz}" aria-label="Qobuz Connect" id="c-qb"></button>
+      </div>
+    </div>
+    <div class="row">
+      <div><div class="lbl">Plex · Caldera Headless</div>
+        <div class="hint">${!sv.calderaPossible
+          ? "Caldera Headless runs on Linux only."
+          : `Each DAC becomes a Plex player for Plexamp, Plex for iOS and the Plex web app, through <b>Caldera Headless</b>. Caldera plays to the DAC itself, bit-perfect, and shares it with the bridge: whoever plays first has it.
+             ${sv.caldera ? "<br>" + calderaState(sv, data.dacs.map((d) => d.caldera).filter(Boolean)) : ""}`}</div></div>
+      <div class="ctl">
+        ${sv.caldera && sv.calderaPossible && (!sv.calderaVersion || sv.calderaDownload) ? `<button class="btn" id="c-cdl"${sv.calderaDownload.startsWith("downloading") ? " disabled" : ""}>${sv.calderaVersion ? "Download again" : "Download Caldera"}</button>` : ""}
+        ${sv.caldera && sv.calderaPossible && !sv.plexSignedIn && !sv.plexCode ? `<button class="btn" id="c-plex">Sign in to Plex</button>` : ""}
+        <button class="switch" role="switch" aria-checked="${sv.caldera}" aria-label="Plex through Caldera Headless" id="c-cal"></button>
+      </div>
+    </div>
+    <div class="row">
       <div><div class="lbl">Roon Bridge</div>
         <div class="hint">Runs beside the bridge, not inside it. Switch on <b>Share when idle</b> on a DAC to let Roon use it while nothing else plays.
         <a href="https://meltface-80.github.io/Mandarin-DAC-Bridge/#roon" target="_blank" rel="noopener">Installing it</a>.</div></div>
@@ -269,12 +292,41 @@ function renderConnections() {
   if (lms) lms.onchange = () => postServices({ lmsServer: lms.value });
   const key = $("#c-key");
   if (key) key.onchange = () => { if (key.value.trim()) postServices({ soloistKey: key.value.trim() }); };
+  $("#c-cal").onclick = () => postServices({ caldera: !sv.caldera });
+  $("#c-qb").onclick = () => postServices({ qobuz: !sv.qobuz });
+  for (const [sel, url] of [["#c-cdl", "/api/services/caldera"], ["#c-plex", "/api/services/plex"], ["#c-qi", "/api/services/qobuz"]]) {
+    const b = $(sel);
+    if (b) b.onclick = async () => {
+      b.disabled = true;
+      try { await fetch(url, { method: "POST" }); } catch (e) { /* next refresh */ }
+      refresh();
+    };
+  }
   const dl = $("#c-dl");
   if (dl) dl.onclick = async () => {
     dl.disabled = true;
     try { await fetch("/api/services/soloist", { method: "POST" }); } catch (e) { /* next refresh */ }
     refresh();
   };
+}
+
+// What's still needed for Qobuz, or how it is.
+function qobuzState(sv) {
+  if (sv.qobuzInstall) return esc(sv.qobuzInstall);
+  if (!sv.qobuzInstalled) return "QobuzProxy isn't installed yet: <b>Install QobuzProxy</b> fetches it from GitHub into a private Python environment (Python 3.10 or later needed).";
+  return esc(sv.qobuzStatus || "starting…");
+}
+
+// What's still needed for Caldera, or how it is.
+function calderaState(sv, statuses) {
+  const parts = [];
+  if (sv.calderaDownload) parts.push(esc(sv.calderaDownload));
+  else if (!sv.calderaVersion) parts.push("Caldera isn't on this machine yet: <b>Download Caldera</b> fetches it from Caldera.");
+  else parts.push("Caldera Headless " + esc(sv.calderaVersion) + " (it updates itself)");
+  if (sv.plexCode) parts.push(`Go to <a href="https://plex.tv/link" target="_blank" rel="noopener">plex.tv/link</a> and enter <b class="code">${esc(sv.plexCode)}</b>`);
+  else if (!sv.plexSignedIn) parts.push("Sign in to Plex." + (sv.plexMessage ? " " + esc(sv.plexMessage) : ""));
+  if (statuses.length) parts.push(esc(statuses[0]));
+  return parts.join("<br>");
 }
 
 // What's still needed for Spotify, or how it is.
@@ -333,7 +385,7 @@ function renderSheet() {
       ${d.currentRate ? `<dt>Running at</dt><dd>${kHz(d.currentRate)}</dd>` : ""}
       ${vol}
       <dt>Formats</dt><dd><ul class="formats">${(d.formats || []).map((f) => `<li>${esc(f)}</li>`).join("") || "<li>—</li>"}</ul></dd>
-      ${d.upnpName ? `<dt>On the network</dt><dd>${esc(d.upnpName)} <span class="hint">· UPnP</span>${d.squeezebox ? `<br><span class="hint">Squeezebox: ${esc(d.squeezebox)} (${esc(d.squeezeboxId)})</span>` : ""}${d.spotify ? `<br><span class="hint">Spotify: ${esc(d.spotify)}</span>` : ""}</dd>` : ""}
+      ${d.upnpName ? `<dt>On the network</dt><dd>${esc(d.upnpName)} <span class="hint">· UPnP</span>${d.squeezebox ? `<br><span class="hint">Squeezebox: ${esc(d.squeezebox)} (${esc(d.squeezeboxId)})</span>` : ""}${d.spotify ? `<br><span class="hint">Spotify: ${esc(d.spotify)}</span>` : ""}${d.caldera ? `<br><span class="hint">Plex (Caldera): ${esc(d.caldera)}</span>` : ""}</dd>` : ""}
     </dl>
 
     <h3>Settings</h3>

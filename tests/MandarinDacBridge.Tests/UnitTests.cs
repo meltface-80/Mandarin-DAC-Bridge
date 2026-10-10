@@ -470,3 +470,65 @@ public class SoloistExpiryTests
         Assert.Equal("soloist 1.3.9.7", Spotify.SoloistDownload.Explain("soloist 1.3.9.7"));
     }
 }
+
+public class CalderaTests
+{
+    [Fact]
+    public void Timeline_GivesStateTimeTrackAndServer()
+    {
+        var t = Caldera.CalderaPlayer.Timeline("""
+            <MediaContainer commandID="3"><Timeline type="video" state="stopped"/>
+            <Timeline type="music" state="paused" time="12500" duration="200000" key="/library/metadata/7" ratingKey="7"
+              address="192.168.1.9" port="32400" protocol="https" token="t0k"/></MediaContainer>
+            """)!;
+        Assert.Equal("paused", t.State);
+        Assert.Equal(12.5, t.Time);
+        Assert.Equal(200, t.Duration);
+        Assert.Equal("/library/metadata/7", t.Key);
+        Assert.Equal("https://192.168.1.9:32400", t.Server);
+        Assert.Equal("t0k", t.Token);
+        Assert.Null(Caldera.CalderaPlayer.Timeline("<MediaContainer/>"));
+    }
+
+    [Fact]
+    public void PlexMetadata_GivesTrackFormatAndCover()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""
+            {"MediaContainer":{"Metadata":[{"title":"T","grandparentTitle":"Album Artist","originalTitle":"Track Artist","parentTitle":"A",
+             "duration":1000,"parentThumb":"/p/thumb","Media":[{"audioCodec":"alac","Part":[{"Stream":[{"streamType":1},{"streamType":2,"samplingRate":44100,"bitDepth":16}]}]}]}]}}
+            """);
+        var (m, f, thumb) = Caldera.CalderaPlayer.Metadata(doc.RootElement);
+        Assert.Equal("Track Artist", m.Artist);
+        Assert.Equal("A", m.Album);
+        Assert.Equal("44.1 kHz · 16-bit · ALAC", f);
+        Assert.Equal("/p/thumb", thumb);
+    }
+}
+
+public class QobuzTests
+{
+    [Fact]
+    public void Config_HasASpeakerPerDac_WithAStableUuid()
+    {
+        var list = new List<Qobuz.QobuzSpeaker>
+        {
+            new("dac-1", "usb:1", "D90 \"Pro\" (Bridge)", "http://127.0.0.1:55500/upnp/dac-1/description.xml", "127.0.0.1", 55500),
+            new("dac-2", "usb:2", "RME (Bridge)", "http://127.0.0.1:55500/upnp/dac-2/description.xml", "127.0.0.1", 55500)
+        };
+        var yaml = Qobuz.QobuzConnect.Config(list);
+        Assert.Contains("name: \"D90 \\\"Pro\\\" (Bridge)\"", yaml);
+        Assert.Contains("proxy_port: 7121", yaml);
+        Assert.Contains("http_port: 8691", yaml);
+        Assert.Equal(Qobuz.QobuzConnect.Uuid("usb:1"), Qobuz.QobuzConnect.Uuid("usb:1"));
+        Assert.NotEqual(Qobuz.QobuzConnect.Uuid("usb:1"), Qobuz.QobuzConnect.Uuid("usb:2"));
+        Assert.Matches("^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", Qobuz.QobuzConnect.Uuid("usb:1"));
+    }
+
+    [Fact]
+    public void ProtocolInfo_SaysTheDacsBest_ForFlac()
+    {
+        var pi = Upnp.Control.ProtocolInfo([44100, 96000, 192000], [16, 24, 32]);
+        Assert.StartsWith("http-get:*:audio/flac:sampleRate=192000;bitsPerSample=32,", pi);
+        Assert.Contains("http-get:*:audio/L24;rate=192000;channels=2:*", pi);
+    }
+}
