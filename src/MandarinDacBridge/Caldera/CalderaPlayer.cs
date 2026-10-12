@@ -98,7 +98,7 @@ internal sealed partial class CalderaPlayer : IDisposable
         }
     }
 
-    private ProcessStartInfo Start(string program, string home, IEnumerable<string> args)
+    private static ProcessStartInfo Start(string program, string home, IEnumerable<string> args)
     {
         var psi = new ProcessStartInfo(program) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in args) psi.ArgumentList.Add(a);

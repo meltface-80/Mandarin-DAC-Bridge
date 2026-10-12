@@ -86,18 +86,18 @@ internal sealed class AlsaSink(string device) : ISink
         {
             if (pcm == IntPtr.Zero) throw new DeviceException(Message == "" ? "the DAC isn't open" : Message);
             configured = false;
-            Alsa.Drop(pcm);
-            Alsa.HwFree(pcm);
+            _ = Alsa.Drop(pcm);
+            _ = Alsa.HwFree(pcm);
             Alsa.HwParamsMalloc(out var hw);
             try
             {
                 int err;
                 if ((err = Alsa.HwParamsAny(pcm, hw)) < 0) throw Fail(err, "the DAC's settings can't be read");
-                Alsa.HwSetRateResample(pcm, hw, 0);
+                _ = Alsa.HwSetRateResample(pcm, hw, 0);
                 if ((err = Alsa.HwSetAccess(pcm, hw, Alsa.AccessRwInterleaved)) < 0) throw Fail(err, "interleaved access");
                 format = Candidates.FirstOrDefault(f => Alsa.HwTestFormat(pcm, hw, f) == 0, -1);
                 if (format < 0) throw new DeviceException("the DAC takes none of S32_LE, S24_LE, S24_3LE, S16_LE");
-                Alsa.HwSetFormat(pcm, hw, format);
+                _ = Alsa.HwSetFormat(pcm, hw, format);
                 sampleBytes = Alsa.FormatPhysicalWidth(format) / 8;
                 Alsa.HwGetChannelsMin(hw, out var cmin);
                 Alsa.HwGetChannelsMax(hw, out var cmax);
@@ -144,7 +144,7 @@ internal sealed class AlsaSink(string device) : ISink
             {
                 if (!configured || pcm == IntPtr.Zero) throw new DeviceException("the DAC isn't set up");
                 fixed (byte* p = &scratch[off * frameBytes]) n = Alsa.WriteI(pcm, p, (nuint)(frames - off));
-                if (n == Alsa.EPIPE || n == Alsa.ESTRPIPE || n == Alsa.EINTR) { Alsa.Recover(pcm, (int)n, 1); continue; }
+                if (n == Alsa.EPIPE || n == Alsa.ESTRPIPE || n == Alsa.EINTR) { _ = Alsa.Recover(pcm, (int)n, 1); continue; }
                 if (n < 0 && n != Alsa.EAGAIN)
                 {
                     if (Alsa.IsGone((int)n)) { Gone?.Invoke(); }
@@ -155,8 +155,8 @@ internal sealed class AlsaSink(string device) : ISink
             if (n == Alsa.EAGAIN || n == 0)
             {
                 // Full: a stream not yet running starts once its buffer is (start threshold).
-                lock (gate) { if (pcm != IntPtr.Zero && Alsa.State(pcm) == Alsa.StatePrepared) Alsa.Start(pcm); }
-                Alsa.Wait(pcm, 100);
+                lock (gate) { if (pcm != IntPtr.Zero && Alsa.State(pcm) == Alsa.StatePrepared) _ = Alsa.Start(pcm); }
+                _ = Alsa.Wait(pcm, 100);
             }
         }
     }
@@ -192,7 +192,7 @@ internal sealed class AlsaSink(string device) : ISink
             {
                 if (pcm == IntPtr.Zero || !configured) break;
                 int st = Alsa.State(pcm);
-                if (st == Alsa.StatePrepared && written > 0) { Alsa.Start(pcm); st = Alsa.State(pcm); }
+                if (st == Alsa.StatePrepared && written > 0) { _ = Alsa.Start(pcm); st = Alsa.State(pcm); }
                 // Out of samples: XRUN (or never started) means everything has played.
                 if (st != Alsa.StateRunning && st != Alsa.StateDraining) break;
                 if (Alsa.Delay(pcm, out var d) == 0 && d <= 0) break;
@@ -201,7 +201,7 @@ internal sealed class AlsaSink(string device) : ISink
         }
         lock (gate)
         {
-            if (pcm != IntPtr.Zero && configured) { Alsa.Drop(pcm); Alsa.Prepare(pcm); }
+            if (pcm != IntPtr.Zero && configured) { _ = Alsa.Drop(pcm); _ = Alsa.Prepare(pcm); }
             written = 0;
         }
     }
@@ -210,7 +210,7 @@ internal sealed class AlsaSink(string device) : ISink
     {
         lock (gate)
         {
-            if (pcm != IntPtr.Zero && configured) { Alsa.Drop(pcm); Alsa.Prepare(pcm); }
+            if (pcm != IntPtr.Zero && configured) { _ = Alsa.Drop(pcm); _ = Alsa.Prepare(pcm); }
             written = 0;
             hwPaused = false;
             running.Set();
@@ -231,15 +231,15 @@ internal sealed class AlsaSink(string device) : ISink
                     {
                         // Can't hold it where it is: what it held is dropped, and the clock stops there.
                         long p = PlayedLocked();
-                        Alsa.Drop(pcm);
-                        Alsa.Prepare(pcm);
+                        _ = Alsa.Drop(pcm);
+                        _ = Alsa.Prepare(pcm);
                         written = p;
                     }
                 }
             }
             else
             {
-                if (hwPaused && pcm != IntPtr.Zero) Alsa.Pause(pcm, 0);
+                if (hwPaused && pcm != IntPtr.Zero) _ = Alsa.Pause(pcm, 0);
                 hwPaused = false;
                 running.Set();
             }
@@ -254,7 +254,7 @@ internal sealed class AlsaSink(string device) : ISink
             shared = on;
             if (on)
             {
-                if (pcm != IntPtr.Zero) { Alsa.Drop(pcm); Alsa.Close(pcm); pcm = IntPtr.Zero; }
+                if (pcm != IntPtr.Zero) { _ = Alsa.Drop(pcm); _ = Alsa.Close(pcm); pcm = IntPtr.Zero; }
                 configured = false;
                 Exclusive = false;
                 HolderPid = 0;
@@ -304,7 +304,7 @@ internal sealed class AlsaSink(string device) : ISink
         lock (gate)
         {
             disposed = true;
-            if (pcm != IntPtr.Zero) { Alsa.Drop(pcm); Alsa.Close(pcm); pcm = IntPtr.Zero; }
+            if (pcm != IntPtr.Zero) { _ = Alsa.Drop(pcm); _ = Alsa.Close(pcm); pcm = IntPtr.Zero; }
             configured = false;
             Exclusive = false;
             running.Set();

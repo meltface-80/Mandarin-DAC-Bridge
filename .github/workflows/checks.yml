@@ -1,12 +1,36 @@
-name: CI
+name: Checks
 
+# The gates and the whole suite (dev/quality.md). A test that does not block a release is a
+# suggestion, so these run on every branch push and pull request, and release.yml calls this
+# before it builds anything: a red check means no release.
+#
+# The steps are the commands a contributor runs locally (tools/check.sh).
 on:
   push:
     branches: ['**']
   pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
+  gates:
+    name: Gates (file length, analyzers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: File length, the gates' own tests, the build with the analyzers (tools/check.sh gates)
+        run: tools/check.sh gates
+
   test:
+    # A stalled audio test would otherwise hold the run for GitHub's default of six hours.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

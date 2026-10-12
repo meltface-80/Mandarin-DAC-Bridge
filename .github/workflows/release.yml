@@ -14,18 +14,12 @@ permissions:
   contents: write
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '10.0.x'
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64
-      - run: dotnet test -c Release
+  # Every gate and the whole suite on macOS, Windows and Linux (checks.yml): nothing is built unless all pass.
+  checks:
+    uses: ./.github/workflows/checks.yml
 
   build:
-    needs: test
+    needs: checks
     strategy:
       matrix:
         include:

@@ -44,6 +44,8 @@ internal sealed class Config
     public bool Qobuz { get; init; }
     public bool MacApps { get; init; }
     public bool Roon { get; init; }
+    public bool RoonApi { get; init; }
+    public string RoonCore { get; init; } = "";
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
     public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : "other";
@@ -74,6 +76,8 @@ internal sealed class Config
             Qobuz = Env("QOBUZ") == "1",
             MacApps = Env("MAC_APPS") == "1",
             Roon = Env("ROON_BRIDGE") == "1",
+            RoonApi = Env("ROON_API") == "1",
+            RoonCore = Env("ROON_CORE") ?? "",
             TestDevices = Env("BRIDGE_TEST_DEVICES"),
             TestSink = Env("BRIDGE_TEST_SINK") is "fake" or "busy",
             TestSinkBusy = Env("BRIDGE_TEST_SINK") == "busy"

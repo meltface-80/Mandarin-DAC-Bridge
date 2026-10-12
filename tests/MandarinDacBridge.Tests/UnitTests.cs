@@ -602,3 +602,43 @@ public class AlsaVolumeTests
         Assert.Null(Audio.AlsaVolume.Open("hw:CARD=NoSuchDac,DEV=0"));
     }
 }
+
+public class RoonApiTests
+{
+    [Fact]
+    public void Sood_QueriesAndRepliesRoundTrip()
+    {
+        var q = Roon.Sood.Message('Q', [new("query_service_id", Roon.Sood.RoonApiService), new("_tid", "t-1"), new("none", null)]);
+        Assert.Equal("SOOD"u8.ToArray().Concat(new byte[] { 2, (byte)'Q' }), q.Take(6));
+        var (type, props) = Roon.Sood.Parse(q)!.Value;
+        Assert.Equal('Q', type);
+        Assert.Equal(Roon.Sood.RoonApiService, props["query_service_id"]);
+        Assert.Equal("t-1", props["_tid"]);
+        Assert.Null(props["none"]);
+        Assert.Null(Roon.Sood.Parse("NOPE"u8.ToArray()));
+    }
+
+    [Fact]
+    public void Moo_FramesAndParses()
+    {
+        var m = Roon.RoonApi.Moo("REQUEST", "com.roonlabs.registry:1/info", 7, "{\"a\":1}"u8.ToArray());
+        Assert.StartsWith("MOO/1 REQUEST com.roonlabs.registry:1/info\nRequest-Id: 7\nContent-Length: 7\n", System.Text.Encoding.UTF8.GetString(m));
+        var (verb, name, headers, body) = Roon.RoonApi.ParseMoo(m)!.Value;
+        Assert.Equal(("REQUEST", "com.roonlabs.registry:1/info", "7", "{\"a\":1}"), (verb, name, headers["Request-Id"], System.Text.Encoding.UTF8.GetString(body)));
+        var ping = Roon.RoonApi.ParseMoo(System.Text.Encoding.UTF8.GetBytes("MOO/1 REQUEST com.roonlabs.ping:1/ping\nRequest-Id: 3\n\n"))!.Value;
+        Assert.Equal(("REQUEST", "com.roonlabs.ping:1/ping", 0), (ping.Verb, ping.Name, ping.Body.Length));
+    }
+
+    [Fact]
+    public void AZone_GivesItsNowPlaying()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""
+            {"zone_id":"z","display_name":"Den","state":"paused","outputs":[{"display_name":"DragonFly"}],
+             "now_playing":{"seek_position":5,"length":300,"image_key":"k","two_line":{"line1":"Song","line2":"Band"}}}
+            """);
+        var z = Roon.RoonApi.Zone(doc.RootElement)!;
+        Assert.Equal(("Den", "paused", "Song", "Band", "", "k", 300.0, (double?)5), (z.Name, z.State, z.Title, z.Artist, z.Album, z.ImageKey, z.Length, z.Seek));
+        Assert.Equal(["DragonFly"], z.Outputs);
+        Assert.True(z.InUse);
+    }
+}

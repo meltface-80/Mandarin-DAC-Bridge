@@ -1,0 +1,13 @@
+<!-- Gates (dev/quality.md): every project builds with .NET's recommended analyzers and the rules in
+     .editorconfig, and every warning is an error. Nothing is grandfathered: a finding is fixed, or suppressed
+     where it stands with a reason ([SuppressMessage(..., Justification = "...")]). -->
+<Project>
+  <PropertyGroup>
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Needed for IDE0005 (unnecessary usings) to run in the build; the code uses plain comments, not XML docs. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+</Project>
