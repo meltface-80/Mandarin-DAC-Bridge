@@ -3,37 +3,20 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
-## [1.1.4] — 2026-10-12
+## [1.1.3] — 2026-10-12
 
 ### Fixed
 
-- **A `settings.json` that couldn't be read was silently replaced by the defaults.** The bridge
-  started with every DAC's settings and the services' secrets gone, said nothing, and overwrote the
-  file at the next change. Now a file that isn't settings (cut short, edited by hand) is moved aside
-  (`settings.json.unreadable-…`) and the log says why; one that can't be opened at all (held by
-  another program, its permissions) is left as it is and never written over; `{"dacs":null}` no
-  longer stops the bridge starting. Roon's tokens (`roon-api.json`) get the same care, where a bad
-  file used to drop the other Cores' tokens. Class: a silent catch that lost data. Gate: tests start
-  from a cut-short file, a file held open and a null section, and require the file kept byte for byte
-  or the bridge started (the first failed before; each guard was removed once and its test failed).
-- **Secrets files were written, then made owner-only**, and a crash midway could leave them cut
-  short. `settings.json` and `roon-api.json` are now created owner-only and written whole through a
-  new file of their own (`OwnerOnlyFile`). The tests require mode 600 and fail if the writer creates
-  files others can read; the moment between writing and restricting in the old code can't itself be
-  shown by a test.
-- **Caldera's copy of the Plex token was in folders others could read** (`DATA_DIR/caldera`, its
-  HOME, and its player folders). They are now their owner's only (the Caldera test requires it, and
-  failed before). What Caldera prints (its log lines and errors, which reach the log and the page)
-  is cleaned of the owner's token and any `X-Plex-Token=` in a URL. The token is still on Caldera's
-  command line for the moment `caldera-music --set` runs; the README says so.
-- **Moving the volume slider rewrote `settings.json` each time**, though a level isn't kept. It
-  writes only when something kept changes.
-- **The README said Docker hides the Soloist key** from other accounts on the machine. It doesn't.
-
-### Changed
-
-- **Two oversized files shrink:** the settings classes moved out of `Manager.cs` into `Settings.cs`,
-  and the Caldera test out of `EndToEndTests.cs` into `CalderaTests.cs`.
+- **Any website's page could change the bridge.** The bridge took a change from whoever sent it,
+  so a page of another site, open in a browser anywhere on the network, could switch connections
+  on, start downloads or turn a DAC up. Now a change that a browser says comes from another site
+  (Sec-Fetch-Site, or Origin on older browsers) is refused with 403; the bridge's own page and
+  programs that aren't browsers (UPnP controllers, a Squeezebox server, `curl`) go ahead. Class: a
+  web API trusting every request that reaches it (cross-site request forgery). Gate: an end-to-end
+  test sends another site's requests to the API, a download and a UPnP action and requires them
+  refused with nothing changed, and fails without the check; unit tests cover each header case
+  (three deliberate breaks of the rule each failed them). The password in `dev/quality.md` is
+  still to come.
 
 ## [1.1.2] — 2026-10-12
 

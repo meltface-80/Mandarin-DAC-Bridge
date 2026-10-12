@@ -9,4 +9,4 @@ version's story; this is the index.
 | 1.1.0 | `main` (#7, merged from its branch straight into `main`), not published as a release | Roon now playing (#5, merged before the version rule; numbered here) and the quality gates (`quality/gates-1`). `dev` gets the same commits with #8. |
 | 1.1.1 | `main` (#9), not published as a release | Test images on GitHub's container registry: `<version>-test` per branch, `dev` for the dev branch (`feature/test-image`). |
 | 1.1.2 | `dev` | A Squeezebox server's volume no longer moves the DAC on connect (`fix/volume-on-connect`). |
-| 1.1.4 | `dev` | Settings and secrets files: kept when unreadable, owner-only from the start; Caldera's folder owner-only (`fix/settings-and-secrets`). |
+| 1.1.3 | `dev` | Changes sent from another site's page are refused (`security/same-origin`). |
