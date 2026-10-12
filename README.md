@@ -398,6 +398,14 @@ The DAC's volume is the ALSA mixer control alsamixer shows for the card (usually
 Core Audio's device volume on a Mac, and the endpoint volume on Windows when the DAC applies it
 itself.
 
+### Who can change things
+
+Anyone who can open the page can change the bridge, so keep port 55500 on your home network. From a
+browser, only the bridge's own page can change anything: a request that another website's page sends
+to the bridge (to switch a connection on, start a download or turn a DAC up) is refused. Programs
+that aren't browsers (Audirvana, Mandarin, a Squeezebox server, `curl`) aren't affected. An optional
+password is planned.
+
 ### Settings (all optional)
 
 | Variable | Default | |
