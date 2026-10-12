@@ -56,6 +56,10 @@ internal sealed class ServicesView
     public string RoonVersion { get; set; } = "";
     public string RoonDownload { get; set; } = "";
     public string RoonStatus { get; set; } = "";
+    // Roon now playing (its extension API): on, how it is, and the zones it knows (for each DAC's choice).
+    public bool RoonApi { get; set; }
+    public string RoonApiStatus { get; set; } = "";
+    public string[] RoonZones { get; set; } = [];
     public string RoonBridge { get; set; } = "";
 }
 
@@ -92,6 +96,8 @@ internal sealed class DacView
     public string? Spotify { get; set; }
     public string? Caldera { get; set; }
     // The DAC's own volume: whether it has one, "dac" or "fixed", and where it is (0–100, dB) while the apps set it.
+    public string RoonZone { get; set; } = "";
+    public string RoonZoneChosen { get; set; } = "";
     public bool VolumeAvailable { get; set; }
     public string VolumeMode { get; set; } = "dac";
     public int? Level { get; set; }

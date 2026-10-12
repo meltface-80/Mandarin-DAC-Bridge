@@ -316,6 +316,15 @@ machine, switch on **Share when idle** on that DAC:
 Or skip Roon Bridge: with the Squeezebox player on, Roon's Squeezebox support plays to the
 bridge directly (with Roon's limits for Squeezebox players, and not as Roon Ready).
 
+**Roon now playing.** Roon's Squeezebox support sends no track details, and through Roon Bridge
+the bridge isn't in the way at all, so the pages and the now-playing screen learn what Roon plays
+from Roon itself, through its extension API (as RoPieee's display does). Switch on **Roon now
+playing** under *Connections* (or set `ROON_API=1`), then in Roon go to *Settings → Extensions* and
+enable **Mandarin DAC Bridge** (once: it stays enabled). The bridge finds the Roon Core on the
+network by itself (set `ROON_CORE=host:port` if it can't, e.g. across subnets). Each DAC shows its
+Roon zone's title, artist, album, cover and position: the zone named like the DAC (its Squeezebox
+name, or Roon Bridge's name for it), or the one chosen under **Roon zone** on the DAC's page.
+
 ### The now-playing screen
 
 `http://<machine>:55500/now`, full-screen in any browser: cover, title, artist, album, time and
@@ -407,6 +416,8 @@ itself.
 | `CALDERA` | — | `1` starts with Plex through Caldera Headless on (Linux) |
 | `MAC_APPS` | — | `1` starts with the Music and Spotify apps on (macOS) |
 | `ROON_BRIDGE` | — | `1` starts with Roon Bridge on (downloaded from Roon Labs, run beside the bridge) |
+| `ROON_API` | — | `1` starts with Roon now playing on (Roon's extension API) |
+| `ROON_CORE` | found by itself | the Roon Core, `host:port`, if it can't be found on the network |
 | `SOLOIST_VERBOSE` | — | `1` runs Spotify Soloist with its detailed log (in `DATA_DIR/soloist/<dac>/soloist.log`) |
 
 On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. On Windows, set them
