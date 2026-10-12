@@ -121,9 +121,9 @@
   .conn .row:first-of-type { border-top: 0; }
   .conn .row:last-child { border-bottom: 0; }
   .conn .row > div:first-child { min-width: 0; }
-  .conn input[type=text], .conn input[type=password], .conn select { font: inherit; font-size: 13.5px; color: var(--text); background: var(--bg-deep); border: 1px solid var(--line);
+  .conn input[type=text], .conn input[type=password], .conn select, #card select { font: inherit; font-size: 13.5px; color: var(--text); background: var(--bg-deep); border: 1px solid var(--line);
     border-radius: 10px; padding: 7px 10px; width: 220px; max-width: 100%; }
-  .conn input[type=text]:focus, .conn input[type=password]:focus, .conn select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
+  .conn input[type=text]:focus, .conn input[type=password]:focus, .conn select:focus, #card select:focus { outline: 2px solid var(--gold); outline-offset: 1px; }
   .conn .ctl { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
   .tag { font-size: 12px; border-radius: 999px; padding: 2px 9px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
   .tag.on { border-color: var(--gold); color: var(--gold); }
@@ -305,6 +305,13 @@ function renderConnections() {
       </div>
     </div>
     <div class="row">
+      <div><div class="lbl">Roon now playing</div>
+        <div class="hint">Title, artist, album and cover of what Roon plays to the DACs (through the Squeezebox player or Roon Bridge), for the
+          pages and the now-playing screen, from Roon's own extension API. Once on, enable <b>Mandarin DAC Bridge</b> in Roon:
+          Settings → Extensions.${sv.roonApi ? "<br>" + esc(sv.roonApiStatus || "starting…") : ""}</div></div>
+      <div class="ctl"><button class="switch" role="switch" aria-checked="${!!sv.roonApi}" aria-label="Roon now playing" id="c-rapi"></button></div>
+    </div>
+    <div class="row">
       <div><div class="lbl">Now-playing screen</div><div class="hint">For a monitor or TV beside the DAC: open <a href="/now">${esc(nowUrl)}</a> full-screen. Optional.</div></div>
       <div class="ctl"><a class="btn" href="/now" style="text-decoration:none;color:inherit">Open</a></div>
     </div>`;
@@ -317,6 +324,7 @@ function renderConnections() {
   $("#c-cal").onclick = () => postServices({ caldera: !sv.caldera });
   $("#c-qb").onclick = () => postServices({ qobuz: !sv.qobuz });
   $("#c-roon").onclick = () => postServices({ roon: !sv.roon });
+  $("#c-rapi").onclick = () => postServices({ roonApi: !sv.roonApi });
   const mac = $("#c-mac");
   if (mac) mac.onclick = () => postServices({ macApps: !sv.macApps });
   const mdac = $("#c-mdac");
@@ -393,6 +401,7 @@ let volMoved = 0;   // when the volume slider last moved: the sheet isn't redraw
 
 function renderSheet() {
   if (Date.now() - volMoved < 1500) return;
+  if (document.activeElement && document.activeElement.id === "s-rzone") return;   // not under an open list
   const d = data.dacs.find((x) => x.id === openId);
   if (!d) { closeSheet(); return; }
   const s = state(d), p = d.player || {}, c = d.control || {};
@@ -459,6 +468,13 @@ function renderSheet() {
       <div><div class="lbl">Share when idle</div><div class="hint">Lets go of the DAC whenever nothing plays through the bridge, so Roon Bridge or another player on this machine can use it. Taken back when an app plays here.</div></div>
       <button class="switch" role="switch" aria-checked="${!!d.share}" aria-label="Share when idle" id="s-share"></button>
     </div>
+    ${data.services && data.services.roonApi ? `<div class="row">
+      <div><div class="lbl">Roon zone</div><div class="hint">Whose now playing is this DAC's. ${d.roonZone ? "Now: <b>" + esc(d.roonZone) + "</b>." : "None found by its name: choose one."}</div></div>
+      <select id="s-rzone" aria-label="Roon zone">
+        <option value="">By name</option>
+        ${(data.services.roonZones || []).map((z) => `<option value="${esc(z)}"${z === d.roonZoneChosen ? " selected" : ""}>${esc(z)}</option>`).join("")}
+      </select>
+    </div>` : ""}
     ${c.owner && d.enabled ? `<div class="row"><div><div class="lbl">Hand over</div><div class="hint">Lets another app take this DAC now, even while ${esc(c.owner)} holds it.</div></div><button class="btn" id="s-release">Release</button></div>` : ""}
     <div class="foot">${d.volumeAvailable
       ? "The volume is applied in the DAC itself, so playback stays bit-perfect."
@@ -469,6 +485,8 @@ function renderSheet() {
   $("#s-share").onclick = () => post(`/api/dacs/${d.id}/settings`, { share: !d.share });
   for (const b of document.querySelectorAll("[data-dsd]")) b.onclick = () => post(`/api/dacs/${d.id}/settings`, { dsd: b.dataset.dsd });
   for (const b of document.querySelectorAll("[data-vol]")) b.onclick = () => post(`/api/dacs/${d.id}/settings`, { volume: b.dataset.vol });
+  const rzs = $("#s-rzone");
+  if (rzs) rzs.onchange = () => post(`/api/dacs/${d.id}/settings`, { roonZone: rzs.value });
   const vs = $("#s-vol");
   if (vs) {
     let timer = 0;

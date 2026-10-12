@@ -498,6 +498,9 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
           through it, and takes it back when an app plays to the bridge (once Roon has let go). A Roon Bridge installed
           separately is used as it is. Or skip Roon Bridge: Roon's Squeezebox support plays to the bridge directly, with
           Roon's Squeezebox limits.</p>
+        <p><b>Roon now playing:</b> switch it on under <i>Connections</i>, then enable <b>Mandarin DAC Bridge</b> in Roon
+          (<i>Settings → Extensions</i>). The pages and the now-playing screen then show the title, artist, album and cover
+          of what Roon plays to each DAC, through Roon Bridge or the Squeezebox player, from Roon's own extension API.</p>
       </div>
       <div class="info-card" id="display">
         <div class="sym">Now-playing screen</div>
@@ -609,6 +612,8 @@ docker compose down --rmi local --volumes</pre>
           <tr><td>CALDERA</td><td>&mdash;</td><td><code>1</code> starts with Plex through Caldera Headless on (Linux).</td></tr>
           <tr><td>MAC_APPS</td><td>&mdash;</td><td><code>1</code> starts with the Music and Spotify apps on (macOS).</td></tr>
           <tr><td>ROON_BRIDGE</td><td>&mdash;</td><td><code>1</code> starts with Roon Bridge on (downloaded from Roon Labs).</td></tr>
+          <tr><td>ROON_API</td><td>&mdash;</td><td><code>1</code> starts with Roon now playing on (Roon's extension API).</td></tr>
+          <tr><td>ROON_CORE</td><td>found by itself</td><td>The Roon Core, <code>host:port</code>, if it can't be found on the network.</td></tr>
           <tr><td>SOLOIST_VERBOSE</td><td>&mdash;</td><td><code>1</code> runs Spotify Soloist with its detailed log.</td></tr>
         </tbody>
       </table>
