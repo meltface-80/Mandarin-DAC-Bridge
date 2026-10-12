@@ -188,7 +188,7 @@ internal sealed class QobuzConnect : IDisposable
         var h = SHA256.HashData(Encoding.UTF8.GetBytes("qobuz|" + key));
         h[6] = (byte)((h[6] & 0x0F) | 0x50);
         h[8] = (byte)((h[8] & 0x3F) | 0x80);
-        return new Guid(h[..16], bigEndian: true).ToString();
+        return new Guid(h.AsSpan(0, 16), bigEndian: true).ToString();
     }
 
     // The DACs changed (added, gone, renamed): qobuz-proxy starts again with them.

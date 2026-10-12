@@ -20,7 +20,6 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using MandarinDacBridge.Upnp;
-using Microsoft.AspNetCore.Http;
 
 namespace MandarinDacBridge;
 

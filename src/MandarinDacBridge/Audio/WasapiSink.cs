@@ -36,7 +36,6 @@ internal sealed class WasapiSink(string endpointId) : ISink
     private byte[] ring = [];
     private long ringWrite, ringRead;          // bytes, ever increasing
     private long deliveredReal, silence;       // frames handed to the DAC: samples, and silence while running
-    private long written;                      // frames written since the clock last started at 0
     private bool running, paused, configured, shared, started, disposed, gone;
     private byte[] scratch = new byte[1 << 16];
 
@@ -212,7 +211,7 @@ internal sealed class WasapiSink(string endpointId) : ISink
     private void ResetCounters()
     {
         ringWrite = ringRead = 0;
-        deliveredReal = silence = written = 0;
+        deliveredReal = silence = 0;
         running = false;
     }
 
@@ -310,7 +309,6 @@ internal sealed class WasapiSink(string endpointId) : ISink
                 scratch.AsSpan(off + first, n - first).CopyTo(ring);
                 ringWrite += n;
                 off += n;
-                written += n / frameBytes;
             }
             StartIfReady();
         }

@@ -1,0 +1,23 @@
+# Analyzer rules beyond .NET's recommended set (Directory.Build.props), for the bug classes this project has
+# had or is likely to: parsing that depends on the machine's culture, comparisons that depend on its locale,
+# return codes dropped without saying so, and code left behind unused. Warnings are errors in the build.
+root = true
+
+[*.cs]
+dotnet_diagnostic.CA1305.severity = warning   # culture: say InvariantCulture (a "," decimal machine broke parsing once)
+dotnet_diagnostic.CA1309.severity = warning   # ordinal comparison
+dotnet_diagnostic.CA1310.severity = warning   # culture-specific comparison
+dotnet_diagnostic.CA1806.severity = warning   # a return code dropped: discard it with _ = to say it's on purpose
+dotnet_diagnostic.CA2016.severity = warning   # pass the CancellationToken on
+dotnet_diagnostic.IDE0051.severity = warning  # unused private member
+dotnet_diagnostic.IDE0052.severity = warning  # private member written, never read
+dotnet_diagnostic.IDE0059.severity = warning  # value assigned, never used
+dotnet_diagnostic.IDE0060.severity = warning  # unused parameter
+dotnet_diagnostic.IDE0005.severity = warning  # unnecessary using
+
+[tests/**.cs]
+dotnet_diagnostic.CA1707.severity = none      # test names read as sentences, with underscores
+dotnet_diagnostic.CA1861.severity = none      # constant arrays in assertions are fine
+dotnet_diagnostic.CA1859.severity = none
+dotnet_diagnostic.CA1001.severity = none      # xunit disposes through IAsyncLifetime
+dotnet_diagnostic.IDE0060.severity = none

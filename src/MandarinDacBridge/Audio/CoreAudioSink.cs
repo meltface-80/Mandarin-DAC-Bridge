@@ -234,7 +234,7 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
 
     private void StopIo()
     {
-        if (ioRunning) { CoreAudio.DeviceStop(dev, procId); ioRunning = false; }
+        if (ioRunning) { _ = CoreAudio.DeviceStop(dev, procId); ioRunning = false; }
     }
 
     // With the IO stopped.
@@ -328,7 +328,7 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
             disposed = true;
             watch?.Dispose();
             StopIo();
-            if (procId != IntPtr.Zero) CoreAudio.DestroyIOProcId(dev, procId);
+            if (procId != IntPtr.Zero) _ = CoreAudio.DestroyIOProcId(dev, procId);
             procId = IntPtr.Zero;
             // Giving hog mode back: it is a toggle, and ours.
             if (haveHog && CoreAudio.HogOwner(dev) == myPid) CoreAudio.Set(dev, CoreAudio.DeviceHogMode, CoreAudio.ScopeGlobal, myPid);

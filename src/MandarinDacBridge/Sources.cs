@@ -117,7 +117,7 @@ internal static partial class Sources
             catch (Exception e) { log("DSD header: " + e.Message + "; trying ffmpeg"); }
         }
         var raw = RawPcmOf(mime);
-        var first = FfmpegSource.Open(ffmpeg, uri, offset, raw, [], log, ct);
+        var first = FfmpegSource.Open(ffmpeg, uri, offset, raw, [], ct);
         var info = first.Info;
         var filters = new List<string>();
         int want = PickRate(info.Rate, dac.Rates);
@@ -128,13 +128,13 @@ internal static partial class Sources
         first.Dispose();
         log($"{Path.GetFileName(uri.Split('?')[0])}: {string.Join(", ", filters)}");
         FfmpegSource second;
-        try { second = FfmpegSource.Open(ffmpeg, uri, offset, raw, filters, log, ct); }
+        try { second = FfmpegSource.Open(ffmpeg, uri, offset, raw, filters, ct); }
         catch (Exception) when (filters.Any(f => f.Contains("soxr")) && !ct.IsCancellationRequested)
         {
             // An ffmpeg built without SoX: its own resampler, at its best.
             log("this ffmpeg has no SoX resampler; using its own");
             var plain = filters.Select(f => f.Replace(":resampler=soxr:precision=28", ":filter_size=64:phase_shift=10:cutoff=0.97")).ToList();
-            second = FfmpegSource.Open(ffmpeg, uri, offset, raw, plain, log, ct);
+            second = FfmpegSource.Open(ffmpeg, uri, offset, raw, plain, ct);
         }
         second.Info = second.Info with
         {
@@ -164,7 +164,7 @@ internal sealed class FfmpegSource : IPcmSource
 
     private FfmpegSource(Process p) { proc = p; stdout = p.StandardOutput.BaseStream; }
 
-    public static FfmpegSource Open(string ffmpeg, string uri, double offset, RawPcm? raw, List<string> filters, Action<string> log, CancellationToken ct)
+    public static FfmpegSource Open(string ffmpeg, string uri, double offset, RawPcm? raw, List<string> filters, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(ffmpeg) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in new[] { "-hide_banner", "-nostdin", "-loglevel", "info" }) psi.ArgumentList.Add(a);

@@ -380,7 +380,7 @@ internal sealed class RoonApi : IDisposable
             var m = msg.ToArray();
             msg.SetLength(0);
             if (ParseMoo(m) is not { } moo) continue;
-            int.TryParse(moo.Headers.GetValueOrDefault("Request-Id"), out var id);
+            if (!int.TryParse(moo.Headers.GetValueOrDefault("Request-Id"), out var id)) continue;   // not a request or reply of ours
             if (moo.Verb == "REQUEST")
             {
                 // The Core's pings (and anything else it asks of a service we don't have) are answered.

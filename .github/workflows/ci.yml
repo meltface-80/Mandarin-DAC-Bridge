@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  # The gates no build covers (docs/quality-plan.md): file lengths, and the gate scripts' own tests.
+  # The analyzers run in every build below (Directory.Build.props): a finding fails it.
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: File length (the ratchet)
+        run: python3 tools/quality/length.py
+      - name: The gates' own tests
+        run: python3 -m unittest discover -s tools/quality -v
+
   test:
     strategy:
       fail-fast: false

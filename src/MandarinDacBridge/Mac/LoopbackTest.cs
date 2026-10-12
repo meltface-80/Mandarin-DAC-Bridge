@@ -132,9 +132,9 @@ internal static unsafe class LoopbackTest
             {
                 var until = DateTime.UtcNow.AddSeconds(6);
                 while (DateTime.UtcNow < until && Volatile.Read(ref s->N) < s->Cap) Thread.Sleep(20);
-                CoreAudio.DeviceStop(dev, proc);
+                _ = CoreAudio.DeviceStop(dev, proc);
             }
-            CoreAudio.DestroyIOProcId(dev, proc);
+            _ = CoreAudio.DestroyIOProcId(dev, proc);
             if (err != 0) { Console.WriteLine($"{label}: couldn't start the device ({err})"); return Verdict.Changed; }
             return Check(label, rate, s);
         }
