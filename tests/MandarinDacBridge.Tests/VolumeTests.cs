@@ -44,6 +44,16 @@ public sealed partial class EndToEndTests
         await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"level\":60}"));
         Assert.Equal("60", await Volume(id));
 
+        // Fixed: left where it is; the apps see 100 and can't move it.
+        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"fixed\"}"));
+        dac = await Dac();
+        Assert.Equal("fixed", dac.GetProperty("volumeMode").GetString());
+        Assert.Equal(JsonValueKind.Null, dac.GetProperty("level").ValueKind);
+        Assert.Equal("100", await Volume(id));
+        Assert.Equal(200, (await SetVolume(id, "5")).Status);
+        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"dac\"}"));
+        Assert.Equal("60", await Volume(id));
+
         // A Squeezebox server's volume (audg, "adjust" on): -30 dB, as a level on a 60 dB curve.
         var lms = new TcpListener(IPAddress.Loopback, 0);
         lms.Start();
@@ -65,22 +75,39 @@ public sealed partial class EndToEndTests
                 BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(14), g);
                 return b;
             }
+            // The player handles the server's messages in order: once it has answered a later one (its
+            // name), every earlier one has been dealt with. So "nothing changed" is checked without a wait.
+            async Task Handled()
+            {
+                int n = got.Count(x => x.Op == "SETD");
+                await ToPlayer(s, "setd", [0]);
+                await Until(() => Task.FromResult(got.Count(x => x.Op == "SETD") > n));
+            }
+            // LMS sends its stored volume as a player connects (Player::init powers it on): the bridge
+            // applies no level on connect, so the DAC stays where it is, however loud the server's is.
+            await ToPlayer(s, "audg", Audg(true, 0));
+            await Handled();
+            Assert.Equal("60", await Volume(id));
+            // Once the server asks the player to play (it sends its volume again with every stream it
+            // starts), its volume is the listener's: it moves the DAC.
+            await ToPlayer(s, "strm", Strm('s', "/c44.flac", new Uri(files.Base).Port));
             await ToPlayer(s, "audg", Audg(false, -30));     // the server's volume fixed at 100%: nothing changes
-            await Task.Delay(300);
+            await Handled();
             Assert.Equal("60", await Volume(id));
             await ToPlayer(s, "audg", Audg(true, -30));
             await Until(async () => await Volume(id) == "24");
+
+            // A reconnect starts over: the volume LMS sends as the player comes back isn't applied either.
+            player.Close();
+            using var back = await lms.AcceptTcpClientAsync(cts.Token);
+            s = back.GetStream();
+            got = new();
+            _ = ReadPlayer(s, got, cts.Token);
+            await Until(() => Task.FromResult(got.Any(x => x.Op == "HELO")));
+            await ToPlayer(s, "audg", Audg(true, 0));
+            await Handled();
+            Assert.Equal("24", await Volume(id));
         }
         finally { lms.Stop(); }
-
-        // Fixed: left where it is; the apps see 100 and can't move it.
-        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"fixed\"}"));
-        dac = await Dac();
-        Assert.Equal("fixed", dac.GetProperty("volumeMode").GetString());
-        Assert.Equal(JsonValueKind.Null, dac.GetProperty("level").ValueKind);
-        Assert.Equal("100", await Volume(id));
-        Assert.Equal(200, (await SetVolume(id, "5")).Status);
-        await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"dac\"}"));
-        Assert.Equal("24", await Volume(id));
     }
 }

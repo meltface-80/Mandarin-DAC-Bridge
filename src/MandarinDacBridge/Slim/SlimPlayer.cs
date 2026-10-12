@@ -45,6 +45,10 @@ internal sealed class SlimPlayer : IDisposable
     private IPAddress? switchTo;
     private Caller? caller;
     private bool decodedSent;
+    // Whether the server's volume moves the DAC yet: not from connecting until it first asks this player
+    // to play. LMS sends its stored volume as a player connects, and the bridge applies no level on
+    // connect (CLAUDE.md, volume safety); it sends it again with every stream it starts.
+    private bool serverVolume;
     private long bytesReceived;
 
     public string Status { get; private set; } = "looking for a Squeezebox server";
@@ -171,6 +175,7 @@ internal sealed class SlimPlayer : IDisposable
     // HELO: who this player is and what it plays.
     private void Helo(bool reconnect)
     {
+        serverVolume = false;
         var dac = bridge.Dev;
         int max = dac.Rates.Length > 0 ? dac.Rates.Max() : 384000;
         // What ffmpeg reads from a stream it can't seek in. DSD isn't offered: the server converts it.
@@ -257,10 +262,12 @@ internal sealed class SlimPlayer : IDisposable
 
     // The server's volume: old gains (2 × 4), "adjust" (1: the player's volume is the server's to set), preamp, new
     // gains (2 × 16.16). On a DAC with a volume of its own it goes to the DAC (bit-perfect); otherwise, or with the
-    // server's volume fixed at 100%, nothing changes. Not while another app has the DAC.
+    // server's volume fixed at 100%, nothing changes. Not while another app has the DAC, and not before the
+    // server has asked this player to play (serverVolume).
     private void Gain(byte[] data)
     {
         if (data.Length < 18 || data[8] == 0 || !bridge.VolumeOn) return;
+        if (!serverVolume) { Log("the server's volume is left alone until it plays here (no level on connect)"); return; }
         if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) return;
         uint g = Math.Max(BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(10)), BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(14)));
         double db = g == 0 ? double.NegativeInfinity : 20 * Math.Log10(g / 65536.0);
@@ -293,7 +300,10 @@ internal sealed class SlimPlayer : IDisposable
                     r.Play().GetAwaiter().GetResult();
                     Stat("STMr");
                     return;
-                case 's': Start(s); return;
+                case 's':
+                    serverVolume = true;
+                    Start(s);
+                    return;
             }
         }
         catch (UpnpException e) { Log(e.Message); Stat("STMn"); }
