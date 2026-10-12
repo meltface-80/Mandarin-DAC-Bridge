@@ -22,121 +22,8 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace MandarinDacBridge.Slim;
-
-internal sealed record SlimServer(IPAddress Ip, int Port, string Name, int JsonPort);
-
-internal static partial class SlimDiscovery
-{
-    public const int Port = 3483;
-
-    // "192.168.1.5", "lms.local:3483" → the server; "" → null.
-    public static SlimServer? Parse(string spec)
-    {
-        spec = spec.Trim();
-        if (spec == "") return null;
-        var m = HostPort().Match(spec);
-        if (!m.Success) return null;
-        var host = m.Groups[1].Value.Trim('[', ']');
-        int port = m.Groups[2].Success ? int.Parse(m.Groups[2].Value) : Port;
-        IPAddress? ip;
-        if (!IPAddress.TryParse(host, out ip))
-        {
-            try { ip = Dns.GetHostAddresses(host).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork); }
-            catch (Exception) { ip = null; }
-        }
-        return ip == null ? null : new SlimServer(ip, port, host, 9000);
-    }
-
-    // Asks the network for a server ("e" with the tags wanted) and takes the first to answer ("E" + tags).
-    public static SlimServer? Find(TimeSpan wait, CancellationToken ct)
-    {
-        using var udp = new UdpClient(AddressFamily.InterNetwork);
-        udp.EnableBroadcast = true;
-        var ask = Encoding.ASCII.GetBytes("eNAME\0JSON\0VERS\0");
-        try { udp.Send(ask, ask.Length, new IPEndPoint(IPAddress.Broadcast, Port)); }
-        catch (SocketException) { return null; }
-        var until = DateTime.UtcNow + wait;
-        while (DateTime.UtcNow < until && !ct.IsCancellationRequested)
-        {
-            var task = udp.ReceiveAsync(ct).AsTask();
-            try { if (!task.Wait(until - DateTime.UtcNow, ct)) return null; }
-            catch (Exception) { return null; }
-            var r = task.Result;
-            if (r.Buffer.Length == 0 || r.Buffer[0] != (byte)'E') continue;
-            var tags = ParseTags(r.Buffer.AsSpan(1));
-            var name = tags.GetValueOrDefault("NAME", r.RemoteEndPoint.Address.ToString());
-            int json = int.TryParse(tags.GetValueOrDefault("JSON", ""), out var j) ? j : 9000;
-            return new SlimServer(r.RemoteEndPoint.Address, Port, name, json);
-        }
-        return null;
-    }
-
-    // tag (4) · length (1) · value, repeated.
-    public static Dictionary<string, string> ParseTags(ReadOnlySpan<byte> b)
-    {
-        var d = new Dictionary<string, string>();
-        int at = 0;
-        while (at + 5 <= b.Length)
-        {
-            var tag = Encoding.ASCII.GetString(b.Slice(at, 4));
-            int len = b[at + 4];
-            if (at + 5 + len > b.Length) break;
-            d[tag] = Encoding.UTF8.GetString(b.Slice(at + 5, len));
-            at += 5 + len;
-        }
-        return d;
-    }
-
-    [GeneratedRegex(@"^(\[[^\]]+\]|[^:]+)(?::(\d+))?$")] private static partial Regex HostPort();
-}
-
-// One strm packet: what to play, from where, in what form.
-internal sealed record Strm(char Command, char Autostart, char Format, char SampleSize, char SampleRate, char Channels, char Endian,
-    uint ReplayGain, int ServerPort, uint ServerIp, string Header)
-{
-    public static Strm? Parse(ReadOnlySpan<byte> b)
-    {
-        if (b.Length < 24) return null;
-        return new Strm((char)b[0], (char)b[1], (char)b[2], (char)b[3], (char)b[4], (char)b[5], (char)b[6],
-            BinaryPrimitives.ReadUInt32BigEndian(b[14..]), BinaryPrimitives.ReadUInt16BigEndian(b[18..]),
-            BinaryPrimitives.ReadUInt32BigEndian(b[20..]), Encoding.Latin1.GetString(b[24..]));
-    }
-
-    // "GET /stream.mp3?player=… HTTP/1.0" → "/stream.mp3?player=…"
-    public string Path()
-    {
-        var m = Regex.Match(Header, @"^GET\s+(\S+)\s+HTTP", RegexOptions.IgnoreCase);
-        return m.Success ? m.Groups[1].Value : "/stream.mp3";
-    }
-
-    // The MIME type the renderer is given, so it needn't ask the server (a stream is read once).
-    public string Mime()
-    {
-        switch (Format)
-        {
-            case 'f': return "audio/flac";
-            case 'm': return "audio/mpeg";
-            case 'o': return "audio/ogg";
-            case 'a': return "audio/aac";
-            case 'l': return "audio/mp4";
-            case 'p':
-                int bits = SampleSize switch { '1' => 16, '2' => 24, '3' => 32, _ => 0 };
-                int rate = SampleRate switch
-                {
-                    '0' => 11025, '1' => 22050, '2' => 32000, '3' => 44100, '4' => 48000, '5' => 8000, '6' => 12000,
-                    '7' => 16000, '8' => 24000, '9' => 96000, _ => 0
-                };
-                int ch = Channels switch { '1' => 1, '2' => 2, _ => 0 };
-                // Self-describing (a WAV or AIFF header follows): ffmpeg reads the header.
-                if (bits == 0 || rate == 0 || ch == 0) return "audio/wav";
-                return $"audio/L{bits};rate={rate};channels={ch}{(Endian == '1' ? ";endian=little" : "")}";
-            default: return "";
-        }
-    }
-}
 
 internal sealed class SlimPlayer : IDisposable
 {
@@ -158,6 +45,10 @@ internal sealed class SlimPlayer : IDisposable
     private IPAddress? switchTo;
     private Caller? caller;
     private bool decodedSent;
+    // Whether the server's volume moves the DAC yet: not from connecting until it first asks this player
+    // to play. LMS sends its stored volume as a player connects, and the bridge applies no level on
+    // connect (CLAUDE.md, volume safety); it sends it again with every stream it starts.
+    private bool serverVolume;
     private long bytesReceived;
 
     public string Status { get; private set; } = "looking for a Squeezebox server";
@@ -284,6 +175,7 @@ internal sealed class SlimPlayer : IDisposable
     // HELO: who this player is and what it plays.
     private void Helo(bool reconnect)
     {
+        serverVolume = false;
         var dac = bridge.Dev;
         int max = dac.Rates.Length > 0 ? dac.Rates.Max() : 384000;
         // What ffmpeg reads from a stream it can't seek in. DSD isn't offered: the server converts it.
@@ -370,10 +262,12 @@ internal sealed class SlimPlayer : IDisposable
 
     // The server's volume: old gains (2 × 4), "adjust" (1: the player's volume is the server's to set), preamp, new
     // gains (2 × 16.16). On a DAC with a volume of its own it goes to the DAC (bit-perfect); otherwise, or with the
-    // server's volume fixed at 100%, nothing changes. Not while another app has the DAC.
+    // server's volume fixed at 100%, nothing changes. Not while another app has the DAC, and not before the
+    // server has asked this player to play (serverVolume).
     private void Gain(byte[] data)
     {
         if (data.Length < 18 || data[8] == 0 || !bridge.VolumeOn) return;
+        if (!serverVolume) { Log("the server's volume is left alone until it plays here (no level on connect)"); return; }
         if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) return;
         uint g = Math.Max(BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(10)), BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(14)));
         double db = g == 0 ? double.NegativeInfinity : 20 * Math.Log10(g / 65536.0);
@@ -406,7 +300,10 @@ internal sealed class SlimPlayer : IDisposable
                     r.Play().GetAwaiter().GetResult();
                     Stat("STMr");
                     return;
-                case 's': Start(s); return;
+                case 's':
+                    serverVolume = true;
+                    Start(s);
+                    return;
             }
         }
         catch (UpnpException e) { Log(e.Message); Stat("STMn"); }

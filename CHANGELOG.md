@@ -18,6 +18,25 @@ the owner publishes a release is the release (`dev/release.md`).
   (three deliberate breaks of the rule each failed them). The password in `dev/quality.md` is
   still to come.
 
+## [1.1.2] — 2026-10-12
+
+### Fixed
+
+- **A Squeezebox server's stored volume was put on the DAC the moment the player connected.**
+  Switching Squeezebox on, restarting the bridge or a dropped connection could move a DAC (a
+  headphone amp included) to the server's level, louder as easily as quieter. LMS sends its volume
+  as a player connects and again with every stream it starts; the bridge now lets it move the DAC
+  only once the server has asked that player to play, and what it sends on (re)connecting is left
+  alone. Class: a safety rule ("no level is applied at start or on connect") that no test pinned;
+  the old test sent the volume straight after connecting and expected the DAC to move. The test
+  now proves the opposite on a first connect and on a reconnect, and fails if either guard is
+  removed. Tried against a stand-in server that follows LMS's code, not a real LMS or Roon.
+
+### Changed
+
+- **Two oversized files shrink:** Squeezebox discovery and the strm parser moved out of
+  `SlimPlayer.cs` (now under the length limit), and the volume test out of `EndToEndTests.cs`.
+
 ## [1.1.1] — 2026-10-12
 
 ### Added
