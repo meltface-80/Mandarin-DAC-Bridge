@@ -4,6 +4,6 @@
   "src/MandarinDacBridge/Renderer.cs": 542,
   "src/MandarinDacBridge/Slim/SlimPlayer.cs": 542,
   "src/MandarinDacBridge/Spotify/SoloistPlayer.cs": 640,
-  "tests/MandarinDacBridge.Tests/EndToEndTests.cs": 1134,
+  "tests/MandarinDacBridge.Tests/EndToEndTests.cs": 1003,
   "tests/MandarinDacBridge.Tests/UnitTests.cs": 644
 }
