@@ -11,7 +11,7 @@ call, never a side effect.
 main   ←── only the owner merges, and only from dev. The site and the installers follow main;
   │         a GitHub release the owner publishes builds every platform from it.
 dev    ←── integration. Every finished piece lands here, by a pull request the owner merges.
-  │         The owner tests dev builds (the command below).
+  │         Pushes to dev move the `:dev` image, which the owner's test box pulls.
   ├── feature/roon-now-playing     one concern per branch, cut from dev
   ├── quality/gates-1
   ├── fix/<bug>
@@ -23,9 +23,10 @@ dev    ←── integration. Every finished piece lands here, by a pull request
   directly.
 - **A build branch carries its own version bump and CHANGELOG entry.** Versions keep counting up on
   `dev`; the version on `main` when the owner publishes a release is the release.
-- Push the branch. CI (`checks.yml`) runs every gate and the whole suite on macOS, Windows and Linux.
-  Once that run is green on the branch's latest commit, give the owner the test command for the
-  branch (below).
+- Push the branch. CI (`test-image.yml`) runs every gate and the whole suite on macOS, Windows and
+  Linux (`checks.yml`), then builds `ghcr.io/meltface-80/mandarin-dac-bridge:<version>-test`. Once
+  that run is green on the branch's latest commit, give the owner the docker command for it
+  (below).
 - **Then open a pull request from the branch into `dev`** — never into `main` — following the
   template: what it changes, what was broken on purpose to prove the tests, and what is not covered.
   The owner reviews and merges it. **Claude never merges a pull request**, into `dev` or anywhere
@@ -44,8 +45,9 @@ dev    ←── integration. Every finished piece lands here, by a pull request
 ## Every build — required steps (in order)
 
 **Docs-only exception:** a change that touches only `docs/` (the site), `dev/` or `*.md` is not a
-build: no version bump, no CHANGELOG entry, no test command. `tools/check.sh gates` still runs, and
-the change still gets a normal review.
+build: no version bump, no CHANGELOG entry, no test command, and no test image (`test-image.yml`
+ignores a push that touches only `docs/**` and `*.md`). `tools/check.sh gates` still runs, and the
+pull request's `Checks` run still has to pass. The change still gets a normal review.
 
 1. Make the code change, with its tests.
 2. Bump `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj`.
@@ -53,27 +55,61 @@ the change still gets a normal review.
 4. `tools/check.sh` — the gates and the whole suite (`dev/quality.md`).
 5. Commit in one commit: code + version + CHANGELOG.
 6. Push the branch (cut from `dev`).
-7. Wait for that commit's `Checks` run to finish green on all three systems — check it through the
-   GitHub API (workflow runs for the branch, matching the pushed SHA). A failed or cancelled run
-   means there is nothing to test yet: fix it; don't hand out the command.
-8. Give the owner the test command for the branch (below).
+7. Wait for that commit's **Test image** run (`test-image.yml`) to finish green — check it through
+   the GitHub API (workflow runs for the branch, matching the pushed SHA). Its `checks` jobs (every
+   gate, and the suite on all three systems) run first, and the image is built only if they pass.
+   A failed or cancelled run means there is nothing to test yet: fix it; don't hand out the
+   command.
+8. Give the owner the docker command for `:<version>-test` (below).
 9. Open the pull request into `dev`. The owner merges it.
+
+## Images
+
+The test builds are published to **`ghcr.io/meltface-80/mandarin-dac-bridge`**, for `linux/amd64`
+and `linux/arm64`, by `test-image.yml`:
+
+| When | Tags |
+|------|------|
+| Every push to a branch other than `main` (not docs-only), after `checks.yml` passes | `<version>-test` (pinned to the `.csproj`'s version: use this one for a branch), `test` (the last test build, any branch), and `dev` when the branch is `dev` (what the owner's test box pulls) |
+
+- Each processor's image is built on a runner of that processor (`ubuntu-24.04-arm` for arm64),
+  never under emulation: the .NET SDK and its native compiler are not supported under QEMU.
+- The image keeps the container name, the data volume (`dac-bridge-data`, mounted at `/data`) and
+  the port of the locally built one, so switching between them keeps every setting.
+- The image is named in the workflow, not taken from the repository's name: a renamed repository
+  must not send builds to a new name that no command pulls.
+- No `latest` image, and no release image: users on `main` build the image themselves (README).
+  Publishing release images would be the owner's decision.
+- If a pull answers `denied`, the package is private: GitHub → the profile's Packages →
+  `mandarin-dac-bridge` → Package settings → visibility, before anything else.
 
 ## Testing a branch or `dev` (the command to give)
 
-In Docker, built straight from GitHub (the settings volume is kept; replace `dev` with the branch
-name to test a branch before its merge):
+Once the branch's Test image run is green, give this with the version filled in (the `.csproj`'s
+`<Version>` on that commit). It pulls FIRST, and everything after the pull sits inside `&& { … }`,
+so a failed pull (an image not built yet) leaves the running bridge untouched. Lines pasted one
+after another do not do that: a shell runs each whatever the last one did. The settings volume is
+kept.
 
 ```bash
-docker build -t mandarin-dac-bridge https://github.com/meltface-80/Mandarin-DAC-Bridge.git#dev
-docker stop mandarin-dac-bridge 2>/dev/null; docker rm mandarin-dac-bridge 2>/dev/null
-docker run -d --name mandarin-dac-bridge --network host --restart unless-stopped \
-  --device /dev/snd --privileged -v /dev/snd:/dev/snd --cap-add SYS_NICE \
-  -e TZ=Europe/London -v dac-bridge-data:/data mandarin-dac-bridge
+docker pull ghcr.io/meltface-80/mandarin-dac-bridge:NEW-test && {
+  docker stop mandarin-dac-bridge
+  docker rm mandarin-dac-bridge
+  docker run -d --name mandarin-dac-bridge --network host --restart unless-stopped \
+    --device /dev/snd --privileged -v /dev/snd:/dev/snd --cap-add SYS_NICE \
+    -e TZ=Europe/London -v dac-bridge-data:/data \
+    ghcr.io/meltface-80/mandarin-dac-bridge:NEW-test
+}
 ```
 
-Add the `-e` settings the owner uses (for example `-e SOLOIST_VERBOSE=1`). On a Mac or Windows, a
-branch is tested from a clone: `git checkout <branch>`, then
+**Use the volume the box already has.** A wrong volume name doesn't fail: the bridge starts with
+empty settings. `docker run` (the README's command) made `dac-bridge-data`; Compose puts its
+project name in front (`mandarin-dac-bridge_dac-bridge-data` for a clone in `Mandarin-DAC-Bridge`).
+`docker volume ls` shows which one holds the settings.
+
+After the owner merges into `dev`, the same with `:dev` in both places follows `dev`. Add the `-e`
+settings the owner uses (for example `-e SOLOIST_VERBOSE=1`). On a Mac or Windows, a branch is
+tested from a clone: `git checkout <branch>`, then
 `dotnet run --project src/MandarinDacBridge -c Release`.
 
 ## Releases — the owner's

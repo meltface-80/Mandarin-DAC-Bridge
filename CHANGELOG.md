@@ -3,6 +3,24 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.1] — 2026-10-12
+
+### Added
+
+- **A test image for every branch, to pull instead of building** (`test-image.yml`). Each push to a
+  branch other than `main` runs every check, then publishes
+  `ghcr.io/meltface-80/mandarin-dac-bridge:<version>-test` for x86-64 and arm64; a push to `dev`
+  also moves the `dev` tag, which the owner's test box pulls. Each processor's image is built on a
+  runner of that processor, as the release builds the program, since .NET's native compiler is
+  not supported under emulation. It keeps the container name, the data volume and the port, so
+  switching from a locally built image keeps every setting. Nothing changes for users on `main`,
+  who still build the image themselves.
+
+### Changed
+
+- **The checks run once per push, inside the test image's run**, instead of separately as well;
+  a pull request still runs them under the names the rulesets on `dev` and `main` require.
+
 ## [1.1.0] — 2026-10-12
 
 ### Added

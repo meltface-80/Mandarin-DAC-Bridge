@@ -13,7 +13,7 @@ only what no tool can check.
 ## Principles
 
 1. **Gates run automatically.** Locally (pre-commit, about ten seconds) and in CI (`checks.yml`),
-   where a red gate stops the release. A rule that lives only in a document is ignored in a long
+   where a red gate stops the test image and the release. A rule that lives only in a document is ignored in a long
    session.
 2. **Today's debt is recorded, not fixed all at once.** A gate starts from a baseline of what
    already fails. New code must pass; the baseline may only shrink.

@@ -1,0 +1,152 @@
+name: Test image
+
+# Every push to a working branch builds an image to test before the owner merges (dev/release.md):
+#   <image>:<version>-test   pinned to the .csproj's version: the one to run for a branch
+#   <image>:test             whichever test build was pushed last, any branch
+#   <image>:dev              the dev branch only: what the owner's test box pulls
+# Never main, and never a push that touches only the docs (the site, dev/ and *.md), which is not
+# a build. A newer push to the same branch cancels a build still running.
+on:
+  push:
+    branches-ignore: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: test-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # The gates and the whole suite (checks.yml) first: a branch whose checks are red gets no image,
+  # so there is never a test build to hand out for it.
+  checks:
+    uses: ./.github/workflows/checks.yml
+
+  # Each processor's image is built on a runner of that processor, as release.yml builds the
+  # program: the .NET SDK and its native compiler are not supported under emulation (QEMU).
+  # Each pushes its image by digest alone; the job after joins the two under the tags.
+  build:
+    needs: checks
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, platform: linux/amd64, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, platform: linux/arm64, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image name and version
+        id: v
+        run: |
+          # The image is NAMED, not derived from the repository: on Rouen a renamed repository sent
+          # every build to a new name while every install command still pulled the old one.
+          echo "image=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/mandarin-dac-bridge" >> "$GITHUB_OUTPUT"
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/MandarinDacBridge/MandarinDacBridge.csproj | head -n 1)
+          [ -n "$version" ] || { echo "No <Version> in src/MandarinDacBridge/MandarinDacBridge.csproj"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.title=Mandarin DAC Bridge (test build)
+            org.opencontainers.image.description=USB DACs as bit-perfect network players
+            org.opencontainers.image.licenses=MIT
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}-test
+          outputs: type=image,name=${{ steps.v.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=test-image-${{ matrix.arch }}
+          # A cache that fails to save must not fail the image it was saving.
+          cache-to: type=gha,scope=test-image-${{ matrix.arch }},mode=max,ignore-error=true
+
+      - name: Keep the digest for the next job
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          touch "$RUNNER_TEMP/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  image:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: test-image-digest-*
+          merge-multiple: true
+
+      - name: Image name and version
+        id: v
+        run: |
+          echo "image=ghcr.io/$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')/mandarin-dac-bridge" >> "$GITHUB_OUTPUT"
+          version=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/MandarinDacBridge/MandarinDacBridge.csproj | head -n 1)
+          [ -n "$version" ] || { echo "No <Version> in src/MandarinDacBridge/MandarinDacBridge.csproj"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Tag the two processors' images as one
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE: ${{ steps.v.outputs.image }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          [ "$(ls | wc -l)" -eq 2 ] || { echo "Expected two digests (amd64, arm64), found: $(ls)"; exit 1; }
+          tags=(-t "$IMAGE:$VERSION-test" -t "$IMAGE:test")
+          # The dev branch is what the owner's test box pulls: it also moves the dev tag.
+          if [ "$GITHUB_REF_NAME" = "dev" ]; then tags+=(-t "$IMAGE:dev"); fi
+          sources=()
+          for d in *; do sources+=("$IMAGE@sha256:$d"); done
+          docker buildx imagetools create "${tags[@]}" \
+            --annotation "index:org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --annotation "index:org.opencontainers.image.version=$VERSION-test" \
+            "${sources[@]}"
+
+      - name: Both processors are in it
+        env:
+          IMAGE: ${{ steps.v.outputs.image }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          docker buildx imagetools inspect "$IMAGE:$VERSION-test" | tee inspect.txt
+          grep -q "linux/amd64" inspect.txt && grep -q "linux/arm64" inspect.txt
