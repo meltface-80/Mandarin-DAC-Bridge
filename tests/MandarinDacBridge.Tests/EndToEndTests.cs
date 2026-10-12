@@ -16,7 +16,7 @@ using Xunit.Abstractions;
 
 namespace MandarinDacBridge.Tests;
 
-public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
+public sealed partial class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
 {
     private const string Avt = "urn:schemas-upnp-org:service:AVTransport:1";
     private const string Aud = "Audirvana Studio/2.0 UPnP/1.0";

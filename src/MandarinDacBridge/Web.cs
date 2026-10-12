@@ -66,6 +66,14 @@ internal static partial class Web
         var method = ctx.Request.Method;
         Match m;
 
+        var h0 = ctx.Request.Headers;
+        if (SameOrigin.Refusal(method, h0["Sec-Fetch-Site"].ToString(), h0.Origin.ToString(), ctx.Request.Host.Value ?? "") is { } no)
+        {
+            Log.Write($"refused {method} {p}: {no}");
+            await Send(ctx, 403, "text/plain", "refused: " + no);
+            return;
+        }
+
         // ---------------------------------------------------------------- UPnP
         if ((m = DescriptionPath().Match(p)).Success)
         {

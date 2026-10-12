@@ -3,6 +3,21 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.3] — 2026-10-12
+
+### Fixed
+
+- **Any website's page could change the bridge.** The bridge took a change from whoever sent it,
+  so a page of another site, open in a browser anywhere on the network, could switch connections
+  on, start downloads or turn a DAC up. Now a change that a browser says comes from another site
+  (Sec-Fetch-Site, or Origin on older browsers) is refused with 403; the bridge's own page and
+  programs that aren't browsers (UPnP controllers, a Squeezebox server, `curl`) go ahead. Class: a
+  web API trusting every request that reaches it (cross-site request forgery). Gate: an end-to-end
+  test sends another site's requests to the API, a download and a UPnP action and requires them
+  refused with nothing changed, and fails without the check; unit tests cover each header case
+  (three deliberate breaks of the rule each failed them). The password in `dev/quality.md` is
+  still to come.
+
 ## [1.1.1] — 2026-10-12
 
 ### Added
