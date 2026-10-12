@@ -100,3 +100,22 @@ the owner publishes a release is the release (`dev/release.md`).
 - **The Roon client took a message with no request number as request 0** (the first request it
   sent). Class: a parse result used without checking it succeeded; the analyzers now flag a dropped
   `TryParse` result (CA1806).
+
+## [1.0.0] — 2026-10-10
+
+The first version, before versions were moved with each change (`dev/history.md` says which pull
+request carried what).
+
+### Added
+
+- **Exclusive, bit-perfect USB DACs for Audirvana and Mandarin.** The bridge holds each USB DAC,
+  switches it to each track's own rate, plays the samples unchanged (DSD as DoP) and offers it on
+  the network as a UPnP renderer, `"<DAC> (Bridge)"`, controlled by one app at a time. A page on
+  port 55500 shows each DAC. Native programs for macOS, Windows (WASAPI exclusive mode) and Linux,
+  and a Docker image; installers for the Mac and Windows, and the install site.
+- **More ways to play, each off until switched on:** a Squeezebox player per DAC (Lyrion, Roon's
+  Squeezebox support); Spotify Connect through Spotify Soloist (Linux); Qobuz Connect through
+  QobuzProxy; Plex through Caldera Headless (Linux), with Plex sign-in and sign-out; the Mac's Music
+  and Spotify apps through a virtual output; Roon Bridge, downloaded from Roon Labs, beside the
+  bridge; share-when-idle per DAC; and a now-playing screen at `/now`.
+- **The DAC's own volume**, where it has one, from every app and the page.
