@@ -70,14 +70,17 @@ One piece per session, moved into its own file with its tests, and the baseline 
 same commit. Order — where every change lands first, then the logic most often in bugs:
 
 1. **`EndToEndTests.cs`** → one file per area (`PlaybackTests`, `SqueezeboxTests`, `SpotifyTests`,
-   `CalderaTests`, `QobuzTests`, `RoonTests`, `VolumeTests`) over a shared `BridgeFixture`.
+   `CalderaTests`, `QobuzTests`, `RoonTests`, `VolumeTests`) over a shared `BridgeFixture`. Until
+   the fixture exists, an area moves out as a part of the same class (`partial`), sharing its
+   helpers: `VolumeTests.cs` is the first.
 2. **`UnitTests.cs`** → the same, by area.
 3. **`Manager.cs`** → each connection's wiring (Squeezebox, Spotify, Caldera, Qobuz, Roon, the Mac)
    and the page's view. (The settings went to `Settings.cs` in 1.1.4.)
 4. **`SoloistPlayer.cs`** → its sound path (private PulseAudio and the pipe), the WebSocket, the
    metadata (needed before the Spotify now-playing fix).
 5. **`Page/index.html`** → its script and styles into their own files (with the page-scripts gate).
-6. **`Renderer.cs`**, **`SlimPlayer.cs`**.
+6. **`Renderer.cs`**. (`SlimPlayer.cs` is under the limit since 1.1.2: server discovery and the
+   strm parser moved to `Slim/SlimDiscovery.cs` and `Slim/Strm.cs`.)
 
 Each move keeps behaviour identical, and the existing suite is the proof: it must pass before and
 after with no test changed except where it lives.
