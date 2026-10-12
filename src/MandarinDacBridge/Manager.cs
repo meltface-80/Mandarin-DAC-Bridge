@@ -427,7 +427,7 @@ internal sealed class Manager(Config config) : IDisposable
         lock (servicesGate)
         {
             if (Get(b.Id) != b) return;
-            if (SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer);
+            if (SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer, config.LmsJsonPort);
             else if (!SqueezeliteOn && b.Slim != null) { dropSlim = b.Slim; b.Slim = null; }
             if ((!SpotifyOn || restartSpotify) && b.Spotify != null) { dropSpotify = b.Spotify; b.Spotify = null; }
             if (SpotifyOn && b.Spotify == null)

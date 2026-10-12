@@ -45,18 +45,21 @@ internal sealed class SlimPlayer : IDisposable
     private IPAddress? switchTo;
     private Caller? caller;
     private bool decodedSent;
-    // Whether the server's volume moves the DAC yet: not from connecting until it first asks this player
-    // to play. LMS sends its stored volume as a player connects, and the bridge applies no level on
-    // connect (CLAUDE.md, volume safety); it sends it again with every stream it starts.
-    private bool serverVolume;
+    // The server's volume and the DAC's, kept as one (ServerVolume.cs).
+    private readonly ServerVolume volume = new();
+    private readonly int jsonPort;
+    private int connection;       // counts connections, so a late answer from an old one is ignored
+    private int applying;         // the thread putting the server's volume on the DAC (its echo isn't sent back)
+    private int deciding;         // 1 while the first telling on this connection is under way
     private long bytesReceived;
 
     public string Status { get; private set; } = "looking for a Squeezebox server";
     public string ServerName => server?.Name ?? "";
     public string Mac { get; }
 
-    public SlimPlayer(Bridge bridge, string hostname, Func<string> serverSetting)
+    public SlimPlayer(Bridge bridge, string hostname, Func<string> serverSetting, int jsonPort = 9000)
     {
+        this.jsonPort = jsonPort;
         this.bridge = bridge;
         this.serverSetting = serverSetting;
         mac = MacFor(hostname, bridge.Dev.Key);
@@ -65,6 +68,7 @@ internal sealed class SlimPlayer : IDisposable
         r.Reached += OnReached;
         r.Decoded += OnDecoded;
         r.Finished += OnFinished;
+        bridge.VolumeChanged += OnDacVolume;
         thread = new Thread(Run) { IsBackground = true, Name = "slimproto " + bridge.Id };
         thread.Start();
         heartbeat = new Timer(_ =>
@@ -106,7 +110,7 @@ internal sealed class SlimPlayer : IDisposable
             {
                 var s = switchTo != null ? new SlimServer(switchTo, SlimDiscovery.Port, switchTo.ToString(), server?.JsonPort ?? 9000) : null;
                 switchTo = null;
-                s ??= SlimDiscovery.Parse(serverSetting()) ?? SlimDiscovery.Find(TimeSpan.FromSeconds(3), stop.Token);
+                s ??= SlimDiscovery.Parse(serverSetting(), jsonPort) ?? SlimDiscovery.Find(TimeSpan.FromSeconds(3), stop.Token);
                 if (s == null) { SetStatus("looking for a Squeezebox server"); Wait(5000); continue; }
                 server = s;
                 using var client = new TcpClient { NoDelay = true };
@@ -117,6 +121,7 @@ internal sealed class SlimPlayer : IDisposable
                 caller = new Caller("slim|" + s.Ip, ServerLabel(s), s.Ip.ToString());
                 Helo(reconnect);
                 Log($"connected to {ServerLabel(s)} at {s.Ip} as {Mac}");
+                if (bridge.VolumeOn && Interlocked.Exchange(ref deciding, 1) == 0) _ = TellServer(bridge.Level, connection, first: true);
                 SetStatus($"connected to {ServerLabel(s)}");
                 lastError = "";
                 reconnect = true;
@@ -175,7 +180,8 @@ internal sealed class SlimPlayer : IDisposable
     // HELO: who this player is and what it plays.
     private void Helo(bool reconnect)
     {
-        serverVolume = false;
+        volume.Connected();
+        Interlocked.Increment(ref connection);
         var dac = bridge.Dev;
         int max = dac.Rates.Length > 0 ? dac.Rates.Max() : 384000;
         // What ffmpeg reads from a stream it can't seek in. DSD isn't offered: the server converts it.
@@ -261,18 +267,66 @@ internal sealed class SlimPlayer : IDisposable
     }
 
     // The server's volume: old gains (2 × 4), "adjust" (1: the player's volume is the server's to set), preamp, new
-    // gains (2 × 16.16). On a DAC with a volume of its own it goes to the DAC (bit-perfect); otherwise, or with the
-    // server's volume fixed at 100%, nothing changes. Not while another app has the DAC, and not before the
-    // server has asked this player to play (serverVolume).
+    // gains (2 × 16.16). On a DAC with a volume of its own it goes to the DAC (bit-perfect) as ServerVolume says:
+    // never what it sends on connecting. Otherwise, or with the server's volume fixed at 100%, nothing changes.
+    // While another app has the DAC nothing moves, and the server's slider is put back to the DAC's level.
     private void Gain(byte[] data)
     {
-        if (data.Length < 18 || data[8] == 0 || !bridge.VolumeOn) return;
-        if (!serverVolume) { Log("the server's volume is left alone until it plays here (no level on connect)"); return; }
-        if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) return;
+        if (data.Length < 18 || data[8] == 0 || !bridge.VolumeOn || bridge.Level is not { } now) return;
+        // The DAC's own volume came into use after this connection was made (it was Fixed): decide now.
+        if (volume.Deciding && Interlocked.Exchange(ref deciding, 1) == 0) _ = TellServer(now, connection, first: true);
+        bool refused = !Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive);
         uint g = Math.Max(BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(10)), BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(14)));
-        double db = g == 0 ? double.NegativeInfinity : 20 * Math.Log10(g / 65536.0);
-        int level = Audio.VolumeCurve.LevelOfGainDb(db);
-        if (bridge.Level != level && bridge.SetLevel(level)) Log($"volume {level}% (from the server, {(g == 0 ? "silent" : $"{db:0.0} dB")})");
+        int sent = ServerVolume.VolumeOf(g, now);
+        var to = volume.Take(sent, now, refused, out bool putBack);
+        if (putBack) { Log($"the server's volume ({sent}) is refused while another app has the DAC"); _ = TellServer(now, connection, first: false); }
+        if (to is not { } level) return;
+        applying = Environment.CurrentManagedThreadId;
+        try { if (bridge.SetLevel(level)) Log($"volume {level}% (the server's slider at {sent})"); }
+        finally { applying = 0; }
+    }
+
+    // The DAC moved elsewhere (the page, another app, its own knob): the server's slider follows.
+    private void OnDacVolume(int level)
+    {
+        if (applying == Environment.CurrentManagedThreadId) return;     // the server's own change, coming back
+        if (volume.ToTell(level) is { } to) _ = TellServer(to, connection, first: false);
+    }
+
+    // Sets the server's volume to the DAC's level (LMS's JSON-RPC "mixer volume"). The first time on a connection
+    // settles how the server's volume is taken: a server without JSON-RPC (Roon's) can't be told, and then only its
+    // changes move the DAC (ServerVolume). Left undecided while the DAC's volume isn't in use (Fixed).
+    private async Task TellServer(int? level, int conn, bool first)
+    {
+        try
+        {
+            if (level is not { } l || !bridge.VolumeOn || server is not { } srv) return;
+            volume.Telling(l);
+            bool ok = await SlimRequest(srv, $"[\"mixer\",\"volume\",\"{l.ToString(CultureInfo.InvariantCulture)}\"]") is { } res && Ok(res);
+            if (conn != connection || !first) return;     // a later telling that fails: told again at the next move
+            if (!ok)
+            {
+                volume.NotTold();
+                Log("the server can't be told the DAC's volume (no JSON-RPC): its slider moves the DAC by its changes only");
+                return;
+            }
+            volume.Told();
+            Log($"the server's volume follows the DAC's ({l}%)");
+            // The DAC moved while the server was being told: tell it where the DAC is now.
+            if (bridge.Level is { } now && now != l && volume.ToTell(now) is { } again) await TellServer(again, conn, first: false);
+        }
+        finally { if (first) Interlocked.Exchange(ref deciding, 0); }
+
+        static bool Ok(HttpResponseMessage res) { using (res) return res.IsSuccessStatusCode; }
+    }
+
+    // One JSON-RPC request to the server ("slim.request" for this player), or null when it can't be made or has
+    // no answer: a server without JSON-RPC (Roon's), a wrong port, no network. The callers say what that means.
+    private async Task<HttpResponseMessage?> SlimRequest(SlimServer srv, string command)
+    {
+        var body = $"{{\"id\":1,\"method\":\"slim.request\",\"params\":[\"{Mac}\",{command}]}}";
+        try { return await Json.PostAsync($"http://{srv.Ip}:{srv.JsonPort}/jsonrpc.js", new StringContent(body, Encoding.UTF8, "application/json")); }
+        catch (Exception) { return null; }    // no answer: what that means is the caller's to say (see above)
     }
 
     private void Stream(Strm s)
@@ -300,10 +354,7 @@ internal sealed class SlimPlayer : IDisposable
                     r.Play().GetAwaiter().GetResult();
                     Stat("STMr");
                     return;
-                case 's':
-                    serverVolume = true;
-                    Start(s);
-                    return;
+                case 's': Start(s); return;
             }
         }
         catch (UpnpException e) { Log(e.Message); Stat("STMn"); }
@@ -393,9 +444,8 @@ internal sealed class SlimPlayer : IDisposable
         await Task.Delay(300);
         try
         {
-            var body = $"{{\"id\":1,\"method\":\"slim.request\",\"params\":[\"{Mac}\",[\"status\",\"-\",\"1\",\"tags:aldjKc\"]]}}";
-            using var res = await Json.PostAsync($"http://{srv.Ip}:{srv.JsonPort}/jsonrpc.js", new StringContent(body, Encoding.UTF8, "application/json"));
-            if (!res.IsSuccessStatusCode) return;
+            using var res = await SlimRequest(srv, "[\"status\",\"-\",\"1\",\"tags:aldjKc\"]");
+            if (res is not { IsSuccessStatusCode: true }) return;
             using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
             var meta = ParseStatus(doc.RootElement, $"http://{srv.Ip}:{srv.JsonPort}", Mac);
             if (meta != null && IsMine(t)) bridge.Renderer.SetLive(t, meta);
@@ -430,6 +480,7 @@ internal sealed class SlimPlayer : IDisposable
         r.Reached -= OnReached;
         r.Decoded -= OnDecoded;
         r.Finished -= OnFinished;
+        bridge.VolumeChanged -= OnDacVolume;
         // Switched off while the server plays: that stops too.
         if (Ours() && (r.IsActive || r.Transport == "PAUSED_PLAYBACK"))
             try { r.Stop().Wait(TimeSpan.FromSeconds(3)); } catch (Exception) { /* closing */ }

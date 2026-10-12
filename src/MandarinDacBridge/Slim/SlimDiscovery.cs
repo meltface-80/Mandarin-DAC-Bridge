@@ -13,8 +13,8 @@ internal static partial class SlimDiscovery
 {
     public const int Port = 3483;
 
-    // "192.168.1.5", "lms.local:3483" → the server; "" → null.
-    public static SlimServer? Parse(string spec)
+    // "192.168.1.5", "lms.local:3483" → the server; "" → null. Its web (JSON-RPC) port isn't in the spec.
+    public static SlimServer? Parse(string spec, int jsonPort = 9000)
     {
         spec = spec.Trim();
         if (spec == "") return null;
@@ -26,9 +26,11 @@ internal static partial class SlimDiscovery
         if (!IPAddress.TryParse(host, out ip))
         {
             try { ip = Dns.GetHostAddresses(host).FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork); }
+            // The name doesn't resolve (yet): no server for now. The player asks again in 5 s and the page says
+            // it is still looking, so nothing is lost by not saying more.
             catch (Exception) { ip = null; }
         }
-        return ip == null ? null : new SlimServer(ip, port, host, 9000);
+        return ip == null ? null : new SlimServer(ip, port, host, jsonPort);
     }
 
     // Asks the network for a server ("e" with the tags wanted) and takes the first to answer ("E" + tags).
@@ -38,13 +40,13 @@ internal static partial class SlimDiscovery
         udp.EnableBroadcast = true;
         var ask = Encoding.ASCII.GetBytes("eNAME\0JSON\0VERS\0");
         try { udp.Send(ask, ask.Length, new IPEndPoint(IPAddress.Broadcast, Port)); }
-        catch (SocketException) { return null; }
+        catch (SocketException) { return null; }    // no network to broadcast on (yet): asked again in 5 s
         var until = DateTime.UtcNow + wait;
         while (DateTime.UtcNow < until && !ct.IsCancellationRequested)
         {
             var task = udp.ReceiveAsync(ct).AsTask();
             try { if (!task.Wait(until - DateTime.UtcNow, ct)) return null; }
-            catch (Exception) { return null; }
+            catch (Exception) { return null; }    // switched off, or the socket closed: no answer, asked again later
             var r = task.Result;
             if (r.Buffer.Length == 0 || r.Buffer[0] != (byte)'E') continue;
             var tags = ParseTags(r.Buffer.AsSpan(1));

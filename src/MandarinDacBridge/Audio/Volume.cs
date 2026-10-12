@@ -68,9 +68,6 @@ internal static class VolumeCurve
         double n = level * (1 - minN) + minN;
         return n <= 0 ? minDb : Math.Max(minDb, 60 * Math.Log10(n) + maxDb);
     }
-
-    // A gain in dB (a Squeezebox server's, say) as a level: the same curve over 60 dB.
-    public static int LevelOfGainDb(double db) => db <= -60 ? 0 : (int)Math.Round(100 * ToLevel(db, -60, 0));
 }
 
 internal static class VolumeFactory

@@ -12,3 +12,4 @@ version's story; this is the index.
 | 1.1.3 | `main` (#11, straight from its branch), not published as a release | Changes sent from another site's page are refused (`security/same-origin`). |
 | 1.1.4 | `main` (#15, which kept the number 1.1.3) and `dev` (#12), not published as a release | Settings and secrets files: kept when unreadable, owner-only from the start; Caldera's folders owner-only (`fix/settings-and-secrets`). |
 | 1.1.5 | `dev` | `dev` and `main` the same code again, numbered past both (`fix/reconcile-dev-main`). |
+| 1.1.6 | `dev` | A Squeezebox server and the DAC share one volume; Lyrion's stored volume never reaches the DAC (`fix/lyrion-follows-dac`). |

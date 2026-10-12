@@ -74,14 +74,14 @@ public sealed partial class EndToEndTests(ITestOutputHelper output) : IAsyncLife
         return p;
     }
 
-    private async Task<string> Start(object dev, bool clock = true, bool busy = false, string soloist = "", string roonCore = "")
+    private async Task<string> Start(object dev, bool clock = true, bool busy = false, string soloist = "", string roonCore = "", int lmsJson = 9000)
     {
         port = FreePort();
         var config = new Config
         {
             Port = port, DataDir = Directory.CreateTempSubdirectory("data-").FullName, BindIp = "127.0.0.1",
             LockGrace = TimeSpan.FromSeconds(2), Ffmpeg = "ffmpeg",
-            TestDevices = JsonSerializer.Serialize(dev), TestSink = clock, TestSinkBusy = busy, Soloist = soloist, RoonCore = roonCore
+            TestDevices = JsonSerializer.Serialize(dev), TestSink = clock, TestSinkBusy = busy, Soloist = soloist, RoonCore = roonCore, LmsJsonPort = lmsJson
         };
         var host = new BridgeHost(config);
         hosts.Add(host);
