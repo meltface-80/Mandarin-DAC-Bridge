@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File-length tripwire (docs/quality-plan.md, "File length").
+"""File-length ratchet (dev/quality.md, "File length").
 
 Every tracked code file is measured like `wc -l`. Above FAIL lines the check fails, unless the file is in
 length-baseline.json: files that were already too long when the limit came in. Those may not grow, and the
@@ -17,8 +17,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-LIMITS = {"fail": 600, "warn": 500, "report": 400}
+LIMITS = {"fail": 500, "warn": 450, "report": 400}
 CODE = re.compile(r"\.(cs|js|html|css|sh|ps1|py|c|h)$")
+# Never part of the program or its tests: the GitHub Pages site.
+IGNORED = re.compile(r"^docs/")
+
+
+def measured(name: str) -> bool:
+    """Whether the gate counts this tracked file."""
+    return bool(CODE.search(name)) and not IGNORED.search(name)
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE = Path(__file__).with_name("length-baseline.json")
 
@@ -62,7 +69,7 @@ def tracked(root: Path = ROOT) -> dict:
     counts = {}
     for name in out.splitlines():
         p = root / name
-        if CODE.search(name) and p.is_file():
+        if measured(name) and p.is_file():
             counts[name] = lines(p.read_text(encoding="utf-8", errors="replace"))
     return counts
 

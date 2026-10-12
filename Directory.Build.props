@@ -1,4 +1,4 @@
-<!-- Gates (docs/quality-plan.md): every project builds with .NET's recommended analyzers and the rules in
+<!-- Gates (dev/quality.md): every project builds with .NET's recommended analyzers and the rules in
      .editorconfig, and every warning is an error. Nothing is grandfathered: a finding is fixed, or suppressed
      where it stands with a reason ([SuppressMessage(..., Justification = "...")]). -->
 <Project>

@@ -4,3 +4,7 @@
 **/obj
 tests
 tools
+.githooks
+.claude
+dev
+docs

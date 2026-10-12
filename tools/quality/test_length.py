@@ -1,7 +1,7 @@
 """Tests for the file-length tripwire: python3 -m unittest discover -s tools/quality"""
 import unittest
 
-from length import judge, lines, ratchet
+from length import judge, lines, measured, ratchet
 from edit_hook import decide
 
 LIMITS = {"fail": 10, "warn": 8, "report": 5}
@@ -74,6 +74,12 @@ class EditHook(unittest.TestCase):
     def test_files_that_arent_code_are_left_alone(self):
         p, before = self.payload("x\n", "x\n" * 50, name="README.md")
         self.assertIsNone(decide(p, lambda _: before, {}, LIMITS))
+
+    def test_the_site_and_prose_arent_measured(self):
+        self.assertTrue(measured("src/MandarinDacBridge/Manager.cs"))
+        self.assertTrue(measured("src/MandarinDacBridge/Page/index.html"))
+        self.assertFalse(measured("docs/index.html"))
+        self.assertFalse(measured("README.md"))
 
     def test_counts_like_wc(self):
         self.assertEqual(lines("a\nb\n"), 2)

@@ -3,13 +3,13 @@
 learns a file needs splitting at its first edit, not at commit. A note past WARN lines; a refusal when an
 edit would take a file past FAIL (or a baselined file past its recorded length). An edit that shrinks a file
 is never refused, so an oversized file can always be split. Anything unexpected is silent: the commit-time
-check (length.py, in pre-commit and CI) is the backstop, and a hook must never block an edit it can't judge.
+check (length.py, in tools/check.sh: pre-commit and CI) is the backstop, and a hook must never block an edit it can't judge.
 """
 import json
 import sys
 from pathlib import Path
 
-from length import BASELINE, CODE, LIMITS, ROOT, lines
+from length import BASELINE, LIMITS, ROOT, lines, measured
 
 
 def project(tool: str, before: str, inp: dict):
@@ -38,7 +38,7 @@ def decide(payload: dict, read, baseline: dict, limits: dict = LIMITS):
         name = Path(path).resolve().relative_to(ROOT).as_posix() if Path(path).is_absolute() else Path(path).as_posix()
     except ValueError:
         return None
-    if not CODE.search(name):
+    if not measured(name):
         return None
     try:
         before = read(name)
