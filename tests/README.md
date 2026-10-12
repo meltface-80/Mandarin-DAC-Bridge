@@ -11,8 +11,9 @@ dotnet test -c Release                           # the suite alone
 dotnet test -c Release --filter "FullyQualifiedName~Roon"   # one area
 ```
 
-CI (`.github/workflows/checks.yml`) runs the suite on macOS, Windows and Linux on every push and
-pull request, and the release needs it green.
+CI (`.github/workflows/checks.yml`) runs the suite on macOS, Windows and Linux on every pull
+request, and on every branch push before the test image is built (`test-image.yml`); the test image
+and the release both need it green.
 
 ## What the suite needs
 

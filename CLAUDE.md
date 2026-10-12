@@ -25,7 +25,7 @@ goes to the owner before the code that depends on it is written; it is not resol
 `tools/check.sh` is the bar and is green before every push: file length, the gates' own tests, the
 build with the analyzers (every warning an error), and the whole test suite. The pre-commit hook
 runs the fast half (`tools/check.sh gates`); CI (`checks.yml`) runs all of it on macOS, Windows and
-Linux, and blocks the release. `--no-verify` and workflow edits that skip a gate stay off the table.
+Linux, and blocks the test image and the release. `--no-verify` and workflow edits that skip a gate stay off the table.
 
 Baselines only shrink. Never raise a length entry, add a `#pragma warning disable`, a project-wide
 suppression or a lowered rule severity to make a change pass. A `[SuppressMessage]` goes only where
@@ -91,8 +91,8 @@ never pushes to a branch whose PR is merged, and never rewrites pushed history.
 
 A build bumps `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj` and adds a CHANGELOG
 entry, in one commit with the code. A change touching only `docs/`, `dev/` or `*.md` is not a build:
-no bump. After a push, the test command for the branch is given only once that commit's checks are
-green.
+no bump. After a push, the docker command for the branch's test image is given only once that
+commit's Test image run (`test-image.yml`, which runs the checks first) is green.
 
 ## Markdown
 

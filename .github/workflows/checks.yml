@@ -1,13 +1,14 @@
 name: Checks
 
 # The gates and the whole suite (dev/quality.md). A test that does not block a release is a
-# suggestion, so these run on every branch push and pull request, and release.yml calls this
-# before it builds anything: a red check means no release.
+# suggestion, so these run before anything is built or published:
+#   test-image.yml calls this on every branch push before it builds the branch's test image;
+#   release.yml calls this before it builds a release: a red check means no release.
+# A pull request runs it as well, under these job names, which the rulesets on dev and main
+# require: the pull request shows red or green before the owner merges.
 #
 # The steps are the commands a contributor runs locally (tools/check.sh).
 on:
-  push:
-    branches: ['**']
   pull_request:
   workflow_call:
   workflow_dispatch:
