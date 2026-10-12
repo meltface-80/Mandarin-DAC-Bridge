@@ -145,7 +145,7 @@ internal sealed unsafe class MacSource : IDisposable
         err = CoreAudio.DeviceStart(dev, procId);
         if (err != 0)
         {
-            CoreAudio.DestroyIOProcId(dev, procId);
+            _ = CoreAudio.DestroyIOProcId(dev, procId);
             procId = IntPtr.Zero;
             SetStatus($"couldn't read the DAC Bridge output ({err}): allow Microphone access for mandarin-dac-bridge");
             return false;
@@ -157,8 +157,8 @@ internal sealed unsafe class MacSource : IDisposable
     private void StopCapture()
     {
         if (!capturing) return;
-        CoreAudio.DeviceStop(dev, procId);
-        CoreAudio.DestroyIOProcId(dev, procId);
+        _ = CoreAudio.DeviceStop(dev, procId);
+        _ = CoreAudio.DestroyIOProcId(dev, procId);
         procId = IntPtr.Zero;
         capturing = false;
     }

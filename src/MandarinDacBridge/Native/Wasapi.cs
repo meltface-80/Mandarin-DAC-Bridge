@@ -191,7 +191,7 @@ internal static partial class Wasapi
     [LibraryImport("avrt", StringMarshalling = StringMarshalling.Utf16)] private static partial nint AvSetMmThreadCharacteristicsW(string task, ref uint index);
 
     // COM on this thread (multi-threaded: the audio interfaces are free-threaded). Harmless if already.
-    public static void Init() => CoInitializeEx(0, 0 /* COINIT_MULTITHREADED */);
+    public static void Init() => _ = CoInitializeEx(0, 0 /* COINIT_MULTITHREADED */);
 
     public static T Wrap<T>(nint p) where T : class
     {

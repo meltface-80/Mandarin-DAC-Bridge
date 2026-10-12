@@ -8,6 +8,7 @@ namespace MandarinDacBridge.Upnp;
 internal static class Description
 {
     // A UDN that stays the same for this DAC on this machine.
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350", Justification = "A stable UPnP identifier, not security; changing it makes every controller forget the DAC")]
     public static string UdnFor(string host, string key)
     {
         var h = Convert.ToHexStringLower(SHA1.HashData(Encoding.UTF8.GetBytes($"mandarin-dac-bridge|{host}|{key}")));

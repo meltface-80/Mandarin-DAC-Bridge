@@ -72,7 +72,7 @@ internal sealed class AlsaVolume : IDacVolume
         {
             if (AlsaMixer.Attach(m, card) < 0 || AlsaMixer.Register(m, IntPtr.Zero, IntPtr.Zero) < 0 || AlsaMixer.Load(m) < 0)
             {
-                AlsaMixer.Close(m);
+                _ = AlsaMixer.Close(m);
                 return null;
             }
             var found = new List<(IntPtr Elem, string Name)>();
@@ -83,11 +83,11 @@ internal sealed class AlsaVolume : IDacVolume
                 if (hi <= lo) continue;
                 found.Add((e, Marshal.PtrToStringUTF8(AlsaMixer.Name(e)) ?? ""));
             }
-            if (found.Count == 0) { AlsaMixer.Close(m); return null; }
+            if (found.Count == 0) { _ = AlsaMixer.Close(m); return null; }
             var pick = found.OrderBy(f => Array.FindIndex(Names, n => f.Name.Contains(n, StringComparison.OrdinalIgnoreCase)) is var i && i >= 0 ? i : Names.Length).First();
             return new AlsaVolume(m, pick.Elem, pick.Name);
         }
-        catch (Exception) { AlsaMixer.Close(m); throw; }
+        catch (Exception) { _ = AlsaMixer.Close(m); throw; }
     }
 
     private long Raw()
@@ -101,7 +101,7 @@ internal sealed class AlsaVolume : IDacVolume
         lock (gate)
         {
             if (mixer == IntPtr.Zero) return null;
-            AlsaMixer.HandleEvents(mixer);
+            _ = AlsaMixer.HandleEvents(mixer);
             long raw = Raw();
             if (raw == setRaw && setLevel >= 0) return setLevel;
             if (minDb is { } lo && maxDb is { } hi && AlsaMixer.GetDb(elem, AlsaMixer.FrontLeft, out var db) == 0)
@@ -115,7 +115,7 @@ internal sealed class AlsaVolume : IDacVolume
         lock (gate)
         {
             if (mixer == IntPtr.Zero || minDb == null) return null;
-            AlsaMixer.HandleEvents(mixer);
+            _ = AlsaMixer.HandleEvents(mixer);
             return AlsaMixer.GetDb(elem, AlsaMixer.FrontLeft, out var db) == 0 ? db / 100.0 : null;
         }
     }
@@ -126,7 +126,7 @@ internal sealed class AlsaVolume : IDacVolume
         lock (gate)
         {
             if (mixer == IntPtr.Zero) return false;
-            AlsaMixer.HandleEvents(mixer);
+            _ = AlsaMixer.HandleEvents(mixer);
             int err;
             if (minDb is { } lo && maxDb is { } hi)
             {
@@ -148,7 +148,7 @@ internal sealed class AlsaVolume : IDacVolume
     {
         lock (gate)
         {
-            if (mixer != IntPtr.Zero) AlsaMixer.Close(mixer);
+            if (mixer != IntPtr.Zero) _ = AlsaMixer.Close(mixer);
             mixer = IntPtr.Zero;
         }
     }

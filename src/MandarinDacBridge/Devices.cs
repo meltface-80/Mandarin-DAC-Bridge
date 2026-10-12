@@ -51,6 +51,8 @@ internal static partial class Devices
     public static readonly int[] StandardRates = [44100, 48000, 88200, 96000, 176400, 192000, 352800, 384000, 705600, 768000, 1411200, 1536000];
     public static readonly int[] DopCandidates = [176400, 352800, 705600, 1411200];
 
+    // SHA-1 here is a name, not security: changing it would rename every DAC and lose its settings.
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "CA5350", Justification = "A stable identifier, not security; changing it renames every DAC")]
     public static string IdOf(string key) => "dac-" + Convert.ToHexStringLower(SHA1.HashData(Encoding.UTF8.GetBytes(key)))[..10];
 
     public static string KHz(int r) => (r % 1000 == 0 ? (r / 1000).ToString() : (r / 1000.0).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)) + " kHz";

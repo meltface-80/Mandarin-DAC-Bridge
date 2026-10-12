@@ -455,6 +455,13 @@ as user environment variables (`setx PORT 55501`) and sign in again. In Docker, 
 .NET 10 SDK. ffmpeg is needed for the end-to-end tests; on Linux, libasound2 too (and PulseAudio
 for the Soloist test). CI runs the tests and a native build on macOS, Windows and Linux.
 
+`tools/check.sh` runs every gate and the whole suite (`tools/check.sh gates` the fast half).
+Changes go on their own branch from `dev`, into `dev` by a pull request the owner merges once CI is
+green; only the owner merges `dev` into `main`. The rules are in [CLAUDE.md](CLAUDE.md); the gates
+(analyzers as errors, a file-length ratchet, tests on three systems) in
+[dev/quality.md](dev/quality.md); branches and releases in [dev/release.md](dev/release.md). Once
+per clone: `git config core.hooksPath .githooks`.
+
 ```bash
 dotnet test                                                     # unit and end-to-end tests
 dotnet run --project src/MandarinDacBridge                      # run it

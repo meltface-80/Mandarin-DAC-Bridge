@@ -4,6 +4,7 @@
 // Linux, the real ALSA path on the "null" device).
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
@@ -110,8 +111,8 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Dictionary<string, string>? args = null, string ua = "")
     {
         var sb = new StringBuilder($"<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\"><s:Body><u:{action} xmlns:u=\"{type}\">");
-        foreach (var (k, v) in args ?? new()) sb.Append($"<{k}>{Xml.Esc(v)}</{k}>");
-        sb.Append($"</u:{action}></s:Body></s:Envelope>");
+        foreach (var (k, v) in args ?? new()) sb.Append(CultureInfo.InvariantCulture, $"<{k}>{Xml.Esc(v)}</{k}>");
+        sb.Append(CultureInfo.InvariantCulture, $"</u:{action}></s:Body></s:Envelope>");
         using var req = new HttpRequestMessage(HttpMethod.Post, $"http://127.0.0.1:{port}/upnp/{id}/{service}/control") { Content = new StringContent(sb.ToString(), Encoding.UTF8, "text/xml") };
         req.Headers.TryAddWithoutValidation("SOAPACTION", $"\"{type}#{action}\"");
         if (ua != "") req.Headers.TryAddWithoutValidation("User-Agent", ua);
@@ -205,7 +206,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         await Until(async () =>
         {
             var p = (await Dac()).GetProperty("player");
-            return p.GetProperty("format").GetString()!.StartsWith("96 kHz") && p.GetProperty("transport").GetString() == "PLAYING";
+            return p.GetProperty("format").GetString()!.StartsWith("96 kHz", StringComparison.Ordinal) && p.GetProperty("transport").GetString() == "PLAYING";
         }, 6000);
         Assert.Equal(200, (await Av(id, "Stop")).Status);
         Assert.Equal("STOPPED", await State(id));
@@ -309,7 +310,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         // 352.8 kHz to a DAC that stops at 192 kHz: down to 176.4, in the same family.
         await Av(id, "SetAVTransportURI", new() { ["CurrentURI"] = Url("hi.flac"), ["CurrentURIMetaData"] = "" }, Aud);
         await Av(id, "Play", new() { ["Speed"] = "1" }, Aud);
-        await Until(async () => (await Dac()).GetProperty("player").GetProperty("format").GetString()!.StartsWith("352.8 kHz → 176.4 kHz"));
+        await Until(async () => (await Dac()).GetProperty("player").GetProperty("format").GetString()!.StartsWith("352.8 kHz → 176.4 kHz", StringComparison.Ordinal));
         await Av(id, "Stop", null, Aud);
         cb.Stop();
     }
@@ -362,7 +363,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal("25", await Volume(id));
         Assert.Equal(25, (await Dac()).GetProperty("level").GetInt32());
         var db = (await Soap(id, "RenderingControl", Rcs, "GetVolumeDB", new() { ["InstanceID"] = "0", ["Channel"] = "Master" })).Out["CurrentVolume"];
-        Assert.True(int.Parse(db) < 0);
+        Assert.True(int.Parse(db, CultureInfo.InvariantCulture) < 0);
         Assert.Contains("<errorCode>402</errorCode>", (await SetVolume(id, "loud")).Text);
 
         // The page's slider.
@@ -428,7 +429,7 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
                 {
                     HttpListenerContext c;
                     try { c = await http.GetContextAsync(); } catch (Exception) { return; }
-                    if (c.Request.Url!.AbsolutePath.StartsWith("/api/image/"))
+                    if (c.Request.Url!.AbsolutePath.StartsWith("/api/image/", StringComparison.Ordinal))
                     {
                         Got.Enqueue("image " + c.Request.Url.PathAndQuery);
                         c.Response.ContentType = "image/jpeg";
@@ -459,16 +460,16 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
                 var text = Encoding.UTF8.GetString(buf, 0, r.Count);
                 Got.Enqueue(text);
                 var first = text.Split('\n')[0];
-                var id = int.Parse(Regex.Match(text, @"Request-Id: (\d+)").Groups[1].Value);
-                if (first.EndsWith("registry:1/info"))
+                var id = int.Parse(Regex.Match(text, @"Request-Id: (\d+)").Groups[1].Value, CultureInfo.InvariantCulture);
+                if (first.EndsWith("registry:1/info", StringComparison.Ordinal))
                     await Send(ws, "COMPLETE", "Success", id, """{"core_id":"core-1","display_name":"Test Core","display_version":"2.0"}""");
-                else if (first.EndsWith("registry:1/register"))
+                else if (first.EndsWith("registry:1/register", StringComparison.Ordinal))
                 {
                     // As if enabled in Roon's Settings → Extensions; then the Core pings.
                     await Send(ws, "CONTINUE", "Registered", id, """{"core_id":"core-1","token":"tok-1","display_name":"Test Core"}""");
                     await Send(ws, "REQUEST", "com.roonlabs.ping:1/ping", 900);
                 }
-                else if (first.EndsWith("transport:2/subscribe_zones"))
+                else if (first.EndsWith("transport:2/subscribe_zones", StringComparison.Ordinal))
                 {
                     await Send(ws, "CONTINUE", "Subscribed", id, "{\"zones\":[" + Zone + "]}");
                     await Send(ws, "CONTINUE", "Changed", id, """{"zones_seek_changed":[{"zone_id":"z1","seek_position":100}]}""");
@@ -505,11 +506,11 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         Assert.Equal("Roon", dac.GetProperty("control").GetProperty("owner").GetString());
         Assert.Equal("Test DAC (Bridge)", dac.GetProperty("roonZone").GetString());
         Assert.Equal(new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 9, 9 }, await Http.GetByteArrayAsync($"http://127.0.0.1:{port}{p.GetProperty("art").GetString()}"));
-        Assert.Contains(core.Got, g => g.StartsWith("image /api/image/img1?scale=fit"));
+        Assert.Contains(core.Got, g => g.StartsWith("image /api/image/img1?scale=fit", StringComparison.Ordinal));
 
         // Registered as an extension; the Core's ping answered; the token kept, its owner's only.
-        Assert.Contains(core.Got, g => g.StartsWith("MOO/1 REQUEST com.roonlabs.registry:1/register") && g.Contains("\"extension_id\":\"com.musicd.mandarin-dac-bridge\""));
-        await Until(() => Task.FromResult(core.Got.Any(g => g.StartsWith("MOO/1 COMPLETE Success") && g.Contains("Request-Id: 900"))));
+        Assert.Contains(core.Got, g => g.StartsWith("MOO/1 REQUEST com.roonlabs.registry:1/register", StringComparison.Ordinal) && g.Contains("\"extension_id\":\"com.musicd.mandarin-dac-bridge\""));
+        await Until(() => Task.FromResult(core.Got.Any(g => g.StartsWith("MOO/1 COMPLETE Success", StringComparison.Ordinal) && g.Contains("Request-Id: 900"))));
         var tokens = Path.Combine(hosts[^1].Manager.Settings.Dir, "roon-api.json");
         Assert.Contains("\"core-1\":\"tok-1\"", File.ReadAllText(tokens));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, OperatingSystem.IsWindows() ? UnixFileMode.UserRead | UnixFileMode.UserWrite : File.GetUnixFileMode(tokens));
@@ -570,11 +571,11 @@ public sealed class EndToEndTests(ITestOutputHelper output) : IAsyncLifetime
         File.SetUnixFileMode(start, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
         await Post("/api/services", "{\"roon\":true}");
-        await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonStatus").GetString()!.StartsWith("running · 2.71 (build 1683)"));
+        await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonStatus").GetString()!.StartsWith("running · 2.71 (build 1683)", StringComparison.Ordinal));
         var root = Path.Combine(data, "roon", "data");
         await Until(() => Task.FromResult(File.Exists(Path.Combine(root, "child"))));
         Assert.Equal($"{root}|{root}", File.ReadAllText(Path.Combine(root, "env")).Trim());
-        int child = int.Parse(File.ReadAllText(Path.Combine(root, "child")).Trim());
+        int child = int.Parse(File.ReadAllText(Path.Combine(root, "child")).Trim(), CultureInfo.InvariantCulture);
         Assert.True(Native.Libc.Alive(child));
         // Shared while nothing plays through the bridge, so Roon can open the DAC.
         await Until(async () => !(await Dac()).GetProperty("exclusive").GetBoolean());
@@ -1107,13 +1108,13 @@ internal sealed class FileServer : IDisposable
             var f = Path.Combine(dir, Path.GetFileName(c.Request.Url!.AbsolutePath));
             if (!File.Exists(f)) { c.Response.StatusCode = 404; c.Response.Close(); return; }
             var buf = File.ReadAllBytes(f);
-            c.Response.ContentType = f.EndsWith(".dsf") ? "audio/dsf" : "audio/flac";
+            c.Response.ContentType = f.EndsWith(".dsf", StringComparison.Ordinal) ? "audio/dsf" : "audio/flac";
             var range = c.Request.Headers["Range"];
             var m = Regex.Match(range ?? "", @"bytes=(\d+)-(\d*)");
             if (m.Success)
             {
                 lock (Ranges) Ranges.Add(range!);
-                long a = long.Parse(m.Groups[1].Value), b = m.Groups[2].Value != "" ? Math.Min(long.Parse(m.Groups[2].Value), buf.Length - 1) : buf.Length - 1;
+                long a = long.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture), b = m.Groups[2].Value != "" ? Math.Min(long.Parse(m.Groups[2].Value, CultureInfo.InvariantCulture), buf.Length - 1) : buf.Length - 1;
                 c.Response.StatusCode = 206;
                 c.Response.Headers["Content-Range"] = $"bytes {a}-{b}/{buf.Length}";
                 c.Response.ContentLength64 = b - a + 1;
