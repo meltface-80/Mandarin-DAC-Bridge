@@ -119,6 +119,7 @@ internal sealed class RoonApi : IDisposable
     public const string ExtensionId = "com.musicd.mandarin-dac-bridge";
 
     private readonly string tokenFile;
+    private readonly object tokenGate = new();
     private readonly string fixedCore;
     private readonly CancellationTokenSource stop = new();
     private readonly Thread thread;
@@ -282,28 +283,21 @@ internal sealed class RoonApi : IDisposable
 
     private string Token(string coreId)
     {
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(tokenFile));
-            return Str(doc.RootElement, coreId);
-        }
-        catch (Exception) { return ""; }
+        try { return OwnerOnlyFile.ReadStrings(tokenFile).GetValueOrDefault(coreId, ""); }
+        catch (Exception e) { Log("couldn't read the token: " + e.Message); return ""; }
     }
 
     private void SaveToken(string coreId, string token)
     {
         try
         {
-            var all = new JsonObject();
-            try
+            // Read, add, write: one Core at a time, or one Core's token could undo another's.
+            lock (tokenGate)
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(tokenFile));
-                foreach (var p in doc.RootElement.EnumerateObject()) if (p.Value.ValueKind == JsonValueKind.String) all[p.Name] = p.Value.GetString();
+                var all = OwnerOnlyFile.ReadStrings(tokenFile);
+                all[coreId] = token;
+                OwnerOnlyFile.WriteStrings(tokenFile, all);
             }
-            catch (Exception) { /* first one */ }
-            all[coreId] = token;
-            File.WriteAllText(tokenFile, all.ToJsonString());
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(tokenFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         }
         catch (Exception e) { Log("couldn't keep the token: " + e.Message); }
     }
