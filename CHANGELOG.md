@@ -3,6 +3,40 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.3] — 2026-10-12
+
+### Fixed
+
+- **Any website's page could change the bridge.** The bridge took a change from whoever sent it,
+  so a page of another site, open in a browser anywhere on the network, could switch connections
+  on, start downloads or turn a DAC up. Now a change that a browser says comes from another site
+  (Sec-Fetch-Site, or Origin on older browsers) is refused with 403; the bridge's own page and
+  programs that aren't browsers (UPnP controllers, a Squeezebox server, `curl`) go ahead. Class: a
+  web API trusting every request that reaches it (cross-site request forgery). Gate: an end-to-end
+  test sends another site's requests to the API, a download and a UPnP action and requires them
+  refused with nothing changed, and fails without the check; unit tests cover each header case
+  (three deliberate breaks of the rule each failed them). The password in `dev/quality.md` is
+  still to come.
+
+## [1.1.2] — 2026-10-12
+
+### Fixed
+
+- **A Squeezebox server's stored volume was put on the DAC the moment the player connected.**
+  Switching Squeezebox on, restarting the bridge or a dropped connection could move a DAC (a
+  headphone amp included) to the server's level, louder as easily as quieter. LMS sends its volume
+  as a player connects and again with every stream it starts; the bridge now lets it move the DAC
+  only once the server has asked that player to play, and what it sends on (re)connecting is left
+  alone. Class: a safety rule ("no level is applied at start or on connect") that no test pinned;
+  the old test sent the volume straight after connecting and expected the DAC to move. The test
+  now proves the opposite on a first connect and on a reconnect, and fails if either guard is
+  removed. Tried against a stand-in server that follows LMS's code, not a real LMS or Roon.
+
+### Changed
+
+- **Two oversized files shrink:** Squeezebox discovery and the strm parser moved out of
+  `SlimPlayer.cs` (now under the length limit), and the volume test out of `EndToEndTests.cs`.
+
 ## [1.1.1] — 2026-10-12
 
 ### Added

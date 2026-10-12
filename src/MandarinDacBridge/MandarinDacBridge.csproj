@@ -13,7 +13,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>mandarin-dac-bridge</AssemblyName>
     <RootNamespace>MandarinDacBridge</RootNamespace>
-    <Version>1.1.1</Version>
+    <Version>1.1.3</Version>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
