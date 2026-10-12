@@ -100,6 +100,9 @@ public sealed partial class EndToEndTests
                      "audio.sampleRate=0", "audio.channels=0", "audio.masterVolume=100", "player.loudnessLeveling=no", "player.sweetFades=no" })
             Assert.Contains(want, set);
         Assert.Equal($"{Path.Combine(data, "caldera")}|{Path.Combine(install, "lib")}", File.ReadAllText(Path.Combine(cfg, "env")).Trim());
+        // Caldera keeps its own copy of the token under its HOME: that and its folder are its owner's only.
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(cfg));
+        Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.Combine(data, "caldera")));
 
         // The DAC is shared while Caldera is on: let go while the bridge isn't playing.
         await Until(async () => !(await Dac()).GetProperty("exclusive").GetBoolean());

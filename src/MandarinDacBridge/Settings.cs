@@ -64,6 +64,8 @@ internal sealed class Settings
     private readonly string file;
     private readonly object gate = new();
     private readonly SettingsFile data;
+    // settings.json is there but couldn't be read or kept aside: nothing is written over it.
+    private readonly bool frozen;
 
     public string Dir { get; }
 
@@ -71,8 +73,28 @@ internal sealed class Settings
     {
         Dir = dir;
         file = Path.Combine(dir, "settings.json");
-        try { data = JsonSerializer.Deserialize(File.ReadAllText(file), BridgeJson.Default.SettingsFile) ?? new(); }
-        catch (Exception) { data = new(); }
+        data = new();
+        string? text = null;
+        try { text = OwnerOnlyFile.Read(file); }
+        catch (Exception e)
+        {
+            // There, but it can't be opened (its permissions, a lock): left as it is and never written over.
+            frozen = true;
+            Log.Write($"settings.json couldn't be opened ({e.Message}): the defaults hold, and changes aren't saved over it");
+        }
+        if (text != null)
+        {
+            try { data = JsonSerializer.Deserialize(text, BridgeJson.Default.SettingsFile) ?? new(); }
+            catch (Exception e) when (e is JsonException or NotSupportedException)
+            {
+                // Not settings (cut short, edited by hand): kept aside, and said so; every DAC's settings and
+                // the secrets are in it. If it can't be moved, it isn't written over either.
+                frozen = !OwnerOnlyFile.KeepAside(file, e.Message);
+            }
+        }
+        // {"dacs":null} is JSON too.
+        data.Dacs ??= new();
+        data.Services ??= new();
     }
 
     public DacSettings For(string id)
@@ -95,6 +117,8 @@ internal sealed class Settings
             if (p.Share is { } sh) s.Share = sh;
             if (p.Volume is "dac" or "fixed") s.Volume = p.Volume;
             if (p.RoonZone != null) s.RoonZone = p.RoonZone.Trim()[..Math.Min(120, p.RoonZone.Trim().Length)];
+            // A level alone (the volume slider, many a second) isn't kept: nothing to write.
+            if (Same(s, For(id))) return s;
             data.Dacs[id] = s;
             Save();
             return s;
@@ -133,14 +157,14 @@ internal sealed class Settings
         }
     }
 
+    private static bool Same(DacSettings a, DacSettings b) =>
+        (a.Enabled, a.Dsd, a.Name, a.Share, a.Volume, a.RoonZone) == (b.Enabled, b.Dsd, b.Name, b.Share, b.Volume, b.RoonZone);
+
     private void Save()
     {
-        try
-        {
-            File.WriteAllText(file, JsonSerializer.Serialize(data, BridgeJson.Default.SettingsFile));
-            // It can hold the Soloist API key: its owner's only.
-            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(file, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
+        if (frozen) { Log.Write("settings: not saved, so the settings.json that couldn't be read isn't written over"); return; }
+        // It holds the Soloist API key and the Plex token: its owner's only.
+        try { OwnerOnlyFile.Write(file, JsonSerializer.Serialize(data, BridgeJson.Default.SettingsFile)); }
         catch (Exception e) { Log.Write("settings: " + e.Message); }
     }
 }

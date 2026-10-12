@@ -211,8 +211,9 @@ elsewhere moves Spotify's slider too. On a DAC without one, Spotify's volume sta
 (bit-perfect): a change in the Spotify app is put back.
 
 Soloist takes the API key only on its command line, so other accounts on the same machine could read
-it from the process list. On a machine you share with others, run the bridge in Docker. On a Mac,
-the Spotify app itself plays through the bridge instead ([below](#this-mac-the-music-app-and-the-spotify-app)).
+it from the process list, Docker or not (a container's programs show in the machine's process list
+too). On a machine only you log in to, that doesn't matter. On a Mac, the Spotify app itself plays
+through the bridge instead ([below](#this-mac-the-music-app-and-the-spotify-app)).
 
 ### Qobuz Connect, through QobuzProxy (Mac, Windows, Linux)
 
@@ -233,7 +234,10 @@ Switch on **Plex · Caldera Headless** on the page (or set `CALDERA=1`), press *
 Caldera** (it fetches [Caldera Headless](https://caldera.homes/music/amp/#linux) for this machine's
 processor), then **Sign in to Plex**: the page shows a code to enter at
 [plex.tv/link](https://plex.tv/link). Each DAC then appears as a player in Plexamp, Plex for iOS and
-the Plex web app. The Plex token stays in `settings.json` (owner-only) and is never sent to the page.
+the Plex web app. The Plex token stays in `settings.json` (owner-only) and is never sent to the page;
+Caldera keeps its own copy in its folder (`DATA_DIR/caldera`), its owner's only too. The bridge hands
+the token to Caldera by running `caldera-music --set` for a moment, so while that runs it is on that
+program's command line, where other accounts on the same machine could see it.
 The page says which Plex account is signed in; **Sign out of Plex** forgets it (here and in Caldera's
 settings), so you can sign in with another. Plexamp lists the DACs for any account on the network,
 but plays only for the one signed in.
