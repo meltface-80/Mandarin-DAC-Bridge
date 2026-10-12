@@ -30,6 +30,10 @@ checked by a tool, which is why they are prose; anything a tool CAN check belong
   someone's ears. The DAC's own volume is used; the bridge never sets a level by itself. Volume and
   mute from an app are refused while another app has the DAC, but never claim it (a volume nudge
   must not lock the other app out for the grace period).
+- **Files that hold secrets go through `OwnerOnlyFile`** (`settings.json`, `roon-api.json`): created
+  owner-only (never written and then restricted), written whole through a new file, and a file that
+  can't be read is moved aside and logged, never replaced by the defaults. A corrupt `settings.json`
+  once became the defaults without a word and was overwritten on the next change (1.1.4).
 - **Identities are forever.** Changing how DAC ids or UPnP UDNs are derived renames every DAC: its
   settings are lost and every app forgets it.
 

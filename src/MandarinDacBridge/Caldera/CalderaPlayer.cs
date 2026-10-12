@@ -114,7 +114,11 @@ internal sealed partial class CalderaPlayer : IDisposable
         if (!OperatingSystem.IsLinux()) throw new NotReady("Caldera Headless runs on Linux only");
         if (!File.Exists(s.Program)) throw new NotReady("needs Caldera Headless: download it on this page");
         if (s.Token == "") throw new NotReady("needs a Plex sign-in: link it on this page");
-        Directory.CreateDirectory(configDir);
+        // Caldera keeps its own copy of the Plex token under its HOME: its owner's only, like settings.json.
+        const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        Directory.CreateDirectory(configDir, OwnerOnly);
+        File.SetUnixFileMode(s.Home, OwnerOnly);
+        File.SetUnixFileMode(configDir, OwnerOnly);
 
         // Bit-perfect, on this DAC only, under the bridge's name for it.
         var prefs = new List<string> { "--config", configDir };
@@ -133,7 +137,8 @@ internal sealed partial class CalderaPlayer : IDisposable
             var err = set.StandardError.ReadToEndAsync();
             set.StandardOutput.ReadToEnd();
             if (!set.WaitForExit(10_000)) { set.Kill(); throw new InvalidOperationException("caldera-music --set didn't finish"); }
-            if (set.ExitCode != 0) throw new InvalidOperationException("caldera-music --set: " + Last(err.Result));
+            // Its error goes to the log and the page: never with the token it was given.
+            if (set.ExitCode != 0) throw new InvalidOperationException("caldera-music --set: " + Clean(Last(err.Result), s.Token));
         }
 
         // Its own port for Caldera's multi-room audio too (9999 is taken by the first one).
@@ -146,6 +151,7 @@ internal sealed partial class CalderaPlayer : IDisposable
         void Line(string? l)
         {
             if (l == null) return;
+            l = Clean(l, s.Token);
             lock (lines) { lines.Enqueue(l); while (lines.Count > 20) lines.Dequeue(); }
             if (l.Contains("token rejected") || l.Contains("auth_expired")) rejected = true;
             if (l.Contains(" E (") || l.Contains("No auth token")) Log(l.Length > 200 ? l[..200] : l);
@@ -171,6 +177,16 @@ internal sealed partial class CalderaPlayer : IDisposable
     }
 
     private static string Last(string text) => text.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l != "") ?? "";
+
+    // What Caldera prints goes to the log and the page (its errors): never with a Plex token in it, the
+    // owner's or a server's (X-Plex-Token=… in a URL).
+    internal static string Clean(string text, string token)
+    {
+        if (token != "") text = text.Replace(token, "(the Plex token)", StringComparison.Ordinal);
+        return PlexTokenParam().Replace(text, "X-Plex-Token=(a token)");
+    }
+
+    [GeneratedRegex(@"X-Plex-Token=[^&\s""']+", RegexOptions.IgnoreCase)] private static partial Regex PlexTokenParam();
 
     private void Kill()
     {
