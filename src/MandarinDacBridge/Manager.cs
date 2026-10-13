@@ -10,168 +10,16 @@
 // on the page. A DAC
 // set to "share when idle" is let go whenever nothing plays, so Roon Bridge
 // (or any player on this machine) can use it in between.
-using MandarinDacBridge.Audio;
 using MandarinDacBridge.Slim;
 using MandarinDacBridge.Spotify;
-using MandarinDacBridge.Upnp;
 
 namespace MandarinDacBridge;
 
-internal sealed class Bridge : IDisposable
+internal sealed partial class Manager : IDisposable
 {
     private readonly Config config;
-    private readonly Settings settings;
-
-    public string Id { get; }
-    public DacDevice Dev { get; set; }
-    public string Udn { get; }
-    public ISink Sink { get; }
-    public Renderer Renderer { get; }
-    public Arbiter Arbiter { get; }
-    public event Action? Changed;
-    public event Action? Gone;
-    // The DAC's volume moved (from an app, the page, or elsewhere on this machine): 0–100.
-    public event Action<int>? VolumeChanged;
-    private bool wasExclusive;
-    private readonly Timer shareTimer;
-    private int? level;
-
-    // The DAC's own volume (Audio/Volume.cs), where it has one.
-    public IDacVolume Volume { get; }
-
-    public SlimPlayer? Slim { get; set; }
-    public SoloistPlayer? Spotify { get; set; }
-    public Caldera.CalderaPlayer? Caldera { get; set; }
-    // On while something else on this machine (Caldera) plays to the DAC by itself: the DAC is shared when idle.
-    public bool ForceShare { get; set; }
-
-    public Bridge(DacDevice dev, Config config, Settings settings)
-    {
-        this.config = config;
-        this.settings = settings;
-        Id = dev.Id;
-        Dev = dev;
-        Udn = Description.UdnFor(config.Hostname, dev.Key);
-        Arbiter = new Arbiter(config.LockGrace, config.MandarinPort);
-        Sink = SinkFactory.Create(dev, config);
-        Renderer = new Renderer(Sink, config.Ffmpeg, () => new DacTraits(Dev.Rates, Dev.Channels, DsdMode()), Arbiter, Log);
-        Renderer.Changed += Notify;
-        Sink.StatusChanged += () =>
-        {
-            if (Sink.Exclusive != wasExclusive)
-            {
-                Log(Sink.Exclusive ? "exclusive: the DAC is the bridge's" : $"waiting: {Sink.Message}");
-                wasExclusive = Sink.Exclusive;
-            }
-            Notify();
-        };
-        Sink.Gone += () => ThreadPool.QueueUserWorkItem(_ => Gone?.Invoke());
-        if (settings.For(Id).Share) { sharing = true; Sink.Share(true); }
-        Volume = VolumeFactory.Create(dev, config);
-        if (Volume.Available)
-        {
-            level = Volume.Read();
-            Log($"volume: the DAC's own ({Volume.Control}){(level is { } l ? $", at {l}%" : "")}");
-        }
-        shareTimer = new Timer(_ => { ShareIfIdle(); RefreshVolume(); }, null, 1000, 1000);
-    }
-
-    // The apps set the DAC's own volume: it has one, and it isn't set to be left alone.
-    public bool VolumeOn => Volume.Available && settings.For(Id).Volume != "fixed";
-
-    // 0–100 while the volume is the apps' to set; null when it stays where it is (100 to the apps).
-    public int? Level => VolumeOn ? level : null;
-
-    public double? LevelDb => VolumeOn ? Volume.ReadDb() : null;
-
-    public bool SetLevel(int to)
-    {
-        if (!VolumeOn) return false;
-        to = Math.Clamp(to, 0, 100);
-        if (!Volume.Set(to)) { Log($"volume: couldn't set it to {to}%"); return false; }
-        Moved(Volume.Read() ?? to);
-        return true;
-    }
-
-    // Changed elsewhere too (alsamixer, the Mac's or Windows' own volume): followed every second.
-    private void RefreshVolume()
-    {
-        if (!VolumeOn) return;
-        try { if (Volume.Read() is { } v) Moved(v); }
-        catch (Exception) { /* the DAC is going */ }
-    }
-
-    private void Moved(int v)
-    {
-        if (v == level) return;
-        level = v;
-        VolumeChanged?.Invoke(v);
-        Notify();
-    }
-
-    public bool Idle => Renderer.Transport is "STOPPED" or "NO_MEDIA_PRESENT" && !Arbiter.Holding(false);
-
-    // Shared: let go of the DAC once nothing plays (and no app is in its grace).
-    private void ShareIfIdle()
-    {
-        if (!(settings.For(Id).Share || ForceShare) || !Sink.Exclusive || !Idle) return;
-        Log("idle: letting go of the DAC for other players (shared)");
-        Sink.Share(true);
-    }
-
-    private bool sharing;
-
-    public void SetShare(bool on)
-    {
-        if (on || ForceShare) { sharing = true; ShareIfIdle(); }
-        else if (sharing)
-        {
-            sharing = false;
-            Sink.Share(false);
-            Log("not shared: holding the DAC again");
-        }
-    }
-
-    // The share setting as it stands (after Caldera was switched on or off).
-    public void ApplyShare() => SetShare(settings.For(Id).Share);
-
-    public void Log(string m) => MandarinDacBridge.Log.Write($"[{Dev.Name}] {m}");
-    public void Notify() => Changed?.Invoke();
-    public void Start() => Sink.Start();
-
-    // DoP where asked; on "auto", where the DAC shows it knows DSD (native DSD formats, Linux).
-    public string DsdMode()
-    {
-        var s = settings.For(Id).Dsd;
-        return s is "dop" or "pcm" ? s : Dev.DsdNative.Length > 0 ? "dop" : "pcm";
-    }
-
-    public string FriendlyName()
-    {
-        var s = settings.For(Id);
-        return (s.Name != "" ? s.Name : Dev.Name) + config.NameSuffix;
-    }
-
-    public string ProtocolInfo() => Control.ProtocolInfo(Dev.Rates, Dev.Bits);
-
-    public Advert Advert => new(Udn, $"/upnp/{Id}/description.xml");
-
-    public void Dispose()
-    {
-        shareTimer.Dispose();
-        Volume.Dispose();
-        Slim?.Dispose();
-        Spotify?.Dispose();
-        Caldera?.Dispose();
-        try { Renderer.Halt().Wait(TimeSpan.FromSeconds(6)); } catch (Exception) { /* closing anyway */ }
-        Renderer.Dispose();
-        Sink.Dispose();
-    }
-}
-
-internal sealed class Manager(Config config) : IDisposable
-{
     private readonly object gate = new();
+    private readonly object connectGate = new();   // Connect, one at a time (taken before servicesGate)
     private readonly Dictionary<string, DacDevice> devices = new();
     private readonly Dictionary<string, Bridge> bridges = new();
     private Timer? timer;
@@ -192,7 +40,13 @@ internal sealed class Manager(Config config) : IDisposable
     private string roonDownload = "";
     private int roonDownloading;
 
-    public Settings Settings { get; } = new(config.DataDir);
+    public Settings Settings { get; }
+
+    public Manager(Config config)
+    {
+        this.config = config;
+        Settings = new(config.DataDir);
+    }
     public event Action<Bridge>? Added;
     public event Action<Bridge>? Removed;
     public event Action<Bridge>? Renamed;
@@ -304,29 +158,6 @@ internal sealed class Manager(Config config) : IDisposable
         drop?.Dispose();
     }
 
-    // The Roon zone that plays to this DAC: the one chosen on its page, else one named like it
-    // (its Squeezebox name "<DAC> (Bridge)", its own name, or Roon Bridge's name for it).
-    private Roon.RoonZone? ZoneFor(Bridge b, List<Roon.RoonZone> zones)
-    {
-        if (zones.Count == 0) return null;
-        var chosen = Settings.For(b.Id).RoonZone;
-        if (chosen != "") return zones.FirstOrDefault(z => z.Name == chosen || z.Outputs.Contains(chosen));
-        static string N(string s) => s.Trim().TrimEnd('.').ToLowerInvariant();
-        var names = new[] { b.FriendlyName(), Settings.For(b.Id).Name, b.Dev.Name }.Where(x => x.Trim() != "").Select(N).ToList();
-        bool Is(Roon.RoonZone z) => z.Outputs.Append(z.Name).Select(N).Any(names.Contains);
-        bool Like(Roon.RoonZone z) => z.Outputs.Append(z.Name).Select(N).Any(o => o.Length >= 6 && names.Any(n => n.Contains(o) || o.Contains(n)));
-        return zones.FirstOrDefault(Is) ?? zones.FirstOrDefault(Like);
-    }
-
-    private static NowPlaying RoonNow(Roon.RoonZone z, string dacId)
-    {
-        double pos = (z.Seek ?? 0) + (z.State == "playing" ? Math.Max(0, Arbiter.Now - z.At) / 1000.0 : 0);
-        if (z.Length > 0) pos = Math.Min(pos, z.Length);
-        var transport = z.State switch { "playing" => "PLAYING", "paused" => "PAUSED_PLAYBACK", _ => "TRANSITIONING" };
-        var art = z.ImageKey != "" ? $"/api/dacs/{dacId}/art?k={Uri.EscapeDataString(z.ImageKey)}" : "";
-        return new NowPlaying(transport, "OK", "", z.Title, z.Artist, z.Album, (long)Math.Round(pos), (long)Math.Round(z.Length), "", "", false, art);
-    }
-
     // Roon Bridge beside the bridge, while switched on (Roon/RoonBridgeHost.cs).
     private void ConnectRoon()
     {
@@ -418,38 +249,51 @@ internal sealed class Manager(Config config) : IDisposable
         }
     }
 
-    // Starts or stops a bridge's Squeezebox player and Spotify speaker, as switched on the page.
+    // Starts or stops a bridge's Squeezebox player, Spotify speaker and Plex player, as switched on the page.
+    // A player being replaced is closed before its successor is made: two at once would share its name for
+    // the renderer ("live:spotify/<dac>", which closing the old one removes), its folders and its ports.
     private void Connect(Bridge b, bool restartSpotify = false, bool restartCaldera = false)
     {
-        SlimPlayer? dropSlim = null;
-        SoloistPlayer? dropSpotify = null;
-        Caldera.CalderaPlayer? dropCaldera = null;
-        lock (servicesGate)
+        // One at a time: another connect between the closing and the making would make a successor
+        // while the old player is still closing.
+        lock (connectGate)
         {
-            if (Get(b.Id) != b) return;
-            if (SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer, config.LmsJsonPort);
-            else if (!SqueezeliteOn && b.Slim != null) { dropSlim = b.Slim; b.Slim = null; }
-            if ((!SpotifyOn || restartSpotify) && b.Spotify != null) { dropSpotify = b.Spotify; b.Spotify = null; }
-            if (SpotifyOn && b.Spotify == null)
+            SlimPlayer? dropSlim = null;
+            SoloistPlayer? dropSpotify = null;
+            Caldera.CalderaPlayer? dropCaldera = null;
+            lock (servicesGate)
             {
-                b.Spotify = new SoloistPlayer(b, config.DataDir, config.Port, Soloist);
-                b.Spotify.Expired += () => { if (config.FindSoloist().StartsWith(config.SoloistDir)) _ = DownloadSoloist(); };
+                if (Get(b.Id) != b) return;
+                if (!SqueezeliteOn && b.Slim != null) { dropSlim = b.Slim; b.Slim = null; }
+                if ((!SpotifyOn || restartSpotify) && b.Spotify != null) { dropSpotify = b.Spotify; b.Spotify = null; }
+                if ((!CalderaOn || restartCaldera) && b.Caldera != null) { dropCaldera = b.Caldera; b.Caldera = null; }
             }
-            if ((!CalderaOn || restartCaldera) && b.Caldera != null) { dropCaldera = b.Caldera; b.Caldera = null; }
-            if (CalderaOn && b.Caldera == null)
+            dropSlim?.Dispose();
+            dropSpotify?.Dispose();
+            dropCaldera?.Dispose();
+            bool open;
+            lock (servicesGate)
             {
-                b.Caldera = new Caldera.CalderaPlayer(b, config.DataDir, CalderaPort(b.Id), CalderaSetup);
-                b.Caldera.TokenRejected += () => { if (PlexToken != "") { Log.Write("Plex: the sign-in was refused; sign in again"); Settings.Apply(new ServiceSettings { PlexToken = "" }); } };
+                open = Get(b.Id) == b;
+                if (open && SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer, config.LmsJsonPort);
+                if (open && SpotifyOn && b.Spotify == null)
+                {
+                    b.Spotify = new SoloistPlayer(b, config.DataDir, config.Port, Soloist);
+                    b.Spotify.Expired += () => { if (config.FindSoloist().StartsWith(config.SoloistDir)) _ = DownloadSoloist(); };
+                }
+                if (open && CalderaOn && b.Caldera == null)
+                {
+                    b.Caldera = new Caldera.CalderaPlayer(b, config.DataDir, CalderaPort(b.Id), CalderaSetup);
+                    b.Caldera.TokenRejected += () => { if (PlexToken != "") { Log.Write("Plex: the sign-in was refused; sign in again"); Settings.Apply(new ServiceSettings { PlexToken = "" }); } };
+                }
+                // Caldera and Roon Bridge play to the DAC themselves: it is shared whenever nothing plays through the bridge.
+                if (open) b.ForceShare = b.Caldera != null || RoonOn;
             }
-            // Caldera and Roon Bridge play to the DAC themselves: it is shared whenever nothing plays through the bridge.
-            b.ForceShare = b.Caldera != null || RoonOn;
+            if (dropCaldera != null && b.Caldera == null) lock (calderaPorts) calderaPorts.Remove(b.Id);
+            if (!open) return;
+            b.ApplyShare();
+            b.Notify();
         }
-        dropSlim?.Dispose();
-        dropSpotify?.Dispose();
-        dropCaldera?.Dispose();
-        if (dropCaldera != null && b.Caldera == null) lock (calderaPorts) calderaPorts.Remove(b.Id);
-        b.ApplyShare();
-        b.Notify();
     }
 
     public ServicesView SetServices(ServiceSettings patch)
@@ -536,16 +380,6 @@ internal sealed class Manager(Config config) : IDisposable
         await plexLink.Start();
     }
 
-    // The cover for what plays on this DAC, when the page can't fetch it itself: a URL (Caldera's, with the
-    // Plex token) or a file (the Music app's).
-    public string? Art(string id)
-    {
-        if (Get(id)?.Caldera?.ArtUrl is { Length: > 0 } u) return u;
-        if (mac?.ArtFile is { Length: > 0 } f) return f;
-        if (roonApi != null && Get(id) is { } b && ZoneFor(b, roonApi.Zones()) is { ImageKey.Length: > 0 } z) return roonApi.ImageUrl(z.ImageKey);
-        return null;
-    }
-
     // Fetches Spotify Soloist from Spotify (the page's Download, or an expired build), then starts the speakers again.
     public async Task DownloadSoloist()
     {
@@ -564,31 +398,6 @@ internal sealed class Manager(Config config) : IDisposable
             Log.Write("Spotify Soloist: " + soloistDownload);
         }
         finally { Volatile.Write(ref downloading, 0); }
-    }
-
-    public ServicesView Services()
-    {
-        var soloist = config.FindSoloist();
-        return new ServicesView
-        {
-            Squeezelite = SqueezeliteOn, LmsServer = LmsServer, Spotify = SpotifyOn,
-            SoloistKey = SoloistKey != "", Soloist = soloist, SoloistVersion = SoloistDownload.Version(soloist),
-            SoloistExpires = SoloistDownload.Expires(SoloistDownload.Version(soloist))?.ToString("yyyy-MM-dd") ?? "",
-            SoloistDownload = soloistDownload, PulseAudio = Config.FindPulseAudio() != "",
-            SpotifyPossible = OperatingSystem.IsLinux() && SoloistDownload.Arch != null,
-            Caldera = CalderaOn, CalderaPossible = OperatingSystem.IsLinux() && Caldera.CalderaDownload.Arch != null,
-            CalderaVersion = Caldera.CalderaDownload.Version(config.DataDir), CalderaDownload = calderaDownload,
-            PlexSignedIn = PlexToken != "", PlexAccount = PlexToken != "" ? Settings.Services().PlexAccount ?? "" : "",
-            PlexCode = plexLink?.Code ?? "", PlexMessage = plexLink?.Message ?? "",
-            Qobuz = QobuzOn, QobuzInstalled = qobuz?.Installed ?? false, QobuzInstall = qobuz?.Install ?? "",
-            QobuzStatus = qobuz?.Status ?? "", QobuzSignedIn = qobuz?.SignedIn ?? false, QobuzWebPort = Qobuz.QobuzConnect.WebPort,
-            MacPossible = OperatingSystem.IsMacOS(), MacApps = MacOn,
-            MacDriver = OperatingSystem.IsMacOS() && Native.CoreAudio.FindDevice(Mac.MacSource.LoopbackUid) != Native.CoreAudio.Unknown, MacDac = MacTarget()?.Id ?? "", MacStatus = mac?.Status ?? "",
-            RoonBridge = RoonBridge.Running(),
-            Roon = RoonOn, RoonPossible = Roon.RoonDownload.Package != null, RoonVersion = Roon.RoonDownload.Version(config.DataDir),
-            RoonDownload = roonDownload, RoonStatus = roon?.Status ?? "",
-            RoonApi = RoonApiOn, RoonApiStatus = roonApi?.Status ?? "", RoonZones = roonApi?.Zones().Select(z => z.Name).ToArray() ?? []
-        };
     }
 
     private void CloseBridge(string id)
@@ -639,81 +448,6 @@ internal sealed class Manager(Config config) : IDisposable
         b.Arbiter.Release();
         b.Notify();
     }
-
-    // Everything the page shows.
-    public BridgeView View()
-    {
-        var list = new List<DacView>();
-        var zones = roonApi?.Zones() ?? [];
-        List<DacDevice> devs;
-        lock (gate) devs = devices.Values.ToList();
-        foreach (var dev in devs)
-        {
-            var s = Settings.For(dev.Id);
-            var b = Get(dev.Id);
-            var holder = dev.HolderPid > 0 ? (dev.HolderName != "" ? dev.HolderName : $"process {dev.HolderPid}") : "";
-            var v = new DacView
-            {
-                Id = dev.Id, Name = s.Name != "" ? s.Name : dev.Name, DeviceName = dev.Name, Manufacturer = dev.Manufacturer, Model = dev.Model,
-                Transport = dev.Transport, Usb = dev.Usb, Rates = dev.Rates, Bits = dev.Bits, Channels = dev.Channels, Formats = dev.Formats,
-                DsdNative = dev.DsdNative, DopRates = dev.DopRates, CurrentRate = dev.CurrentRate, Volume = dev.Volume,
-                Enabled = s.Enabled, Dsd = s.Dsd, Platform = config.Platform, Holder = holder, Share = s.Share, VolumeMode = s.Volume, RoonZoneChosen = s.RoonZone
-            };
-            if (b != null)
-            {
-                v.UpnpName = b.FriendlyName();
-                v.DsdMode = b.DsdMode();
-                v.Exclusive = b.Sink.Exclusive;
-                v.Waiting = b.Sink.Exclusive ? "" : b.Sink.Message;
-                v.Squeezebox = b.Slim?.Status;
-                v.SqueezeboxId = b.Slim?.Mac;
-                v.Spotify = b.Spotify?.Status;
-                v.Caldera = b.Caldera?.Status;
-                v.Holder = b.Sink.Exclusive ? "" : holder;
-                v.VolumeAvailable = b.Volume.Available;
-                v.Level = b.Level;
-                v.LevelDb = b.Level != null ? b.LevelDb : null;
-                v.Player = b.Renderer.Now();
-                var active = b.Renderer.IsActive;
-                // Caldera plays to the DAC by itself: what it plays is shown, and who.
-                var caldera = !active && b.Caldera?.Holding == true ? b.Caldera.Now : null;
-                if (caldera != null) v.Player = caldera;
-                // Roon: what its zone for this DAC plays. Through Roon Bridge (not through the bridge) it's all
-                // there is to show; through the Squeezebox player, it fills in what Roon's Squeezebox support leaves out.
-                string? roonOwner = null;
-                var rz = ZoneFor(b, zones);
-                v.RoonZone = rz?.Name ?? "";
-                if (rz is { InUse: true } && caldera == null)
-                {
-                    var np = RoonNow(rz, b.Id);
-                    if (!active) { v.Player = np; roonOwner = "Roon"; }
-                    else if (v.Player is { } cur && cur.Title == "" && b.Arbiter.Owner?.Name == "Squeezebox server")
-                    {
-                        v.Player = cur with { Title = np.Title, Artist = np.Artist, Album = np.Album, Art = np.Art, Duration = cur.Duration > 0 ? cur.Duration : np.Duration };
-                        roonOwner = "Roon (Squeezebox)";
-                    }
-                }
-                var blocked = b.Arbiter.LastBlocked;
-                v.Control = new ControlView
-                {
-                    Owner = caldera != null ? "Plex (Caldera)" : roonOwner ?? b.Arbiter.Owner?.Name,
-                    Locked = b.Arbiter.Holding(active),
-                    Blocked = blocked != null && Arbiter.Now - blocked.At < 5 * 60 * 1000 ? blocked : null
-                };
-            }
-            list.Add(v);
-        }
-        string err;
-        lock (gate) err = error;
-        return new BridgeView
-        {
-            Dacs = list.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase).ToList(),
-            Error = err, Version = Config.Version, Host = config.Hostname, Platform = config.Platform,
-            Others = Others(), Services = Services()
-        };
-    }
-
-    private List<string> Others() { lock (gate) return skipped.ToList(); }
 
     public void Dispose()
     {

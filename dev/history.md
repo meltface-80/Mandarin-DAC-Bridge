@@ -16,3 +16,4 @@ version's story; this is the index.
 | 1.1.7 | `dev` (#21) | Compose files build the bridge on Update and never pull it: Dockge's and Portainer's Update work (`fix/compose-update`). |
 | 1.1.8 | `dev` | `dev` and `main` the same code again: 1.1.6 and the docs from `main`, 1.1.7 from `dev` (`fix/dev-gets-main`). |
 | 1.1.9 | `dev` | SoX or nothing: every install gets ffmpeg with SoX, the bridge picks it, and without it a track that needs resampling is refused (`fix/sox-everywhere`). |
+| 1.1.10 | `dev` | Spotify keeps playing after its player restarts (`fix/spotify-restart`). |
