@@ -2,7 +2,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/install.ps1 | iex"
 #
-# Installs ffmpeg with winget (if it isn't there), downloads the bridge (one
+# Installs ffmpeg with SoX with winget (if none is there), downloads the bridge (one
 # native program) from the repository's latest GitHub Release into
 # %LOCALAPPDATA%\Mandarin-DAC-Bridge, starts it now and at every sign-in
 # (a hidden scheduled task), and opens its page. If there is no Release yet,
@@ -25,20 +25,43 @@ function Say($m) { Write-Host "`n$m" -ForegroundColor Yellow }
 $rid = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
 Say "Installing Mandarin DAC Bridge ($rid). Leave this window open."
 
-# 1. ffmpeg, the decoder.
-function Find-Ffmpeg {
-    $c = Get-Command ffmpeg -ErrorAction SilentlyContinue
-    if ($c) { return $c.Source }
+# 1. ffmpeg, the decoder, built with SoX: a track at a rate the DAC can't take is resampled with SoX or
+#    refused (Audio/Soxr.cs). winget's Gyan.FFmpeg and Chocolatey's ffmpeg-full (Gyan's full build) have
+#    it; the essentials build (Gyan.FFmpeg.Essentials, Chocolatey's ffmpeg) doesn't. The bridge picks the
+#    one with SoX by itself.
+function Find-Ffmpegs {
+    $all = @(Get-Command ffmpeg -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
     $links = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\ffmpeg.exe'
-    if (Test-Path $links) { return $links }
-    return $null
+    if (Test-Path $links) { $all += $links }
+    return @($all | Where-Object { $_ } | Select-Object -Unique)
 }
-if (-not (Find-Ffmpeg)) {
-    Say 'Installing ffmpeg (winget)…'
+# Whether an ffmpeg has SoX, from ffmpeg -buildconf, read as a process (both streams at once, so neither
+# fills up; and not through PowerShell, which turns a native program's stderr into errors), for 10 s at most.
+function Test-Sox($ffmpeg) {
+    try {
+        $psi = New-Object System.Diagnostics.ProcessStartInfo $ffmpeg, '-hide_banner -buildconf'
+        $psi.UseShellExecute = $false; $psi.RedirectStandardOutput = $true; $psi.RedirectStandardError = $true
+        $p = [System.Diagnostics.Process]::Start($psi)
+        $out = $p.StandardOutput.ReadToEndAsync(); $err = $p.StandardError.ReadToEndAsync()
+        if (-not $p.WaitForExit(10000)) { $p.Kill(); return $false }
+        return ($out.Result + $err.Result).Contains('--enable-libsoxr')
+    } catch { return $false }
+}
+if (-not (Find-Ffmpegs | Where-Object { Test-Sox $_ })) {
+    Say 'Installing ffmpeg with SoX (winget)…'
+    $said = 'no winget'
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         winget install --id Gyan.FFmpeg -e --silent --accept-source-agreements --accept-package-agreements | Out-Null
+        $said = "winget's answer: $LASTEXITCODE"
     }
-    if (-not (Find-Ffmpeg)) { Write-Host 'ffmpeg could not be installed by winget. Install it (https://www.gyan.dev/ffmpeg/builds/) and run this again.'; exit 1 }
+    # winget may have put it on the user's PATH rather than in its Links folder: read the PATH afresh.
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+    $found = Find-Ffmpegs
+    if (-not $found) { Write-Host "ffmpeg could not be installed ($said). Install it (https://www.gyan.dev/ffmpeg/builds/, the full build) and run this again."; exit 1 }
+    if (-not ($found | Where-Object { Test-Sox $_ })) {
+        Write-Host "ffmpeg with SoX could not be installed ($said), so a track at a rate the DAC can't take will be refused."
+        Write-Host 'If Gyan.FFmpeg.Essentials is installed, remove it (winget uninstall Gyan.FFmpeg.Essentials) and run this again.'
+    }
 }
 
 # 2. The bridge (stopped first if this is a second run).

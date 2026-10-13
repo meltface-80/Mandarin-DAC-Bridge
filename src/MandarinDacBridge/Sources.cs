@@ -4,7 +4,8 @@
 // AIFF, ALAC, raw L16/L24, MP3, AAC…) comes out as signed 32-bit samples,
 // which hold 16- and 24-bit audio exactly. Nothing is resampled while the DAC
 // takes the track's rate; when it doesn't, the nearest rate it does take in
-// the same family (44.1 or 48 kHz) is made with SoX's resampler.
+// the same family (44.1 or 48 kHz) is made with SoX's resampler, or, with an
+// ffmpeg built without SoX, the track is refused and says why (Audio/Soxr.cs).
 //
 // DSD files (DSF, DFF) go to the DAC as DoP when that's on for it (Dsd.cs);
 // otherwise ffmpeg turns them into PCM.
@@ -126,15 +127,16 @@ internal static partial class Sources
         if (want != info.Rate) filters.Add($"aresample={want}:resampler=soxr:precision=28");
         if (filters.Count == 0) return first;
         first.Dispose();
+        // Resampled with SoX or not at all (Audio/Soxr.cs): with an ffmpeg that has none, refused, saying why.
+        // Known at start for the ffmpeg the bridge found; otherwise asked only once its resampler has failed.
+        bool resampling = want != info.Rate;
+        if (resampling && Audio.Soxr.Lacks(ffmpeg)) throw new InvalidOperationException(Audio.Soxr.Refusal(ffmpeg, info.Rate, want));
         log($"{Path.GetFileName(uri.Split('?')[0])}: {string.Join(", ", filters)}");
         FfmpegSource second;
         try { second = FfmpegSource.Open(ffmpeg, uri, offset, raw, filters, ct); }
-        catch (Exception) when (filters.Any(f => f.Contains("soxr")) && !ct.IsCancellationRequested)
+        catch (Exception) when (resampling && !ct.IsCancellationRequested && Audio.Soxr.Has(ffmpeg) == false)
         {
-            // An ffmpeg built without SoX: its own resampler, at its best.
-            log("this ffmpeg has no SoX resampler; using its own");
-            var plain = filters.Select(f => f.Replace(":resampler=soxr:precision=28", ":filter_size=64:phase_shift=10:cutoff=0.97")).ToList();
-            second = FfmpegSource.Open(ffmpeg, uri, offset, raw, plain, ct);
+            throw new InvalidOperationException(Audio.Soxr.Refusal(ffmpeg, info.Rate, want));
         }
         second.Info = second.Info with
         {

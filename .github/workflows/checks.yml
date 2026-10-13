@@ -50,9 +50,14 @@ jobs:
         run: |
           case "$RUNNER_OS" in
             Linux)   sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64 pulseaudio pulseaudio-utils clang zlib1g-dev ;;
-            macOS)   brew install ffmpeg ;;
-            Windows) choco install ffmpeg -y --no-progress ;;
+            macOS)   brew install ffmpeg-full && echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH" ;;
+            Windows) choco install ffmpeg-full -y --no-progress ;;
           esac
+      # The bridge resamples with SoX or refuses (Audio/Soxr.cs): without it here, the resampling tests
+      # would test the refusal instead, and pass.
+      - name: ffmpeg has SoX
+        shell: bash
+        run: ffmpeg -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || { echo "::error::this runner's ffmpeg has no SoX (libsoxr)"; exit 1; }
       - run: dotnet test -c Release
       # The native program each platform gets, and its own sound-device code run for real
       # (Core Audio on macOS, WASAPI on Windows, ALSA on Linux): it must list and diagnose without failing.

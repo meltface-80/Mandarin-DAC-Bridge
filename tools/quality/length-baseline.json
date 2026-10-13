@@ -1,8 +1,8 @@
 {
-  "src/MandarinDacBridge/Manager.cs": 759,
+  "src/MandarinDacBridge/Manager.cs": 727,
   "src/MandarinDacBridge/Page/index.html": 547,
   "src/MandarinDacBridge/Renderer.cs": 542,
   "src/MandarinDacBridge/Spotify/SoloistPlayer.cs": 640,
-  "tests/MandarinDacBridge.Tests/EndToEndTests.cs": 931,
-  "tests/MandarinDacBridge.Tests/UnitTests.cs": 644
+  "tests/MandarinDacBridge.Tests/EndToEndTests.cs": 815,
+  "tests/MandarinDacBridge.Tests/UnitTests.cs": 640
 }
