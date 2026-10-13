@@ -23,10 +23,14 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2   # the commit before (a pull request's base), for the length baseline
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
       - name: File length, the gates' own tests, the build with the analyzers (tools/check.sh gates)
+        env:
+          BASELINE_FROM: HEAD~1
         run: tools/check.sh gates
 
   test:
