@@ -41,16 +41,21 @@ internal static class CalderaDownload
         var tmp = target + ".new";
         if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
         Directory.CreateDirectory(tmp);
+        var archive = target + ".tar.gz";
         try
         {
-            await using var body = await Download.Open($"{Base}/latest/caldera-music-linux-{arch}.tar.gz", ct);
-            await using var gz = new GZipStream(body, CompressionMode.Decompress);
+            await Download.ToFile($"{Base}/latest/caldera-music-linux-{arch}.tar.gz", archive, ct);
+            await using var gz = new GZipStream(File.OpenRead(archive), CompressionMode.Decompress);
             await TarFile.ExtractToDirectoryAsync(gz, tmp, overwriteFiles: true, ct);
         }
         catch (Exception)
         {
             try { Directory.Delete(tmp, true); } catch (Exception) { /* held: the next download starts by removing it */ }
             throw;
+        }
+        finally
+        {
+            try { File.Delete(archive); } catch (Exception) { /* held: the next download overwrites it */ }
         }
         if (!File.Exists(Path.Combine(tmp, "bin", "caldera-music"))) throw new InvalidDataException("Caldera's archive has no caldera-music program in it");
         if (Directory.Exists(target)) Directory.Delete(target, true);
