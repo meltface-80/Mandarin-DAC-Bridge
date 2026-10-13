@@ -24,3 +24,4 @@ version's story; this is the index.
 | 1.1.15 | `dev` | A rename reaches Plex; closing a DAC closes all its players; the Mac's cover on its own DAC; `/now` idles on a stopped DAC (`fix/manager-lifecycle`). |
 | 1.1.16 | `dev` | Soloist's folders and log its owner's only; its key never repeated (`fix/process-hygiene`). |
 | 1.1.17 | `dev` | A stalled download gives up after a minute instead of blocking the Download button (`fix/download-timeouts`). |
+| 1.1.18 | `dev` | Windows: a track's end no longer waits five seconds, and a pause there holds it instead of dropping it and unpausing (`fix/wasapi-pause-drain`). |
