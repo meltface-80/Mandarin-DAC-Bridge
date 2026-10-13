@@ -147,4 +147,91 @@ public sealed class DownloadTests : IDisposable
         Assert.Contains("Download.cs", users);
         foreach (var f in users) Assert.True(bounded.ContainsKey(f!), $"{f} uses Sources.Http: what ends its requests? (add it here, with the answer)");
     }
+
+    // A program fetched runs as the bridge, with no checksum from its publisher to hold it to: each one is
+    // saved whole and logged with where it came from, its size and its SHA-256 (before 1.1.25, nothing
+    // said what had been run).
+    private void ServeBytes(byte[] file, int? said = null) =>
+        Serve(async n => { await n.WriteAsync(Head(said ?? file.Length)); await n.WriteAsync(file); });
+
+    private static string NoteFor(byte[] file) =>
+        $"downloaded 127.0.0.1/soloist.tar.gz: {file.Length} bytes, SHA-256 {Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(file))}";
+
+    private static byte[] Random(int length)
+    {
+        var b = new byte[length];
+        new Random(7).NextBytes(b);
+        return b;
+    }
+
+    [Fact]
+    public async Task AProgram_IsSavedWhole_AndNotedWithItsSizeAndSha256()
+    {
+        var file = Random(300_000);
+        ServeBytes(file);
+        var notes = new List<string>();
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "soloist.tar.gz");
+        await Download.ToFile(Url, path, CancellationToken.None, Idle, notes.Add);
+        Assert.Equal(file, await File.ReadAllBytesAsync(path));
+        Assert.Equal([NoteFor(file)], notes);
+    }
+
+    [Fact]
+    public async Task ReadPastItsEndAgain_ItIsNotedOnce()
+    {
+        var file = Random(5000);
+        ServeBytes(file);
+        var notes = new List<string>();
+        await using (var body = await Download.Open(Url, CancellationToken.None, Idle, notes.Add))
+        {
+            await body.CopyToAsync(Stream.Null);
+            _ = await body.ReadAsync(new byte[16]);
+        }
+        Assert.Equal([NoteFor(file)], notes);
+    }
+
+    [Fact]
+    public async Task OneThatStopsPartWay_IsntNoted_NorLeft()
+    {
+        ServeBytes(new byte[1000], said: 300_000);    // says more than it sends, then sends nothing
+        var notes = new List<string>();
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "soloist.tar.gz");
+        await Assert.ThrowsAsync<TimeoutException>(() => Download.ToFile(Url, path, CancellationToken.None, Idle, notes.Add));
+        Assert.Empty(notes);
+        Assert.False(File.Exists(path));
+    }
+
+    // Nothing a publisher makes is 1 GiB: a body that goes on past the limit is refused, not waited out.
+    [Fact]
+    public async Task OneThatGoesOnPastTheLimit_IsRefused()
+    {
+        ServeBytes(Random(10_000));
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "soloist.tar.gz");
+        var e = await Assert.ThrowsAsync<InvalidDataException>(() => Download.ToFile(Url, path, CancellationToken.None, Idle, _ => { }, max: 4096));
+        Assert.Contains("sent more than 4096 bytes", e.Message);
+        Assert.False(File.Exists(path));
+    }
+
+    // The log failing isn't the download failing.
+    [Fact]
+    public async Task ALogThatFails_DoesntFailTheDownload()
+    {
+        var file = Random(5000);
+        ServeBytes(file);
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "soloist.tar.gz");
+        await Download.ToFile(Url, path, CancellationToken.None, Idle, _ => throw new IOException("log full"));
+        Assert.Equal(file, await File.ReadAllBytesAsync(path));
+    }
+
+    // A signed download link's query is a credential: the note names the file, not the query.
+    [Fact]
+    public async Task TheNote_NamesTheFile_WithoutTheLinksQuery()
+    {
+        var file = Random(5000);
+        ServeBytes(file);
+        var notes = new List<string>();
+        var path = Path.Combine(Directory.CreateTempSubdirectory().FullName, "soloist.tar.gz");
+        await Download.ToFile(Url + "?Signature=secret", path, CancellationToken.None, Idle, notes.Add);
+        Assert.Equal([NoteFor(file)], notes);
+    }
 }

@@ -3,6 +3,32 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.25] — 2026-10-13
+
+### Added
+
+- **Soloist, Caldera Headless and Roon Bridge are logged with their size and SHA-256 when downloaded.**
+  - These programs come from their publishers and run as the bridge (as root, in Docker). None of
+    the publishers offers a checksum to compare against, and nothing recorded what had been
+    fetched.
+  - Each is now saved whole to a file first, then unpacked from the file. A download is logged
+    with where it came from, its size and its hash, for example
+    `downloaded soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz: 41235923 bytes,
+    SHA-256 <hex>`. What ran, or what was refused, can then be compared with what the publisher,
+    or another install, got. A signed link's query is never logged.
+  - Before, Soloist and Caldera were unpacked as they streamed in. Now:
+    - an archive that turns out to be wrong is still logged;
+    - a part-download is deleted;
+    - a body that goes on past 1 GiB (none of these programs is that big) is refused, rather
+      than holding the page's Download.
+    The log failing doesn't fail the download.
+  - This doesn't stop a bad download: there is nothing to check it against. The release's own
+    checksums, and QobuzProxy (installed by pip) pinned to known versions, are separate changes.
+  - Gate: seven cases in `DownloadTests`. Seven mutants each fail one: never logged, logged
+    twice, only the first read hashed, no size limit, a log failure failing the download, a
+    part-download left behind, the link's query logged.
+  - Found by the 2026-10-13 audit (S7, first part).
+
 ## [1.1.24] — 2026-10-13
 
 ### Fixed

@@ -35,10 +35,11 @@ internal static class SoloistDownload
         Directory.CreateDirectory(dir);
         var target = Path.Combine(dir, "soloist");
         var tmp = target + ".new";
+        var archive = target + ".tar.gz";
         try
         {
-            await using var body = await Download.Open(Url(arch), ct);
-            await using var gz = new GZipStream(body, CompressionMode.Decompress);
+            await Download.ToFile(Url(arch), archive, ct);
+            await using var gz = new GZipStream(File.OpenRead(archive), CompressionMode.Decompress);
             using var tar = new TarReader(gz);
             bool found = false;
             while (await tar.GetNextEntryAsync(cancellationToken: ct) is { } e)
@@ -54,6 +55,10 @@ internal static class SoloistDownload
         {
             try { File.Delete(tmp); } catch (Exception) { /* none made, or held: the next download overwrites it */ }
             throw;
+        }
+        finally
+        {
+            try { File.Delete(archive); } catch (Exception) { /* held: the next download overwrites it */ }
         }
         File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                                   | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);

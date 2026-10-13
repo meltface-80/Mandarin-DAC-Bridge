@@ -66,9 +66,7 @@ internal static partial class RoonDownload
         progress("downloading from Roon Labs…");
         try
         {
-            await using (var body = await Download.Open($"{Base}/{pkg}", ct))
-            await using (var f = File.Create(file))
-                await body.CopyToAsync(f, ct);
+            await Download.ToFile($"{Base}/{pkg}", file, ct);
             // Roon's own scripts and Apple's tools, run on what came: ten minutes at most, so a step that hangs
             // can't hold the page's Download for ever.
             using var steps = CancellationTokenSource.CreateLinkedTokenSource(ct);
