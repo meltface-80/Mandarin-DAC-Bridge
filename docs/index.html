@@ -288,8 +288,9 @@
       <div class="firstrun"><ol start="4"><li><b>Done.</b> The page opens in your browser at
         <b>http://localhost:55500</b> with a tile for each USB DAC. The bridge starts by itself whenever you log in.
         On a phone, open the address Terminal shows at the end.</li></ol></div>
-      <div class="note"><b>What it installs:</b> Homebrew (if missing) and ffmpeg, the same ones Mandarin uses, so
-        nothing new if Mandarin is already on the Mac. Then the bridge itself, one program in
+      <div class="note"><b>What it installs:</b> Homebrew (if missing; the same one Mandarin uses) and Homebrew's
+        <code>ffmpeg-full</code>, ffmpeg built with SoX, the resampler the bridge needs (a few hundred MB, once; it sits
+        beside Mandarin's ffmpeg). Then the bridge itself, one program in
         <code>~/Mandarin-DAC-Bridge</code>. <b>To update</b>, paste the same line again; your settings are kept.</div>
       <details class="firstrun">
         <summary><b>Prefer to install by hand?</b></summary>
@@ -299,7 +300,7 @@
             <a href="https://github.com/meltface-80/Mandarin-DAC-Bridge/releases/latest">latest release</a>, then:</p>
           <div class="codebox">
             <button class="copy-btn" data-copy>Copy</button>
-<pre>brew install ffmpeg
+<pre>brew install ffmpeg-full
 mkdir -p ~/Mandarin-DAC-Bridge
 tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
 ~/Mandarin-DAC-Bridge/mandarin-dac-bridge --list    # the DACs it can see
@@ -328,7 +329,7 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
         network (private networks).</li></ol></div>
       <div class="firstrun"><ol start="4"><li><b>Done.</b> The page opens at <b>http://localhost:55500</b>. The bridge
         starts by itself at every sign-in.</li></ol></div>
-      <div class="note"><b>What it installs:</b> ffmpeg (with winget, if it isn't there) and the bridge, one program in
+      <div class="note"><b>What it installs:</b> ffmpeg with SoX (winget's <code>Gyan.FFmpeg</code>, if none is there) and the bridge, one program in
         <code>%LOCALAPPDATA%\Mandarin-DAC-Bridge</code>, started by a hidden scheduled task. <b>To update</b>, paste the
         same line again; your settings are kept. In <b>Sound settings</b>, the DACs the bridge holds show as in use: that's
         the exclusive hold. Windows' own sound goes to another output.</div>
@@ -538,7 +539,7 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
       </div>
       <div class="note">It stops the bridge, removes it from login, and deletes <code>~/Mandarin-DAC-Bridge</code>
         (the program, its settings and its log). Homebrew and ffmpeg stay, because Mandarin uses them too. If
-        nothing else needs ffmpeg: <code>brew uninstall ffmpeg</code>.</div>
+        nothing else needs ffmpeg-full: <code>brew uninstall ffmpeg-full</code>.</div>
       <details class="firstrun">
         <summary><b>By hand instead</b></summary>
         <div class="codebox" style="margin-top:14px">

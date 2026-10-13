@@ -118,6 +118,7 @@ namespace MandarinDacBridge
             Log.Write($"Mandarin DAC Bridge {Config.Version} on {config.Platform}");
             var ips = Ssdp.Interfaces(config.BindIp).Select(i => $"http://{i.Address}:{config.Port}");
             Log.Write($"the page: http://localhost:{config.Port}  ·  {string.Join("  ·  ", ips)}");
+            Log.Write(Audio.Soxr.Describe(config.Ffmpeg));
             try { Ssdp.Start(); }
             catch (Exception e) { Log.Write("SSDP (discovery) couldn't start: " + e.Message); }
             Manager.Start();

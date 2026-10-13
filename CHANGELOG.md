@@ -3,6 +3,30 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.8] — 2026-10-13
+
+### Fixed
+
+- **A track at a rate the DAC can't take was resampled without SoX when ffmpeg had none.** The rule is
+  SoX or nothing (`CLAUDE.md`, bit-perfect), but with an ffmpeg built without SoX (Homebrew's plain
+  `ffmpeg`, which the Mac installer installed, and Chocolatey's `ffmpeg`) the bridge quietly used ffmpeg's own
+  resampler instead. Now:
+  - **Every install has SoX.** The Mac installer adds Homebrew's `ffmpeg-full` (ffmpeg with SoX; a
+    few hundred MB, once), beside the plain ffmpeg Mandarin uses. The Windows installer adds winget's
+    `Gyan.FFmpeg` (the full build) when no ffmpeg with SoX is there. The Docker image's has it.
+    Chocolatey users: `choco install ffmpeg-full`.
+  - **The bridge uses the ffmpeg with SoX** where several are installed (`ffmpeg-full`, kept off the
+    PATH by Homebrew, is found by itself, and the Mac installer names it in the launch file), and says at
+    start which one, and whether it has SoX. Only when it starts: `--list` and the other one-off
+    commands ask no ffmpeg.
+  - **Without SoX, such a track is refused** and says why, on the page and in the log, with what to
+    install. Tracks the DAC takes at their own rate play as before with any ffmpeg.
+  Class of error: a fallback that broke a rule quietly where it should have refused. Gates added:
+  `SoxrTests` (the refusal, picking the ffmpeg with SoX, an ffmpeg that doesn't answer), and CI now
+  installs ffmpeg with SoX on every system and fails if it hasn't got it, so the resampling tests
+  test SoX. Run the Mac installer again to get `ffmpeg-full`. Not tried on a real Mac or Windows
+  machine: the installers' new steps run only there.
+
 ## [1.1.4] — 2026-10-12
 
 ### Fixed

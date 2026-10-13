@@ -4,8 +4,9 @@
 #
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/install.sh)"
 #
-# Installs Homebrew (if it isn't there) and ffmpeg (the same one Mandarin
-# uses: nothing new if Mandarin is installed), downloads the bridge — one
+# Installs Homebrew (if it isn't there) and Homebrew's ffmpeg-full (ffmpeg
+# built with SoX, the only resampler the bridge uses; it sits beside the plain
+# ffmpeg Mandarin uses and doesn't replace it), downloads the bridge — one
 # native program, built with .NET 10 — into ~/Mandarin-DAC-Bridge, starts it
 # now and at every login, and opens its page. Nothing to set up.
 #
@@ -43,9 +44,12 @@ if ! command -v brew >/dev/null 2>&1 && ! use_brew; then
 fi
 BREW="$(brew --prefix)"
 
-# 2. ffmpeg, the decoder (skipped when it's there already, e.g. for Mandarin).
-say "Checking ffmpeg…"
-brew list --versions ffmpeg >/dev/null 2>&1 || brew install ffmpeg
+# 2. ffmpeg, the decoder, built with SoX: a track at a rate the DAC can't take is resampled with SoX or
+#    refused (Audio/Soxr.cs), and Homebrew's plain ffmpeg has none. ffmpeg-full has it; Homebrew keeps it
+#    off the PATH (keg-only), so the plain one stays Mandarin's, and the bridge finds this one by itself.
+say "Checking ffmpeg (with SoX)… The first time, this downloads a few hundred MB."
+brew list --versions ffmpeg-full >/dev/null 2>&1 || brew install ffmpeg-full
+FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"   # named in the launch file: Homebrew can live elsewhere
 
 # 3. The bridge (stopped first if this is a second run).
 launchctl unload "$PLIST" 2>/dev/null || true
@@ -93,6 +97,7 @@ say "The USB DACs it can see:"
   echo '  <key>EnvironmentVariables</key><dict>'
   echo "    <key>PORT</key><string>$PORT</string>"
   echo "    <key>DATA_DIR</key><string>$(xml "$APP_DIR/data")</string>"
+  echo "    <key>FFMPEG</key><string>$(xml "$FFMPEG")</string>"
   echo "    <key>PATH</key><string>$(xml "$BREW/bin:/usr/bin:/bin")</string>"
   echo '  </dict>'
   echo '  <key>RunAtLoad</key><true/>'

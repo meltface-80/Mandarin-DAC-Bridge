@@ -28,7 +28,11 @@ internal sealed class Config
 
     public int Port { get; init; } = 55500;
     public string DataDir { get; init; } = Path.Combine(AppContext.BaseDirectory, "data");
-    public string Ffmpeg { get; init; } = "ffmpeg";
+    // FFMPEG as set, else found when first needed: asking each ffmpeg found whether it has SoX takes a
+    // moment, and --list, --diagnose and --loopback-test never need one.
+    private readonly string ffmpeg = "";
+    public string Ffmpeg { get => ffmpeg.Length > 0 ? ffmpeg : Found.Value; init => ffmpeg = value; }
+    private static readonly Lazy<string> Found = new(FindFfmpeg);
     public string BindIp { get; init; } = "";
     public TimeSpan LockGrace { get; init; } = TimeSpan.FromSeconds(10);
     public int MandarinPort { get; init; } = 3500;
@@ -61,7 +65,7 @@ internal sealed class Config
         {
             Port = int.TryParse(Env("PORT"), out var p) ? p : 55500,
             DataDir = Env("DATA_DIR") ?? Path.Combine(AppContext.BaseDirectory, "data"),
-            Ffmpeg = Env("FFMPEG") ?? FindFfmpeg(),
+            Ffmpeg = Env("FFMPEG") ?? "",
             BindIp = Env("BRIDGE_IP") ?? "",
             LockGrace = TimeSpan.FromSeconds(double.TryParse(Env("LOCK_GRACE_S"), System.Globalization.CultureInfo.InvariantCulture, out var g) ? g : 10),
             MandarinPort = int.TryParse(Env("MANDARIN_PORT"), out var mp) ? mp : 3500,
@@ -98,20 +102,20 @@ internal sealed class Config
 
     // A program in these folders, then on the PATH, then where package managers put it ("" if nowhere).
     // On Windows with .exe, and winget's, Scoop's and Chocolatey's folders.
-    internal static string Find(string name, string[] first)
+    internal static string Find(string name, string[] first) => FindAll(name, first).FirstOrDefault() ?? "";
+
+    // Every copy of a program, in the order Find looks.
+    internal static IEnumerable<string> FindAll(string name, string[] first)
     {
         var exe = OperatingSystem.IsWindows() ? name + ".exe" : name;
         foreach (var dir in first.Concat((Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
                      .Concat(Common()))
         {
-            try
-            {
-                var f = Path.Combine(dir.Trim('"'), exe);
-                if (File.Exists(f)) return f;
-            }
-            catch (ArgumentException) { /* a broken PATH entry */ }
+            string f;
+            try { f = Path.Combine(dir.Trim('"'), exe); }
+            catch (ArgumentException) { continue; }   // a broken PATH entry
+            if (File.Exists(f)) yield return f;
         }
-        return "";
     }
 
     private static IEnumerable<string> Common()
@@ -126,8 +130,11 @@ internal sealed class Config
         return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
     }
 
-    // ffmpeg on the PATH, else where Homebrew (launchd's PATH is short) or winget put it.
-    private static string FindFfmpeg() => Find("ffmpeg", []) is { Length: > 0 } f ? f : "ffmpeg";
+    // The ffmpeg with SoX (Audio/Soxr.cs): Homebrew's ffmpeg-full (kept off the PATH, beside the plain ffmpeg
+    // Mandarin uses), then the PATH, then where Homebrew (launchd's PATH is short) or winget put one. With none
+    // that has SoX, the first found.
+    private static string FindFfmpeg() =>
+        Audio.Soxr.Pick(FindAll("ffmpeg", ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"])) is { Length: > 0 } f ? f : "ffmpeg";
 }
 
 internal static class Log
