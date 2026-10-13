@@ -112,12 +112,17 @@ public sealed partial class EndToEndTests
             echo "$XDG_RUNTIME_DIR|$PULSE_SERVER" > "$data/env"
             echo 127.0.0.1 > "$data/ws.addr"
             echo {{fake.Port}} > "$data/ws.port"
+            echo "error: this api key was refused: $(grep -A1 -- --api-key "$data/args" | tail -1)" >&2
             pacat --playback --format=s16le --rate=44100 --channels=2 --raw {{tone}}
             exec sleep 60
 
             """);
         File.SetUnixFileMode(script, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         var id = await Start(Dev("clock"), soloist: script);
+        // A log kept by an earlier version, in which Soloist had repeated its key.
+        var soloistLog = Path.Combine(hosts[^1].Manager.Settings.Dir, "soloist", id, "soloist.log");
+        Directory.CreateDirectory(Path.GetDirectoryName(soloistLog)!);
+        File.WriteAllText(soloistLog, "an older line: test-key-123\n");
 
         // Switched on, with a key: the key is kept, and never sent back.
         using (var res = await Http.PostAsync($"http://127.0.0.1:{port}/api/services",
@@ -136,8 +141,23 @@ public sealed partial class EndToEndTests
         Assert.Equal("Test DAC (Bridge)", args[Array.IndexOf(args, "--device-name") + 1]);
         Assert.Equal("127.0.0.1:0", args[Array.IndexOf(args, "--ws") + 1]);
         Assert.Equal("100", args[Array.IndexOf(args, "--initial-volume") + 1]);
-        Assert.Matches(@"^/.*mdb-\d+-dac-\w+\|unix:/.*/pulse/native$", File.ReadAllText(Path.Combine(data, "env")).Trim());
+        Assert.Matches(@"^/.*mdb-\d+-dac-\w+-\w+\|unix:/.*/pulse/native$", File.ReadAllText(Path.Combine(data, "env")).Trim());
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(Path.Combine(hosts[^1].Manager.Settings.Dir, "settings.json")));
+        // Soloist's folders hold its Spotify sign-in, its log and its sound: its owner's only (1.1.15 left them
+        // open). Its sound's is made new, under a name no one can guess (1.1.15's was fixed, in /tmp).
+        const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        var runDir = File.ReadAllText(Path.Combine(data, "env")).Split('|')[0].Trim();
+        foreach (var dir in new[] { Path.GetDirectoryName(data)!, data, Path.Combine(Path.GetDirectoryName(data)!, "cache"), runDir, Path.Combine(runDir, "pulse") })
+            Assert.Equal(OwnerOnly, File.GetUnixFileMode(dir));
+        Assert.Matches($@"mdb-\d+-{id}-\w{{6,}}$", runDir);
+        // What Soloist says goes to its log, the bridge's and the page: never with the key it was given, which
+        // it said on its error output and over its WebSocket.
+        await fake.Send("{\"type\":\"error\",\"message\":\"the key test-key-123 isn't valid\"}");
+        await Until(() => Task.FromResult(File.ReadAllText(soloistLog).Contains("this api key was refused") && File.ReadAllText(soloistLog).Contains("isn't valid")));
+        Assert.DoesNotContain("test-key-123", File.ReadAllText(soloistLog));
+        lock (logs) Assert.Contains(logs, l => l.Contains("the key [key] isn't valid"));
+        lock (logs) Assert.DoesNotContain(logs, l => l.Contains("test-key-123"));
+        Assert.DoesNotContain("test-key-123", await Http.GetStringAsync($"http://127.0.0.1:{port}/api/dacs"));
 
         // Spotify plays: the DAC plays its sound, with what Spotify says is playing.
         await fake.Send("{\"type\":\"auth_state\",\"logged_in\":true,\"is_active\":true,\"device_name\":\"Test DAC (Bridge)\"}");
@@ -156,7 +176,6 @@ public sealed partial class EndToEndTests
         Assert.InRange(p.GetProperty("position").GetInt64(), 61, 63);
         Assert.Equal("playing", dac.GetProperty("spotify").GetString());
         // What Soloist says, kept for finding out why a connection fails (its owner's only); and the sign-in, in the log.
-        var soloistLog = Path.Combine(hosts[^1].Manager.Settings.Dir, "soloist", id, "soloist.log");
         Assert.Contains("[bridge] {\"type\":\"auth_state\",\"logged_in\":true", File.ReadAllText(soloistLog));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(soloistLog));
         lock (logs) Assert.Contains(logs, l => l.Contains("Soloist is signed in, and the Spotify app has chosen it"));
@@ -188,5 +207,9 @@ public sealed partial class EndToEndTests
         await Until(() => Task.FromResult(fake.Commands.Any(c => c.Contains("\"pause\""))));
         Assert.Equal("Audirvana", (await Dac()).GetProperty("control").GetProperty("owner").GetString());
         Assert.StartsWith("kept out", (await Dac()).GetProperty("spotify").GetString());
+
+        // Switched off: its sound's folder goes with it.
+        await PostServices("{\"spotify\":false}");
+        await Until(() => Task.FromResult(!Directory.Exists(runDir)));
     }
 }

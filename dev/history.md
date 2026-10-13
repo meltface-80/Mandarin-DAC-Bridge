@@ -22,3 +22,4 @@ version's story; this is the index.
 | 1.1.13 | `dev` | Broken DSD files and stalled DSD servers can't hang a track; one feed per DAC (`fix/renderer-races`). |
 | 1.1.14 | `dev` | UPnP events in order, one at a time, and resent when undelivered (`fix/gena-order`). |
 | 1.1.15 | `dev` | A rename reaches Plex; closing a DAC closes all its players; the Mac's cover on its own DAC; `/now` idles on a stopped DAC (`fix/manager-lifecycle`). |
+| 1.1.16 | `dev` | Soloist's folders and log its owner's only; its key never repeated (`fix/process-hygiene`). |

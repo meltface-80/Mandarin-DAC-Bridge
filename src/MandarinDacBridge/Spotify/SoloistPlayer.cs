@@ -42,7 +42,11 @@ internal sealed partial class SoloistPlayer : IDisposable
 
     private readonly Bridge bridge;
     private readonly Func<SoloistSetup> setup;
-    private readonly string dataDir, cacheDir, runDir, fifo, socket, liveName;
+    private readonly string dataDir, cacheDir, liveName;
+    private string runDir = "", fifo = "", socket = "";   // made afresh for each run of Soloist
+    private volatile string key = "";                     // the key it was given, never repeated
+    private bool scrubbed;
+    private readonly int port;
     private readonly Caller caller;
     private readonly CancellationTokenSource stop = new();
     private readonly object gate = new();
@@ -71,10 +75,7 @@ internal sealed partial class SoloistPlayer : IDisposable
         this.setup = setup;
         dataDir = Path.Combine(dataRoot, "soloist", bridge.Id, "data");
         cacheDir = Path.Combine(dataRoot, "soloist", bridge.Id, "cache");
-        // Short: a unix socket's path has to fit in 108 bytes.
-        runDir = Path.Combine(Path.GetTempPath(), $"mdb-{port}-{bridge.Id}");
-        fifo = Path.Combine(runDir, "sound");
-        socket = Path.Combine(runDir, "pulse", "native");
+        this.port = port;
         liveName = "spotify/" + bridge.Id;
         caller = new Caller("spotify|" + bridge.Id, "Spotify", "127.0.0.1");
         Sources.RegisterLive(liveName, Open);
@@ -83,10 +84,11 @@ internal sealed partial class SoloistPlayer : IDisposable
         runner.Start();
     }
 
-    private void Log(string m) => bridge.Log("spotify: " + m);
+    private void Log(string m) => bridge.Log("spotify: " + Clean(m, key));
 
     private void SetStatus(string s)
     {
+        s = Clean(s, key);
         if (s == Status) return;
         Status = s;
         bridge.Notify();
@@ -130,11 +132,25 @@ internal sealed partial class SoloistPlayer : IDisposable
         if (s.ApiKey == "") throw new NotReady("needs your Soloist API key");
         if (s.PulseAudio == "") throw new NotReady("needs PulseAudio for Soloist's sound: sudo apt install pulseaudio");
 
-        Directory.CreateDirectory(dataDir);
-        Directory.CreateDirectory(cacheDir);
-        Directory.CreateDirectory(Path.GetDirectoryName(socket)!);
-        File.Delete(fifo);
-        File.Delete(socket);
+        key = s.ApiKey;
+        Scrub();
+
+        // Its folders hold its Spotify sign-in and its log: its owner's only. They are in the bridge's own data
+        // folder, which its owner chose; one on a filesystem without Unix modes (a FAT stick, a share) is used
+        // as it is.
+        foreach (var dir in new[] { Path.GetDirectoryName(dataDir)!, dataDir, cacheDir })
+        {
+            Directory.CreateDirectory(dir, OwnerOnly);
+            try { File.SetUnixFileMode(dir, OwnerOnly); }
+            catch (Exception e) when (e is UnauthorizedAccessException or IOException) { /* no Unix modes there: see above */ }
+        }
+        // Its sound (a socket any local program could play into, a pipe the DAC is fed from) in a folder made
+        // new for this run, with a name no one can guess (mkdtemp, its owner's only): one another account made
+        // first, or a link it left, is never used. Short: a unix socket's path has to fit in 108 bytes.
+        runDir = Directory.CreateTempSubdirectory($"mdb-{port}-{bridge.Id}-").FullName;
+        fifo = Path.Combine(runDir, "sound");
+        socket = Path.Combine(runDir, "pulse", "native");
+        Directory.CreateDirectory(Path.GetDirectoryName(socket)!, OwnerOnly);
         if (!Native.Libc.MakeFifo(fifo)) throw new IOException("couldn't make the pipe " + fifo);
 
         StartPulse(s.PulseAudio);
@@ -178,6 +194,7 @@ internal sealed partial class SoloistPlayer : IDisposable
         void Line(string? l)
         {
             if (l == null) return;
+            l = Clean(l, key);
             Keep(l);
             if (l.Contains("GLIBC_") || l.Contains("error while loading shared libraries")) soloistError = SoloistDownload.Explain(l);
             else if (l.Contains("rror") || l.Contains("WARN") || l.Contains("arning")) soloistError = l.Length > 200 ? l[..200] : l;
@@ -196,8 +213,12 @@ internal sealed partial class SoloistPlayer : IDisposable
     // the old one is kept as soloist.log.1). It can name the account: don't post it publicly.
     private string LogFile => Path.Combine(Path.GetDirectoryName(dataDir)!, "soloist.log");
 
+    private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
     private void Keep(string line)
     {
+        if (OperatingSystem.IsWindows()) return;   // the log's owner-only mode is Unix's (and Soloist never runs there)
+        line = Clean(line, key);
         lock (logGate)
         {
             try
@@ -205,12 +226,41 @@ internal sealed partial class SoloistPlayer : IDisposable
                 var f = LogFile;
                 var info = new FileInfo(f);
                 if (info.Exists && info.Length > 2_000_000) File.Move(f, f + ".1", overwrite: true);
-                bool fresh = !File.Exists(f);
-                File.AppendAllText(f, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}\n");
-                if (fresh && !OperatingSystem.IsWindows()) File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                // Made owner-only, never written and then restricted.
+                using var log = new FileStream(f, new FileStreamOptions
+                {
+                    Mode = FileMode.Append, Access = FileAccess.Write, Share = FileShare.ReadWrite,
+                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+                });
+                log.Write(System.Text.Encoding.UTF8.GetBytes($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}\n"));
             }
-            catch (Exception) { /* a log, at best */ }
+            catch (Exception) { /* a log, at best: Soloist runs on whether or not its lines are kept */ }
         }
+    }
+
+    // Anything Soloist says: the key it was given is never repeated, wherever it goes (its log, the bridge's
+    // log, the page).
+    internal static string Clean(string line, string key) => key.Length >= 4 ? line.Replace(key, "[key]", StringComparison.Ordinal) : line;
+
+    // Logs kept before 1.1.16 could hold the key, which Soloist repeats: cleaned once it is known, and made
+    // its owner's only.
+    private void Scrub()
+    {
+        if (scrubbed || OperatingSystem.IsWindows()) return;
+        scrubbed = true;
+        lock (logGate)
+            foreach (var f in new[] { LogFile, LogFile + ".1" })
+            {
+                try
+                {
+                    if (!File.Exists(f)) continue;
+                    File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    var text = File.ReadAllText(f);
+                    var clean = Clean(text, key);
+                    if (clean != text) File.WriteAllText(f, clean);
+                }
+                catch (Exception) { /* a filesystem without Unix modes, or the log unreadable: Soloist runs on without it */ }
+            }
     }
 
     private void Teardown()
@@ -234,7 +284,9 @@ internal sealed partial class SoloistPlayer : IDisposable
         reader = null;
         Detach(null);
         if (Ours() && bridge.Renderer.IsActive) Try(bridge.Renderer.Stop);
-        try { File.Delete(fifo); } catch (Exception) { /* gone */ }
+        if (runDir != "")
+            try { Directory.Delete(runDir, recursive: true); } catch (Exception) { /* gone; the next run makes a new one */ }
+        runDir = "";
     }
 
     // ------------------------------------------------------------ the sound
