@@ -26,14 +26,13 @@
 // from Spotify on request (SoloistDownload), as RoPieee does Roon Bridge.
 using System.Diagnostics;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 
 namespace MandarinDacBridge.Spotify;
 
 internal sealed record SoloistSetup(string Soloist, string PulseAudio, string ApiKey);
 
-internal sealed class SoloistPlayer : IDisposable
+internal sealed partial class SoloistPlayer : IDisposable
 {
     public const int Rate = 44100;
     private const int FrameBytes = 8;      // 2 channels of S32
@@ -159,49 +158,6 @@ internal sealed class SoloistPlayer : IDisposable
         throw new InvalidOperationException("Soloist's WebSocket closed");
     }
 
-    private Dictionary<string, string> PrivateEnvironment() => new()
-    {
-        // Only the private server: no PipeWire to be found, PulseAudio at our socket.
-        ["XDG_RUNTIME_DIR"] = runDir,
-        ["PIPEWIRE_RUNTIME_DIR"] = runDir,
-        ["PULSE_RUNTIME_PATH"] = Path.GetDirectoryName(socket)!,
-        ["PULSE_STATE_PATH"] = Path.Combine(runDir, "state"),
-        ["PULSE_SERVER"] = "unix:" + socket
-    };
-
-    private void StartPulse(string exe)
-    {
-        var psi = new ProcessStartInfo(exe) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
-        foreach (var a in new[]
-                 {
-                     "-n", "--daemonize=no", "--exit-idle-time=-1", "--use-pid-file=no", "--disable-shm=yes", "--log-target=stderr",
-                     $"--load=module-native-protocol-unix socket={socket} auth-anonymous=1",
-                     $"--load=module-pipe-sink file={fifo} sink_name=bridge format=s32le rate={Rate} channels=2"
-                 })
-            psi.ArgumentList.Add(a);
-        foreach (var (k, v) in PrivateEnvironment()) psi.Environment[k] = v;
-        var errors = new StringBuilder();
-        Process p;
-        try { p = Process.Start(psi) ?? throw new InvalidOperationException("PulseAudio didn't start"); }
-        catch (System.ComponentModel.Win32Exception e) { throw new NotReady($"can't run {exe}: {e.Message}"); }
-        p.ErrorDataReceived += (_, e) => { if (e.Data is { } l && l.StartsWith("E:")) lock (errors) errors.AppendLine(l); };
-        p.OutputDataReceived += (_, _) => { };
-        p.BeginErrorReadLine();
-        p.BeginOutputReadLine();
-        lock (gate) pulse = p;
-        for (int i = 0; i < 100 && !File.Exists(socket); i++)
-        {
-            if (p.HasExited) break;
-            Wait(50);
-        }
-        if (!File.Exists(socket))
-        {
-            string e;
-            lock (errors) e = errors.ToString().Trim().Split('\n').LastOrDefault() ?? "";
-            throw new InvalidOperationException("Soloist's sound server didn't start" + (e != "" ? ": " + e : ""));
-        }
-    }
-
     private void StartSoloist(SoloistSetup s)
     {
         foreach (var f in new[] { "ws.port", "ws.addr" }) File.Delete(Path.Combine(dataDir, f));
@@ -283,73 +239,6 @@ internal sealed class SoloistPlayer : IDisposable
 
     // ------------------------------------------------------------ the sound
 
-    // What the sound server writes: to the renderer while it plays it, else let go at the speed of a DAC.
-    private void ReadSound()
-    {
-        FileStream pipe;
-        try { pipe = new FileStream(fifo, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 0); }
-        catch (Exception e) { Log("sound pipe: " + e.Message); return; }
-        using (pipe)
-        {
-            var buf = new byte[1 << 14];
-            int have = 0;
-            var pace = Stopwatch.StartNew();
-            long paced = 0;
-            while (!readerStop && !stop.IsCancellationRequested)
-            {
-                int n;
-                try { n = pipe.Read(buf, have, buf.Length - have); }
-                catch (Exception) { return; }
-                if (n <= 0 || readerStop) return;
-                have += n;
-                int usable = have - have % FrameBytes;
-                if (usable == 0) continue;
-                var chunk = buf[..usable];
-                Array.Copy(buf, usable, buf, 0, have - usable);
-                have -= usable;
-
-                LiveSource? s;
-                lock (gate) s = attached;
-                if (s != null)
-                {
-                    if (s.Push(chunk, stop.Token)) { pace.Restart(); paced = 0; continue; }
-                    Detach(s);
-                }
-                lock (gate)
-                {
-                    preroll.Enqueue(chunk);
-                    while (preroll.Count > 8) preroll.Dequeue();
-                }
-                paced += chunk.Length / FrameBytes;
-                var ahead = paced * 1000 / Rate - pace.ElapsedMilliseconds;
-                if (ahead > 0) stop.Token.WaitHandle.WaitOne((int)ahead);
-                if (pace.ElapsedMilliseconds > 2000) { pace.Restart(); paced = 0; }
-            }
-        }
-    }
-
-    private static bool HasSound(byte[] chunk)
-    {
-        foreach (var b in chunk) if (b != 0) return true;
-        return false;
-    }
-
-    // The renderer opens the stream: the one being filled.
-    private IPcmSource Open(CancellationToken ct)
-    {
-        lock (gate) return attached is { Closed: false } s ? s : throw new InvalidOperationException("Spotify isn't playing");
-    }
-
-    private void Detach(LiveSource? which)
-    {
-        lock (gate)
-        {
-            if (which != null && attached != which) return;
-            attached?.Dispose();
-            attached = null;
-        }
-    }
-
     private bool Ours() { lock (gate) return track != null && bridge.Renderer.Current == track; }
 
     // Spotify is playing: the DAC is taken (if the arbiter allows) and the renderer opens the stream.
@@ -414,150 +303,6 @@ internal sealed class SoloistPlayer : IDisposable
         + "<item id=\"spotify\" parentID=\"0\" restricted=\"1\"><dc:title>Spotify</dc:title><upnp:class>object.item.audioItem.musicTrack</upnp:class></item></DIDL-Lite>";
 
     // ------------------------------------------------------------ Soloist's WebSocket
-
-    private void Listen()
-    {
-        var portFile = Path.Combine(dataDir, "ws.port");
-        var until = Environment.TickCount64 + 20_000;
-        while (!File.Exists(portFile))
-        {
-            if (soloist is not { HasExited: false } || stop.IsCancellationRequested) return;
-            if (Environment.TickCount64 > until) throw new InvalidOperationException("Soloist didn't open its WebSocket" + (soloistError != "" ? ": " + soloistError : ""));
-            Wait(100);
-        }
-        Wait(100);
-        var port = File.ReadAllText(portFile).Trim();
-        var addrFile = Path.Combine(dataDir, "ws.addr");
-        var addr = File.Exists(addrFile) ? File.ReadAllText(addrFile).Trim() : "127.0.0.1";
-        if (addr is "" or "0.0.0.0") addr = "127.0.0.1";
-        if (addr.Contains(':') && !addr.StartsWith('[')) addr = $"[{addr}]";
-        var w = new ClientWebSocket();
-        lock (gate) ws = w;
-        w.ConnectAsync(new Uri($"ws://{addr}:{port}"), stop.Token).Wait(TimeSpan.FromSeconds(10));
-        if (w.State != WebSocketState.Open) throw new InvalidOperationException("couldn't reach Soloist's WebSocket");
-        SetStatus("ready · choose it in Spotify");
-        lastError = "";
-
-        var buf = new byte[1 << 16];
-        using var msg = new MemoryStream();
-        while (!stop.IsCancellationRequested && w.State == WebSocketState.Open)
-        {
-            WebSocketReceiveResult got;
-            try { got = w.ReceiveAsync(buf, stop.Token).GetAwaiter().GetResult(); }
-            catch (Exception) { return; }
-            if (got.MessageType == WebSocketMessageType.Close) return;
-            msg.Write(buf, 0, got.Count);
-            if (!got.EndOfMessage) continue;
-            try
-            {
-                using var doc = JsonDocument.Parse(msg.ToArray());
-                OnMessage(doc.RootElement);
-            }
-            catch (JsonException) { /* not JSON: skip it */ }
-            catch (Exception e) { if (!stop.IsCancellationRequested) Log("event: " + e.Message); }
-            msg.SetLength(0);
-        }
-    }
-
-    private async Task Command(string json)
-    {
-        ClientWebSocket? w;
-        lock (gate) w = ws;
-        if (w is not { State: WebSocketState.Open }) return;
-        await sendGate.WaitAsync();
-        try { await w.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, stop.Token); }
-        catch (Exception) { /* closing */ }
-        finally { sendGate.Release(); }
-    }
-
-    private void OnMessage(JsonElement m)
-    {
-        switch (Str(m, "type"))
-        {
-            case "auth_state":
-                Keep("[bridge] " + m.GetRawText());
-                if (Bool(m, "logged_in") != signedIn || Bool(m, "is_active") != active)
-                {
-                    signedIn = Bool(m, "logged_in");
-                    active = Bool(m, "is_active");
-                    Log(signedIn == true ? $"Soloist is signed in{(active == true ? ", and the Spotify app has chosen it" : "")}" : "Soloist is waiting for the Spotify app to choose it");
-                }
-                if (!Bool(m, "logged_in")) SetStatus("ready · choose it in Spotify");
-                else if (!Bool(m, "is_active") && !Ours()) SetStatus("connected · choose it in Spotify to play here");
-                break;
-            case "playback_state":
-                Keep("[bridge] " + Clip(m.GetRawText()));
-                if (m.TryGetProperty("item", out var item)) SetItem(item);
-                if (m.TryGetProperty("position", out var pos)) SetPosition(pos);
-                if (!bridge.VolumeOn) KeepVolume(m);
-                Apply(Str(m, "status"));
-                break;
-            case "track_changed":
-                Keep("[bridge] " + Clip(m.GetRawText()));
-                if (m.TryGetProperty("item", out var it)) SetItem(it);
-                break;
-            case "playback_changed":
-                Keep("[bridge] playback " + Str(m, "status"));
-                Apply(Str(m, "status"));
-                break;
-            case "position_sync":
-                if (m.TryGetProperty("position", out var p)) SetPosition(p);
-                break;
-            case "volume_changed":
-                if (bridge.VolumeOn) TakeVolume(m); else KeepVolume(m);
-                break;
-            case "error":
-                Keep("[bridge] " + m.GetRawText());
-                Log("Soloist: " + Str(m, "message"));
-                break;
-        }
-    }
-
-    private void Apply(string status)
-    {
-        var r = bridge.Renderer;
-        switch (status)
-        {
-            case "playing":
-                Play();
-                break;
-            case "paused":
-                if (Ours() && r.IsActive) Try(r.Pause);
-                if (Ours()) SetStatus("paused");
-                break;
-            case "idle":
-                if (Ours() && (r.IsActive || r.Transport == "PAUSED_PLAYBACK")) Try(r.Stop);
-                if (Ours() || Status is "playing" or "paused") SetStatus("ready · choose it in Spotify");
-                break;
-        }
-    }
-
-    // A DAC without a volume of its own: Spotify's stays at 100% (use the amplifier's), bit-perfect.
-    private void KeepVolume(JsonElement m)
-    {
-        if (m.TryGetProperty("volume", out var v) && v.ValueKind == JsonValueKind.Number && v.GetInt32() != 100)
-            _ = Command("{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":100}");
-    }
-
-    private int told = -1;     // the level last passed to Spotify (its echo is not a change)
-
-    // Spotify's slider moved: the DAC follows (unless another app has the DAC).
-    private void TakeVolume(JsonElement m)
-    {
-        if (!m.TryGetProperty("volume", out var v) || v.ValueKind != JsonValueKind.Number) return;
-        int level = Math.Clamp(v.GetInt32(), 0, 100);
-        if (level == told || level == bridge.Level) return;
-        if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) { TellVolume(bridge.Level ?? 100); return; }
-        bridge.SetLevel(level);
-    }
-
-    // The DAC's volume moved (the page, another app, the machine): Spotify's slider follows.
-    private void TellVolume(int level)
-    {
-        if (!bridge.VolumeOn || level == told) return;
-        told = level;
-        _ = Command($"{{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":{level}}}");
-    }
 
     private static string Clip(string s) => s.Length > 4000 ? s[..4000] + "…" : s;
 
