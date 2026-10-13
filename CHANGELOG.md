@@ -3,6 +3,27 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.20] — 2026-10-13
+
+### Fixed
+
+- **Any device on the network could have the bridge read files on this machine.**
+  - A UPnP controller's track address went to ffmpeg as given, and any device on the network can act
+    as a controller.
+  - `file:///…`, or ffmpeg's own file readers (`concat:`, `subfile:`, `data:`), had ffmpeg read
+    files on this machine; `live:…` attached a controller to another app's sound.
+  - Every track now meets one rule where it reaches ffmpeg: an `http` or `https` stream, nothing
+    else, whichever way it came in.
+  - UPnP controllers are checked earlier too: anything else is refused (716) and logged before it
+    can take the DAC. A blank address no longer takes the DAC before failing.
+  - ffmpeg may now use only the network's protocols, so a playlist it fetches (HLS) can't send it
+    to a file either.
+  - Class of error: input from the network handed to a program that reads more than the network.
+  - Gate: `UpnpControlTests` (seven kinds of address refused, a blank one too, the DAC left
+    untaken) and `SourcesTests` (the address rule, the refusal where tracks open, and ffmpeg's exact
+    protocol list). Each failed with its fix taken out.
+  - Found by the 2026-10-13 audit (S1).
+
 ## [1.1.19] — 2026-10-13
 
 ### Fixed
