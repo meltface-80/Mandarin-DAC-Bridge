@@ -3,6 +3,32 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.16] — 2026-10-13
+
+### Fixed
+
+- **Soloist's folders were open to other accounts, and your API key could reach its log, the bridge's
+  log and the page.**
+  - Its data folder holds its Spotify sign-in and was readable by everyone. It is now its owner's only,
+    as is the folder of its log.
+  - Its run folder held its sound socket and the pipe the DAC is fed from. It was readable by everyone,
+    under a fixed name in `/tmp` that another account could take first. It is now made new for each
+    run, under a name no one can guess, its owner's only, and removed when Soloist stops.
+  - Soloist repeats the key it was given, on its output and over its WebSocket. Everything it says is
+    now cleaned of the key wherever it goes: its log, the bridge's log and the page.
+  - A log kept by an earlier version is cleaned of the key and made its owner's only.
+  - Its log is created owner-only rather than restricted after its first line.
+  - Class of error: a secret's neighbourhood left at the system's default permissions.
+  - Gate: the Spotify test checks each folder and the run folder's name, and has its pretend Soloist
+    say the key both ways, over an old log that holds it. Each check failed with its fix taken out.
+  - Found by the 1.1.9 audit.
+
+### Changed
+
+- **`SoloistPlayer.cs` is under the 500-line limit** (640 → 437): its sound path moved to
+  `Spotify/SoloistSound.cs` and its WebSocket to `Spotify/SoloistSocket.cs`, parts of `SoloistPlayer`,
+  unchanged. The Spotify end-to-end test moved from `EndToEndTests.cs` to `SpotifyTests.cs` (815 → 669).
+
 ## [1.1.15] — 2026-10-13
 
 ### Fixed
