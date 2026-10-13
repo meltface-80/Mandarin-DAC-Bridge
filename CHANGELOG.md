@@ -3,6 +3,27 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.10] — 2026-10-13
+
+### Fixed
+
+- **Spotify stopped playing after its player restarted, until it was switched off and on.** A new
+  Soloist key, **Download Soloist** (the usual first setup: switch Spotify on, then download) and the
+  automatic re-download of an expired build all restart a DAC's Spotify player. The new player was
+  made before the old one was closed, and closing the old one removed the name the renderer reaches
+  Spotify's sound by (`live:spotify/<dac>`), which by then was the new player's: every play failed
+  with "isn't playing". For a few seconds the two Soloists also shared one folder and pipe, and a
+  restarted Caldera found its port still held by the old one. Now the old player is closed before its
+  successor is made, one change at a time. Class of error: two owners of one name in the wrong
+  order. Gate: `Spotify_RestartedByANewKey_StillReachesItsSound` restarts the player and opens its
+  sound (it failed before the fix, and again with the order reversed on purpose). Found by the 1.1.9
+  audit; not tried with a real Soloist.
+
+### Changed
+
+- **`Manager.cs` is under the 500-line limit** (727 → 461 lines): `Bridge` moved to `Bridge.cs` and the
+  page's view to `ManagerView.cs` (a part of `Manager`), both unchanged.
+
 ## [1.1.9] — 2026-10-13
 
 ### Fixed

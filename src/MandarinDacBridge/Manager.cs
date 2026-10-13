@@ -19,6 +19,7 @@ internal sealed partial class Manager : IDisposable
 {
     private readonly Config config;
     private readonly object gate = new();
+    private readonly object connectGate = new();   // Connect, one at a time (taken before servicesGate)
     private readonly Dictionary<string, DacDevice> devices = new();
     private readonly Dictionary<string, Bridge> bridges = new();
     private Timer? timer;
@@ -248,38 +249,51 @@ internal sealed partial class Manager : IDisposable
         }
     }
 
-    // Starts or stops a bridge's Squeezebox player and Spotify speaker, as switched on the page.
+    // Starts or stops a bridge's Squeezebox player, Spotify speaker and Plex player, as switched on the page.
+    // A player being replaced is closed before its successor is made: two at once would share its name for
+    // the renderer ("live:spotify/<dac>", which closing the old one removes), its folders and its ports.
     private void Connect(Bridge b, bool restartSpotify = false, bool restartCaldera = false)
     {
-        SlimPlayer? dropSlim = null;
-        SoloistPlayer? dropSpotify = null;
-        Caldera.CalderaPlayer? dropCaldera = null;
-        lock (servicesGate)
+        // One at a time: another connect between the closing and the making would make a successor
+        // while the old player is still closing.
+        lock (connectGate)
         {
-            if (Get(b.Id) != b) return;
-            if (SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer, config.LmsJsonPort);
-            else if (!SqueezeliteOn && b.Slim != null) { dropSlim = b.Slim; b.Slim = null; }
-            if ((!SpotifyOn || restartSpotify) && b.Spotify != null) { dropSpotify = b.Spotify; b.Spotify = null; }
-            if (SpotifyOn && b.Spotify == null)
+            SlimPlayer? dropSlim = null;
+            SoloistPlayer? dropSpotify = null;
+            Caldera.CalderaPlayer? dropCaldera = null;
+            lock (servicesGate)
             {
-                b.Spotify = new SoloistPlayer(b, config.DataDir, config.Port, Soloist);
-                b.Spotify.Expired += () => { if (config.FindSoloist().StartsWith(config.SoloistDir)) _ = DownloadSoloist(); };
+                if (Get(b.Id) != b) return;
+                if (!SqueezeliteOn && b.Slim != null) { dropSlim = b.Slim; b.Slim = null; }
+                if ((!SpotifyOn || restartSpotify) && b.Spotify != null) { dropSpotify = b.Spotify; b.Spotify = null; }
+                if ((!CalderaOn || restartCaldera) && b.Caldera != null) { dropCaldera = b.Caldera; b.Caldera = null; }
             }
-            if ((!CalderaOn || restartCaldera) && b.Caldera != null) { dropCaldera = b.Caldera; b.Caldera = null; }
-            if (CalderaOn && b.Caldera == null)
+            dropSlim?.Dispose();
+            dropSpotify?.Dispose();
+            dropCaldera?.Dispose();
+            bool open;
+            lock (servicesGate)
             {
-                b.Caldera = new Caldera.CalderaPlayer(b, config.DataDir, CalderaPort(b.Id), CalderaSetup);
-                b.Caldera.TokenRejected += () => { if (PlexToken != "") { Log.Write("Plex: the sign-in was refused; sign in again"); Settings.Apply(new ServiceSettings { PlexToken = "" }); } };
+                open = Get(b.Id) == b;
+                if (open && SqueezeliteOn && b.Slim == null) b.Slim = new SlimPlayer(b, config.Hostname, () => LmsServer, config.LmsJsonPort);
+                if (open && SpotifyOn && b.Spotify == null)
+                {
+                    b.Spotify = new SoloistPlayer(b, config.DataDir, config.Port, Soloist);
+                    b.Spotify.Expired += () => { if (config.FindSoloist().StartsWith(config.SoloistDir)) _ = DownloadSoloist(); };
+                }
+                if (open && CalderaOn && b.Caldera == null)
+                {
+                    b.Caldera = new Caldera.CalderaPlayer(b, config.DataDir, CalderaPort(b.Id), CalderaSetup);
+                    b.Caldera.TokenRejected += () => { if (PlexToken != "") { Log.Write("Plex: the sign-in was refused; sign in again"); Settings.Apply(new ServiceSettings { PlexToken = "" }); } };
+                }
+                // Caldera and Roon Bridge play to the DAC themselves: it is shared whenever nothing plays through the bridge.
+                if (open) b.ForceShare = b.Caldera != null || RoonOn;
             }
-            // Caldera and Roon Bridge play to the DAC themselves: it is shared whenever nothing plays through the bridge.
-            b.ForceShare = b.Caldera != null || RoonOn;
+            if (dropCaldera != null && b.Caldera == null) lock (calderaPorts) calderaPorts.Remove(b.Id);
+            if (!open) return;
+            b.ApplyShare();
+            b.Notify();
         }
-        dropSlim?.Dispose();
-        dropSpotify?.Dispose();
-        dropCaldera?.Dispose();
-        if (dropCaldera != null && b.Caldera == null) lock (calderaPorts) calderaPorts.Remove(b.Id);
-        b.ApplyShare();
-        b.Notify();
     }
 
     public ServicesView SetServices(ServiceSettings patch)
