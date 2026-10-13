@@ -61,7 +61,7 @@ for the owner, asked before the change.
 
 ## Splitting the big files
 
-Recorded on 2026-10-12: `tests/MandarinDacBridge.Tests/EndToEndTests.cs` (1,134 lines),
+Recorded on 2026-10-12 (the baseline holds what is still over): `tests/MandarinDacBridge.Tests/EndToEndTests.cs` (1,134 lines),
 `src/MandarinDacBridge/Manager.cs` (900), `tests/MandarinDacBridge.Tests/UnitTests.cs` (644),
 `src/MandarinDacBridge/Spotify/SoloistPlayer.cs` (640), `src/MandarinDacBridge/Page/index.html`
 (547), `src/MandarinDacBridge/Renderer.cs` (542), `src/MandarinDacBridge/Slim/SlimPlayer.cs` (542).
@@ -76,7 +76,8 @@ same commit. Order — where every change lands first, then the logic most often
 2. **`UnitTests.cs`** → the same, by area.
 3. **`Manager.cs`** → each connection's wiring (Squeezebox, Spotify, Caldera, Qobuz, Roon, the Mac)
    and the page's view. (The settings went to `Settings.cs` in 1.1.4, finding Roon on this machine
-   to `Roon/RoonRunning.cs` in 1.1.6, and the `Bridge` class to `Bridge.cs` in 1.1.10.)
+   to `Roon/RoonRunning.cs` in 1.1.6, and in 1.1.10 the `Bridge` class to `Bridge.cs` and the page's
+   view to `ManagerView.cs`, a part of `Manager`: `Manager.cs` is under the limit since.)
 4. **`SoloistPlayer.cs`** → its sound path (private PulseAudio and the pipe), the WebSocket, the
    metadata (needed before the Spotify now-playing fix).
 5. **`Page/index.html`** → its script and styles into their own files (with the page-scripts gate).
