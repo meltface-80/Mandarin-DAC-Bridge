@@ -3,6 +3,33 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.23] — 2026-10-13
+
+### Fixed
+
+- **A cover could be used to reach other machines through the bridge.**
+  - The bridge fetches each DAC's cover itself, from the server that has it (a Plex server named
+    in Caldera's timeline, or a Roon Core), and passes it on to anyone who asks for it. The fetch
+    followed redirects and took a reply with no type as a JPEG. A server could redirect the bridge
+    to `127.0.0.1` or another machine on the network, and the bridge relayed the answer.
+  - A cover is now only what that same server sends:
+    - a redirect is followed only to another path on the same server, at most three times;
+    - it must be said to be a JPEG (`image/jpg` counts), PNG, WebP or GIF;
+    - it must be no more than 16 MiB, said or sent, and arrive within 15 seconds, from asking to
+      its last byte.
+    Anything else is no cover, and the page gets a 502. Before, a cover that couldn't be fetched
+    gave an empty 200.
+  - The fetch keeps no cookies and renews its connections every 5 minutes, like the bridge's
+    other clients. A cover of a known size is read straight into its own buffer.
+  - The Music app's covers are files on the Mac and are read as before.
+  - Class of error: a fetch on another's behalf that goes wherever the server it asked sends it.
+  - Gate: `CoversTests`. Ten mutants each fail a case: a redirect to another server followed;
+    redirects not capped; no time limit; a reply with no type taken as a JPEG; either size check
+    dropped; the limit off by one; `image/jpg` not taken.
+  - Not tried against a real Plex server or Roon Core. A cover either serves through a redirect
+    to another host is no longer shown.
+  - Found by the 2026-10-13 audit (S4).
+
 ## [1.1.22] — 2026-10-13
 
 ### Fixed

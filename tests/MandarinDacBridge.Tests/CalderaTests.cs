@@ -328,8 +328,8 @@ public sealed class PlexServersTests : IDisposable
     [InlineData("image/jpeg", "image/jpeg")]
     [InlineData("IMAGE/PNG", "image/png")]
     [InlineData("image/webp", "image/webp")]
-    [InlineData(null, "image/jpeg")]
+    [InlineData("image/jpg", "image/jpeg")]
     [InlineData("image/svg+xml", null)]
     [InlineData("text/html", null)]
-    public void ACoverIsPassedOnOnlyAsAPicture(string? from, string? passed) => Assert.Equal(passed, Web.CoverType(from));
+    public void ACoverIsPassedOnOnlyAsAPicture(string? from, string? passed) => Assert.Equal(passed, Covers.Type(from));
 }
