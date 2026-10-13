@@ -135,11 +135,14 @@ internal sealed partial class CalderaPlayer : IDisposable
         using (var set = Process.Start(Start(s.Program, s.Home, prefs)) ?? throw new InvalidOperationException("caldera-music didn't start"))
         {
             var err = set.StandardError.ReadToEndAsync();
-            set.StandardOutput.ReadToEnd();
+            _ = set.StandardOutput.ReadToEndAsync();   // read, not waited on: a --set that hangs is ended at 10 s below
             if (!set.WaitForExit(10_000)) { set.Kill(); throw new InvalidOperationException("caldera-music --set didn't finish"); }
             // Its error goes to the log and the page: never with the token it was given.
             if (set.ExitCode != 0) throw new InvalidOperationException("caldera-music --set: " + Clean(Last(err.Result), s.Token));
         }
+
+        // Closed while it was being set up (a rename, a new sign-in): the player that replaces it starts its own.
+        if (stop.IsCancellationRequested) return;
 
         // Its own port for Caldera's multi-room audio too (9999 is taken by the first one).
         var psi = Start(s.Program, s.Home, ["--config", configDir, "--player-name", bridge.FriendlyName(), "--xita-port", (9999 + Port - 32500).ToString()]);
