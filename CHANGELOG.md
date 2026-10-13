@@ -28,6 +28,13 @@ the owner publishes a release is the release (`dev/release.md`).
     has to say. The unused `CalderaDownload.Latest`, the one other use with no limit, is removed.
   - Found by the 1.1.9 audit.
 
+### Changed
+
+- **A UPnP events test no longer depends on the runner's speed.** `EventsGoOneAtATime_InOrder` waited
+  for exactly five events. Changes within 150 ms of each other go as one, by design, so a slow runner
+  (macOS CI) sent four, and the test timed out. It now waits for the last state and checks the order
+  and that one event at a time was in flight. Reproduced by shortening the gap between changes.
+
 ## [1.1.16] — 2026-10-13
 
 ### Fixed
