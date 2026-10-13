@@ -11,5 +11,8 @@ version's story; this is the index.
 | 1.1.2 | `main` (#10 into `dev`, then #11), not published as a release | A Squeezebox server's volume no longer moves the DAC on connect (`fix/volume-on-connect`). |
 | 1.1.3 | `main` (#11, straight from its branch), not published as a release | Changes sent from another site's page are refused (`security/same-origin`). |
 | 1.1.4 | `main` (#15, which kept the number 1.1.3) and `dev` (#12), not published as a release | Settings and secrets files: kept when unreadable, owner-only from the start; Caldera's folders owner-only (`fix/settings-and-secrets`). |
-| 1.1.5 | `dev` | `dev` and `main` the same code again, numbered past both (`fix/reconcile-dev-main`). |
-| 1.1.6 | `dev` | A Squeezebox server and the DAC share one volume; Lyrion's stored volume never reaches the DAC (`fix/lyrion-follows-dac`). |
+| 1.1.5 | `main` (#17, straight from its branch), not published as a release | `dev` and `main` the same code again, numbered past both (`fix/reconcile-dev-main`). |
+| 1.1.6 | `main` (#19, straight from its branch), not published as a release | A Squeezebox server and the DAC share one volume; Lyrion's stored volume never reaches the DAC (`fix/lyrion-follows-dac`). The docs corrections followed it into `main` (#22, docs only). |
+| 1.1.7 | `dev` (#21) | Compose files build the bridge on Update and never pull it: Dockge's and Portainer's Update work (`fix/compose-update`). |
+| 1.1.8 | `dev` | `dev` and `main` the same code again: 1.1.6 and the docs from `main`, 1.1.7 from `dev` (`fix/dev-gets-main`). |
+| 1.1.9 | `dev` | SoX or nothing: every install gets ffmpeg with SoX, the bridge picks it, and without it a track that needs resampling is refused (`fix/sox-everywhere`). |

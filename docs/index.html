@@ -289,8 +289,9 @@
       <div class="firstrun"><ol start="4"><li><b>Done.</b> The page opens in your browser at
         <b>http://localhost:55500</b> with a tile for each USB DAC. The bridge starts by itself whenever you log in.
         On a phone, open the address Terminal shows at the end.</li></ol></div>
-      <div class="note"><b>What it installs:</b> Homebrew (if missing) and ffmpeg, the same ones Mandarin uses, so
-        nothing new if Mandarin is already on the Mac. Then the bridge itself, one program in
+      <div class="note"><b>What it installs:</b> Homebrew (if missing; the same one Mandarin uses) and Homebrew's
+        <code>ffmpeg-full</code>, ffmpeg built with SoX, the resampler the bridge needs (a few hundred MB, once; it sits
+        beside Mandarin's ffmpeg). Then the bridge itself, one program in
         <code>~/Mandarin-DAC-Bridge</code>. <b>To update</b>, paste the same line again; what you set on the page is
         kept (environment variables added to the launch file by hand are not: add them again).</div>
       <details class="firstrun">
@@ -301,7 +302,7 @@
             <a href="https://github.com/meltface-80/Mandarin-DAC-Bridge/releases/latest">latest release</a>, then:</p>
           <div class="codebox">
             <button class="copy-btn" data-copy>Copy</button>
-<pre>brew install ffmpeg
+<pre>brew install ffmpeg-full
 mkdir -p ~/Mandarin-DAC-Bridge
 tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
 xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser: let macOS run it
@@ -331,7 +332,7 @@ xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser
         network (private networks).</li></ol></div>
       <div class="firstrun"><ol start="4"><li><b>Done.</b> The page opens at <b>http://localhost:55500</b>. The bridge
         starts by itself at every sign-in.</li></ol></div>
-      <div class="note"><b>What it installs:</b> ffmpeg (with winget, if it isn't there) and the bridge, one program in
+      <div class="note"><b>What it installs:</b> ffmpeg with SoX (winget's <code>Gyan.FFmpeg</code>, if none is there) and the bridge, one program in
         <code>%LOCALAPPDATA%\Mandarin-DAC-Bridge</code>, started by a hidden scheduled task. <b>To update</b>, paste the
         same line again; your settings are kept. In <b>Sound settings</b>, the DACs the bridge holds show as in use: that's
         the exclusive hold. Windows' own sound goes to another output.</div>
@@ -543,7 +544,7 @@ xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser
       </div>
       <div class="note">It stops the bridge, removes it from login, and deletes <code>~/Mandarin-DAC-Bridge</code>
         (the program, its settings and its log). Homebrew and ffmpeg stay, because Mandarin uses them too. If
-        nothing else needs ffmpeg: <code>brew uninstall ffmpeg</code>. The DAC Bridge output, if you installed it, stays
+        nothing else needs ffmpeg-full: <code>brew uninstall ffmpeg-full</code>. The DAC Bridge output, if you installed it, stays
         until <code>driver.sh</code> removes it (<a href="#mac-apps">above</a>), and a Roon Bridge the bridge downloaded
         stays in <code>~/Applications</code>.</div>
       <details class="firstrun">
@@ -740,6 +741,7 @@ docker compose down --rmi local --volumes</pre>
         "services:\n  dac-bridge:\n" +
         "    build: " + REPO + "\n" +
         "    image: mandarin-dac-bridge\n" +
+        "    pull_policy: build\n" +
         "    container_name: mandarin-dac-bridge\n" +
         "    restart: unless-stopped\n" +
         "    network_mode: host\n" +
@@ -752,7 +754,8 @@ docker compose down --rmi local --volumes</pre>
         (port !== "55500" ? '      PORT: "' + port + '"\n' : "") +
         (ip ? '      BRIDGE_IP: "' + esc(ip) + '"\n' : "") + "\n" +
         "volumes:\n  dac-bridge-data:\n    name: dac-bridge-data";
-      note = "To update later, in the same folder: docker compose up -d --build. " +
+      note = "To update later, in the same folder: docker compose up -d --build, or Update in Dockge or Portainer: " +
+        "it builds the latest code from GitHub (pull_policy: build; there is no image to pull). " +
         "(A clone of the repository works too: git clone, then docker compose up -d --build in it.)";
     }
     $("cmd").innerHTML = out;

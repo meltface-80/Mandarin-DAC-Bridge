@@ -54,8 +54,9 @@ macOS 14 or newer (macOS 27 included), Apple silicon or Intel. No Docker needed.
 3. **Done.** The page opens in your browser at **http://localhost:55500**. On a phone, open the
    address Terminal shows at the end. The bridge starts by itself whenever you log in.
 
-The installer uses the same Homebrew and ffmpeg as Mandarin, so it installs nothing new if
-Mandarin is already on the Mac. It downloads the bridge from this repository's latest
+The installer uses the same Homebrew as Mandarin, and adds Homebrew's **ffmpeg-full**: ffmpeg
+built with SoX, the resampler the bridge needs (a few hundred MB, once). It sits beside the plain
+ffmpeg Mandarin uses and doesn't replace it. It downloads the bridge from this repository's latest
 **Release** into `~/Mandarin-DAC-Bridge`. If there is no Release yet, it builds the bridge on the
 Mac instead, which takes a few minutes, once. If macOS asks to let **mandarin-dac-bridge** find
 devices on your network, choose **Allow**. To update, paste the same line again.
@@ -82,7 +83,7 @@ Windows 10 or 11, x64 or ARM64. Open **Terminal** (right-click Start) and paste:
 powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/install.ps1 | iex"
 ```
 
-It installs ffmpeg with winget (if it isn't there) and the bridge into
+It installs ffmpeg with SoX (winget's `Gyan.FFmpeg`) if no ffmpeg with SoX is there, and the bridge into
 `%LOCALAPPDATA%\Mandarin-DAC-Bridge`, starts it now and at every sign-in (a hidden scheduled
 task), and opens **http://localhost:55500**. If Windows asks to let **mandarin-dac-bridge** use the
 network, allow it on private networks. To update, paste the same line again.
@@ -118,6 +119,10 @@ docker compose up -d --build
 ```
 
 Then open **http://<server-ip>:55500**. To update: `git pull && docker compose up -d --build`.
+The Compose file says `pull_policy: build`: the bridge is always built, never pulled (there is no
+published image), so **Update** in Dockge or Portainer works too, building the latest code. A
+Compose file made before 1.1.7 needs that line added under `dac-bridge:`, or Update fails with
+*pull access denied for mandarin-dac-bridge*.
 The image builds the bridge with the .NET 10 SDK, then keeps only the native program, ffmpeg, and
 what the optional connections need: PulseAudio (Spotify Soloist), Python (QobuzProxy) and bzip2
 (Roon Bridge). Soloist, QobuzProxy, Caldera and Roon Bridge themselves are not in it: the page
@@ -367,11 +372,13 @@ never touches that path.
 
 * **Decoding.** ffmpeg turns whatever the app sends (FLAC, WAV, AIFF, ALAC, raw L16/L24, MP3,
   AAC…) into 32-bit integer PCM at the track's own rate, which carries 16- and 24-bit audio
-  exactly. Only when the DAC can't take that rate is the track resampled, to the nearest rate in
-  the same family (44.1 or 48 kHz): with SoX at 28-bit precision, or, when this ffmpeg was built
-  without SoX, with ffmpeg's own resampler at its best settings (the log says so). The Docker
-  image's ffmpeg has SoX; Homebrew's and Chocolatey's don't (Homebrew's `ffmpeg-full` and winget's
-  `Gyan.FFmpeg` do).
+  exactly. Only when the DAC can't take that rate is the track resampled (SoX, 28-bit
+  precision), to the nearest rate in the same family (44.1 or 48 kHz). SoX or nothing: with an
+  ffmpeg built without SoX, such a track is refused, and the page says why (for a next track sent
+  ahead for gapless play, the log does, and playback stops after the track before it). The
+  installers and the Docker image bring an ffmpeg with SoX; Homebrew's plain `ffmpeg` and Chocolatey's `ffmpeg` have none
+  (Homebrew's `ffmpeg-full`, Chocolatey's `ffmpeg-full` and winget's `Gyan.FFmpeg` have it). Where
+  several are installed, the bridge uses the one with SoX, and its log says which at start.
 * **Bit depth.** A track deeper than the DAC's widest format (24-bit on a DAC that takes 24 at most,
   or anything over 24-bit on a Mac) loses its lowest bits on the way, with no dither.
 * **DSD.** DSF and DFF files go to the DAC as DoP, untouched, where DoP is on for that DAC: on Linux
@@ -437,7 +444,7 @@ password is planned.
 | `BRIDGE_ALL_OUTPUTS` | — | `1` also offers non-USB outputs |
 | `BRIDGE_NAME_SUFFIX` | ` (Bridge)` | added to each DAC's name on the network |
 | `DATA_DIR` | `data/` beside the program | where `settings.json` lives |
-| `FFMPEG` | `ffmpeg` on the PATH, or Homebrew's | the decoder |
+| `FFMPEG` | the one with SoX: Homebrew's `ffmpeg-full`, on the PATH, or Homebrew's or winget's | the decoder |
 | `SQUEEZELITE` | — | `1` starts with the Squeezebox player on (the page's switch, once used, wins) |
 | `LMS_SERVER` | found by itself | the Squeezebox server, `host` or `host:port` |
 | `LMS_JSON_PORT` | 9000 | that server's web port, if `LMS_SERVER` is set and Lyrion's isn't 9000 |

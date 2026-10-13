@@ -3,6 +3,55 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.9] — 2026-10-13
+
+### Fixed
+
+- **A track at a rate the DAC can't take was resampled without SoX when ffmpeg had none.** The rule is
+  SoX or nothing (`CLAUDE.md`, bit-perfect), but with an ffmpeg built without SoX (Homebrew's plain
+  `ffmpeg`, which the Mac installer installed, and Chocolatey's `ffmpeg`) the bridge quietly used ffmpeg's own
+  resampler instead. Now:
+  - **Every install has SoX.** The Mac installer adds Homebrew's `ffmpeg-full` (ffmpeg with SoX; a
+    few hundred MB, once), beside the plain ffmpeg Mandarin uses. The Windows installer adds winget's
+    `Gyan.FFmpeg` (the full build) when no ffmpeg with SoX is there. The Docker image's has it.
+    Chocolatey users: `choco install ffmpeg-full`.
+  - **The bridge uses the ffmpeg with SoX** where several are installed (`ffmpeg-full`, kept off the
+    PATH by Homebrew, is found by itself, and the Mac installer names it in the launch file), and says at
+    start which one, and whether it has SoX. Only when it starts: `--list` and the other one-off
+    commands ask no ffmpeg.
+  - **Without SoX, such a track is refused** and says why, on the page and in the log, with what to
+    install. Tracks the DAC takes at their own rate play as before with any ffmpeg.
+  Class of error: a fallback that broke a rule quietly where it should have refused. Gates added:
+  `SoxrTests` (the refusal, picking the ffmpeg with SoX, an ffmpeg that doesn't answer), and CI now
+  installs ffmpeg with SoX on every system and fails if it hasn't got it, so the resampling tests
+  test SoX. Run the Mac installer again to get `ffmpeg-full`. Not tried on a real Mac or Windows
+  machine: the installers' new steps run only there.
+
+## [1.1.8] — 2026-10-13
+
+### Changed
+
+- **`dev` and `main` hold the same code again.** Lyrion following the DAC (1.1.6, #19) and the docs
+  corrections (#22) were merged straight into `main`, and the Compose fix (1.1.7, #21) into `dev`.
+  This is all three together. Nothing in the program changes beyond them: the version is numbered
+  past both so its test image is never mistaken for either.
+
+## [1.1.7] — 2026-10-13
+
+### Fixed
+
+- **Update in Dockge (or Portainer) failed with "pull access denied for mandarin-dac-bridge".** The
+  Compose files (the repository's and the one the site writes) build the bridge and name the image
+  `mandarin-dac-bridge`, which exists nowhere to pull. Dockge's Update runs `docker compose pull`
+  first, which asked Docker Hub for it and failed; and a plain `docker compose up -d` kept the image
+  it already had instead of building the new code. Both files now say `pull_policy: build`: pull
+  skips the bridge and every `up` builds the latest code. A Compose file made before this needs the
+  line added under `dac-bridge:` (README, *Install with Docker*). Class of error: a Compose file that
+  builds its image but leaves the pull policy at its default; the new `ComposeTests` fail on any
+  service in either file that builds without `pull_policy: build`. Tried with Docker 29 and Compose
+  5.6: `pull` fails before and is skipped after, and `up` rebuilds only with the line. Not tried in
+  Dockge itself.
+
 ## [1.1.6] — 2026-10-13
 
 ### Fixed
