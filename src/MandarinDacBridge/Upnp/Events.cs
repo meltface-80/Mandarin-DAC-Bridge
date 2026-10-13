@@ -3,6 +3,11 @@
 // RenderingControl in a LastChange document, ConnectionManager plainly). This
 // is how Audirvana and Mandarin see a track end or the next one begin without
 // asking.
+//
+// A subscriber's events go one at a time, in order: the next waits until the last was answered, so a
+// later state can't overtake an earlier one (and leave a controller showing PLAYING after STOPPED). An
+// event that couldn't be delivered isn't taken as known: what it carried goes again with the next one,
+// which is sent a second later (three times running at most; then with the next change).
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -22,6 +27,8 @@ internal sealed class Events(Func<string, string, Dictionary<string, string>?> s
         public long Expires;
         public Dictionary<string, string> Last { get; } = new();
         public readonly object Gate = new();
+        public Task Tail = Task.CompletedTask;   // the last event queued for this subscriber
+        public int Failures;                     // events undelivered in a row
     }
 
     private readonly ConcurrentDictionary<string, Sub> subs = new();
@@ -113,26 +120,42 @@ internal sealed class Events(Func<string, string, Dictionary<string, string>?> s
             seq = sub.Seq;
             sub.Seq = sub.Seq == uint.MaxValue ? 1 : sub.Seq + 1;
             body = PropertySet(sub.Service, vars);
-        }
-        _ = Task.Run(async () =>
-        {
-            foreach (var url in sub.Urls)
+            sub.Tail = sub.Tail.ContinueWith(async _ =>
             {
-                try
+                if (await Deliver(sid, sub, seq, body)) { lock (sub.Gate) sub.Failures = 0; return; }
+                int failures;
+                lock (sub.Gate)
                 {
-                    using var req = new HttpRequestMessage(Notify, url) { Content = new StringContent(body, Encoding.UTF8) };
-                    req.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse("text/xml; charset=\"utf-8\"");
-                    req.Headers.TryAddWithoutValidation("NT", "upnp:event");
-                    req.Headers.TryAddWithoutValidation("NTS", "upnp:propchange");
-                    req.Headers.TryAddWithoutValidation("SID", sid);
-                    req.Headers.TryAddWithoutValidation("SEQ", seq.ToString());
-                    using var res = await Http.SendAsync(req);
-                    if ((int)res.StatusCode == 412) subs.TryRemove(sid, out _);
-                    return;
+                    // Not delivered: what it carried isn't known to the subscriber, so it goes again.
+                    foreach (var (k, v) in vars) if (sub.Last.TryGetValue(k, out var now) && now == v) sub.Last.Remove(k);
+                    failures = ++sub.Failures;
                 }
-                catch (Exception) { /* the next callback URL, if any */ }
+                if (failures == 1 && !initial) Log.Write($"event to {sub.Urls[0]} failed");
+                if (failures <= 3) _ = Task.Delay(1000).ContinueWith(_ => Changed(sub.Bridge), TaskScheduler.Default);
+            }, TaskScheduler.Default).Unwrap();
+        }
+    }
+
+    // One event to the subscriber's first callback URL that answers; false when none did.
+    private async Task<bool> Deliver(string sid, Sub sub, uint seq, string body)
+    {
+        if (!subs.ContainsKey(sid)) return true;
+        foreach (var url in sub.Urls)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(Notify, url) { Content = new StringContent(body, Encoding.UTF8) };
+                req.Content.Headers.ContentType = System.Net.Http.Headers.MediaTypeHeaderValue.Parse("text/xml; charset=\"utf-8\"");
+                req.Headers.TryAddWithoutValidation("NT", "upnp:event");
+                req.Headers.TryAddWithoutValidation("NTS", "upnp:propchange");
+                req.Headers.TryAddWithoutValidation("SID", sid);
+                req.Headers.TryAddWithoutValidation("SEQ", seq.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                using var res = await Http.SendAsync(req);
+                if ((int)res.StatusCode == 412) { subs.TryRemove(sid, out _); return true; }
+                if (res.IsSuccessStatusCode) return true;
             }
-            if (!initial) Log.Write($"event to {sub.Urls[0]} failed");
-        });
+            catch (Exception) { /* not answering: the next callback URL, if any, else reported as undelivered */ }
+        }
+        return false;
     }
 }

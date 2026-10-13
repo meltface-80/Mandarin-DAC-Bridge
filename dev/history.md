@@ -20,3 +20,4 @@ version's story; this is the index.
 | 1.1.11 | `dev` | Changes from a browser must be addressed to this machine: DNS rebinding refused (`fix/host-check`). |
 | 1.1.12 | `dev` | The Plex sign-in goes only to your own servers; covers are pictures only (`fix/plex-token-servers`). |
 | 1.1.13 | `dev` | Broken DSD files and stalled DSD servers can't hang a track; one feed per DAC (`fix/renderer-races`). |
+| 1.1.14 | `dev` | UPnP events in order, one at a time, and resent when undelivered (`fix/gena-order`). |
