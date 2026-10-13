@@ -248,7 +248,8 @@ the Plex web app. The Plex token stays in `settings.json` (owner-only) and is ne
 Caldera keeps its own copy in its folder (`DATA_DIR/caldera`), its owner's only too. The bridge hands
 the token to Caldera by running `caldera-music --set` for a moment, so while that runs it is on that
 program's command line, where other accounts on the same machine could see it.
-The page says which Plex account is signed in; **Sign out of Plex** forgets it (here and in Caldera's
+To show what Caldera plays, the bridge asks the Plex server it plays from; your sign-in is sent only to
+your own servers (as plex.tv lists them), never to one another device named. The page says which Plex account is signed in; **Sign out of Plex** forgets it (here and in Caldera's
 settings), so you can sign in with another. Plexamp lists the DACs for any account on the network,
 but plays only for the one signed in.
 

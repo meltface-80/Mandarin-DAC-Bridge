@@ -173,6 +173,7 @@ internal static partial class Web
                 byte[] img;
                 try { img = await File.ReadAllBytesAsync(art); } catch (Exception) { await Send(ctx, 404, "text/plain", "no cover"); return; }
                 ctx.Response.ContentType = img.Length > 4 && img[0] == 0x89 && img[1] == 0x50 ? "image/png" : "image/jpeg";
+                Inert(ctx);
                 ctx.Response.Headers.CacheControl = "no-cache";
                 ctx.Response.ContentLength = img.Length;
                 await ctx.Response.Body.WriteAsync(img);
@@ -181,8 +182,9 @@ internal static partial class Web
             try
             {
                 using var cover = await Sources.Http.GetAsync(art, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
-                if (!cover.IsSuccessStatusCode) { await Send(ctx, 502, "text/plain", "no cover"); return; }
-                ctx.Response.ContentType = cover.Content.Headers.ContentType?.MediaType is { } t && t.StartsWith("image/") ? t : "image/jpeg";
+                if (!cover.IsSuccessStatusCode || CoverType(cover.Content.Headers.ContentType?.MediaType) is not { } type) { await Send(ctx, 502, "text/plain", "no cover"); return; }
+                ctx.Response.ContentType = type;
+                Inert(ctx);
                 ctx.Response.Headers.CacheControl = "max-age=3600";
                 await cover.Content.CopyToAsync(ctx.Response.Body, ctx.RequestAborted);
             }
@@ -213,6 +215,17 @@ internal static partial class Web
         ctx.Response.Headers.CacheControl = rel.EndsWith(".html") ? "no-cache" : "max-age=86400";
         ctx.Response.ContentLength = res.Length;
         if (method == "GET") await res.CopyToAsync(ctx.Response.Body);
+    }
+
+    // A cover comes from a server the bridge doesn't control: only a picture is passed on (never SVG, which
+    // can carry script), and the browser is told to take it as nothing else.
+    internal static string? CoverType(string? mediaType) =>
+        mediaType?.ToLowerInvariant() is "image/jpeg" or "image/png" or "image/webp" or "image/gif" ? mediaType.ToLowerInvariant() : mediaType == null ? "image/jpeg" : null;
+
+    private static void Inert(HttpContext ctx)
+    {
+        ctx.Response.Headers.XContentTypeOptions = "nosniff";
+        ctx.Response.Headers.ContentSecurityPolicy = "default-src 'none'; sandbox";
     }
 
     [GeneratedRegex(@"^/upnp/([\w-]+)/description\.xml$")] private static partial Regex DescriptionPath();
