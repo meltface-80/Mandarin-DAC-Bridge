@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using MandarinDacBridge.Roon;
 using Xunit;
@@ -199,11 +200,14 @@ public sealed partial class EndToEndTests
         var id = await Start(Dev("clock"), roonCore: $"127.0.0.1:{core.Port}");
         await Post("/api/services", "{\"roonApi\":true}");
         await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonApiStatus").GetString() == "connected to Test Core");
+        // "connected" comes with the registration; the zones come after, in the reply to the subscription.
+        await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonZones").GetArrayLength() > 0);
         Assert.Equal(["Test DAC (Bridge)"], (await Dacs()).RootElement.GetProperty("services").GetProperty("roonZones").EnumerateArray().Select(z => z.GetString()!).ToArray());
 
         // The bridge isn't playing this DAC: what Roon plays to it is shown (Roon Bridge's case).
-        await Until(async () => (await Dac()).GetProperty("player").GetProperty("title").GetString() == "So What");
-        var dac = await Dac();
+        // The Core sends the zone, then its seek, as two messages: a look between them sees the first.
+        var dac = await Until(async () => await Dac() is var d && d.GetProperty("player") is var pl
+                                          && pl.GetProperty("title").GetString() == "So What" && pl.GetProperty("position").GetInt64() >= 100 ? d : (JsonElement?)null);
         var p = dac.GetProperty("player");
         Assert.Equal(("PLAYING", "Miles Davis", "Kind of Blue", 562L), (p.GetProperty("transport").GetString(), p.GetProperty("artist").GetString(), p.GetProperty("album").GetString(), p.GetProperty("duration").GetInt64()));
         Assert.InRange(p.GetProperty("position").GetInt64(), 100, 102);    // the seek that came after
