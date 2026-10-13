@@ -5,7 +5,11 @@ specification (`CLAUDE.md`, *Spec authority*): the code matches it, or the desig
 the same commit as the code. A question a design leaves open goes to the owner before the code that
 depends on it is written.
 
-There are no designs yet. The features built so far are described by the README (what the owner and
-the apps see), the CHANGELOG (why each change was made) and the comments at the top of each source
-file (how it works). A new feature that needs decisions the owner hasn't made yet starts with its
-design here.
+The features built before the first design are described by the README (what the owner and the
+apps see), the CHANGELOG (why each change was made) and the comments at the top of each source file
+(how it works). A new feature that needs decisions the owner hasn't made yet starts with its design
+here.
+
+| Design | Status |
+|---|---|
+| [`password.md`](password.md) | Draft: open questions for the owner |
