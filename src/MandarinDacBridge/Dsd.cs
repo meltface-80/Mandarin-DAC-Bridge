@@ -37,7 +37,16 @@ internal static class Dsd
         return r;
     }
 
-    public static string Name(int rate) => "DSD" + (int)Math.Round(rate / 44100.0);
+    // "DSD64", or "DSD64 (48 kHz)" for the 48 kHz family.
+    public static string Name(int rate) =>
+        rate % 44100 != 0 && rate % 48000 == 0 ? $"DSD{rate / 48000} (48 kHz)" : "DSD" + (int)Math.Round(rate / 44100.0);
+
+    // A DSD rate: DSD32 to DSD1024, in the 44.1 or the 48 kHz family. A file is whatever a controller points
+    // at: the sizes it gives are held to what DSD is (before 1.1.21 a DSF with a block size of 2^30 had the
+    // bridge wait for that much before playing a sample, holding everything it read, until it ran out of
+    // memory).
+    internal static bool Rate(int rate) =>
+        rate > 0 && (rate % 44100 == 0 ? rate / 44100 : rate % 48000 == 0 ? rate / 48000 : 0) is 32 or 64 or 128 or 256 or 512 or 1024;
 
     // The start of a DSD file → its header, or null when it isn't one (or is
     // DST-compressed, which can't go as DoP).
@@ -71,7 +80,8 @@ internal static class Dsd
         at += fmtSize;
         if (b.Length < at + 12 || Tag(b, at) != "data") return null;
         long dataSize = (long)BinaryPrimitives.ReadUInt64LittleEndian(b[(int)(at + 4)..]) - 12;
-        if (channels <= 0 || rate <= 0 || blockSize <= 0 || dataSize < 0 || samples < 0) return null;
+        // The DSF format's own limits: 4096-byte blocks, 1 to 6 channels, 1- or 8-bit samples.
+        if (channels is < 1 or > 6 || !Rate(rate) || blockSize != 4096 || bits is not (1 or 8) || dataSize < 0 || samples < 0) return null;
         return new DsdHeader("dsf", rate, channels, at + 12, dataSize, blockSize, bits == 1,
             (samples + 7) / 8, (double)samples / rate);
     }
@@ -107,7 +117,7 @@ internal static class Dsd
             }
             else if (id == "DSD ")
             {
-                if (rate <= 0 || channels <= 0 || compressed) return null;
+                if (!Rate(rate) || channels < 1 || compressed) return null;
                 return new DsdHeader("dff", rate, channels, at + 12, size, 0, false, size / channels, (double)(size / channels) * 8 / rate);
             }
             else if (id == "DST ") return null;
@@ -151,6 +161,11 @@ internal static class Dsd
 // silence so the DAC doesn't click on the way out.
 internal sealed class DopPacker(DsdHeader h, long consumedPerChannel = 0)
 {
+    // Never more than this waits to be packed. A DSF block group is at most 24 KB, and a DFF is packed as
+    // it comes; once the samples are all packed nothing more is read. Only a file that never makes a whole
+    // block reaches it, and is refused rather than held in memory.
+    internal const int MaxPending = 1 << 20;
+
     private byte[] pending = [];
     private int pendingLength;
     private long left = Math.Max(0, h.BytesPerChannel - consumedPerChannel);
@@ -179,9 +194,10 @@ internal sealed class DopPacker(DsdHeader h, long consumedPerChannel = 0)
 
     private void Append(ReadOnlySpan<byte> data)
     {
+        if (pendingLength + data.Length > MaxPending) throw new InvalidDataException("the DSD file's samples don't come in whole blocks");
         if (pendingLength + data.Length > pending.Length)
         {
-            var n = new byte[Math.Max(pending.Length * 2, pendingLength + data.Length)];
+            var n = new byte[Math.Min(Math.Max(pending.Length * 2, pendingLength + data.Length), MaxPending)];
             pending.AsSpan(0, pendingLength).CopyTo(n);
             pending = n;
         }
@@ -227,7 +243,9 @@ internal sealed class DopPacker(DsdHeader h, long consumedPerChannel = 0)
     {
         int ch = h.Channels;
         long perChannel = Math.Min(pendingLength / ch, left);
-        if (!final) perChannel -= perChannel % 2;
+        // Pairs of bytes (a DoP frame), except the very last of the samples: a file with an odd number per
+        // channel ends there, and anything after it (a comment, cover art) is never read.
+        if (!final && perChannel < left) perChannel -= perChannel % 2;
         if (perChannel <= 0)
         {
             if (final || left <= 0) pendingLength = 0;

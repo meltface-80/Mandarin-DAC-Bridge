@@ -3,6 +3,31 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.21] — 2026-10-13
+
+### Fixed
+
+- **A crafted DSD file could make the bridge run out of memory.**
+  - A DSF file's header was checked only for positive values. With a block size of 2^30, the
+    bridge waited for one whole block group before sending a sample, holding everything it read
+    until it ran out of memory. Any controller can point the bridge at such a file, and DoP is the
+    default for DSD-capable DACs.
+  - Headers are now held to what DSD is:
+    - DSF: blocks of 4096 bytes, 1 to 6 channels, 1- or 8-bit samples;
+    - DFF: at least one channel;
+    - both: DSD32 to DSD1024, in the 44.1 or 48 kHz family.
+  - Whatever a header says, no more than 1 MiB now waits to be packed; past that the file is
+    refused.
+  - A DFF with an odd number of bytes per channel now ends at its last byte. Before, everything
+    after the samples (a comment, cover art) was read and held until the end of the track.
+  - DSD in the 48 kHz family is now named for it ("DSD64 (48 kHz)", not "DSD70").
+  - Class of error: sizes from a file trusted as allocation sizes.
+  - Gate: `DsdMalformedTests`. The old header checks failed 8 of the new cases; the packer
+    without its limit failed 1; the old rounding failed the odd-last-byte case. Files built to the
+    formats' specs at DSD32 to DSD1024, in both families, with 1 to 6 channels, still parse.
+  - Not tried with real DSD files: the files are built by the tests.
+  - Found by the 2026-10-13 audit (S2).
+
 ## [1.1.20] — 2026-10-13
 
 ### Fixed
