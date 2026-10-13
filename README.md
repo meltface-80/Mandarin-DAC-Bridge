@@ -389,6 +389,12 @@ The stream stays bit-perfect. Where a DAC has such a volume, the bridge uses it:
 * a change made elsewhere on the machine (alsamixer, the Mac's or Windows' own volume) shows up
   on the page and in the apps.
 
+A Squeezebox server and the DAC share one volume. When the bridge connects to Lyrion (LMS), it sets
+Lyrion's volume to the DAC's level, and moves Lyrion's slider whenever the DAC's volume changes
+elsewhere; moving Lyrion's slider sets the DAC to the number it shows. What Lyrion had stored before
+is never put on the DAC. Roon's Squeezebox support can't be told the DAC's level: there, only the
+changes made in Roon after connecting move the DAC, by as much as they move Roon's slider.
+
 While another app is playing, a different app's volume change is refused, as for everything else.
 On the DAC's page, **Volume: Fixed** leaves the volume where it is, and the apps see 100: use it for
 a DAC feeding an amplifier with its own volume. A DAC without a volume of its own always plays at
@@ -420,6 +426,7 @@ password is planned.
 | `FFMPEG` | `ffmpeg` on the PATH, or Homebrew's | the decoder |
 | `SQUEEZELITE` | — | `1` starts with the Squeezebox player on (the page's switch, once used, wins) |
 | `LMS_SERVER` | found by itself | the Squeezebox server, `host` or `host:port` |
+| `LMS_JSON_PORT` | 9000 | that server's web port, if `LMS_SERVER` is set and Lyrion's isn't 9000 |
 | `SPOTIFY` | — | `1` starts with Spotify Connect on (Spotify Soloist, Linux) |
 | `SOLOIST_API_KEY` | — | your Soloist API key (or type it on the page) |
 | `SOLOIST` | downloaded by the page, or on the PATH | the soloist program |

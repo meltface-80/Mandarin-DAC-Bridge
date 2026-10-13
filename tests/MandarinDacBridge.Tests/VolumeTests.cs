@@ -22,10 +22,47 @@ public sealed partial class EndToEndTests
     private Task<(int Status, string Text, Dictionary<string, string> Out)> SetVolume(string id, string v, string ua = Aud) =>
         Soap(id, "RenderingControl", Rcs, "SetVolume", new() { ["InstanceID"] = "0", ["Channel"] = "Master", ["DesiredVolume"] = v }, ua);
 
+    // A pretend LMS's JSON-RPC: what the bridge sets its volume to ("mixer volume"), and whether it answers
+    // at all (Roon's Squeezebox support has none).
+    private sealed class FakeLmsJson : IDisposable
+    {
+        private readonly HttpListener http = new();
+        public int Port { get; } = FreePort();
+        public System.Collections.Concurrent.ConcurrentQueue<string> Volumes { get; } = new();
+        public volatile bool Answers = true;
+
+        public FakeLmsJson()
+        {
+            http.Prefixes.Add($"http://127.0.0.1:{Port}/");
+            http.Start();
+            _ = Task.Run(async () =>
+            {
+                while (http.IsListening)
+                {
+                    HttpListenerContext c;
+                    try { c = await http.GetContextAsync(); } catch (Exception) { return; }    // stopped
+                    if (!Answers) { c.Response.StatusCode = 404; c.Response.Close(); continue; }
+                    using var doc = JsonDocument.Parse(await new StreamReader(c.Request.InputStream).ReadToEndAsync());
+                    var cmd = doc.RootElement.GetProperty("params")[1];
+                    if (cmd[0].GetString() == "mixer" && cmd[1].GetString() == "volume") Volumes.Enqueue(cmd[2].GetString()!);
+                    c.Response.OutputStream.Write("{\"id\":1,\"result\":{}}"u8);
+                    c.Response.Close();
+                }
+            });
+        }
+
+        public void Dispose() { try { http.Stop(); } catch (Exception) { /* closing */ } }
+    }
+
+    // What LMS sends a squeezeplay player for a volume (audg's new gains, 16.16), worked out by hand with LMS's
+    // own formulas (Slim::Player::SqueezePlay::getVolumeParameters, Squeezebox2::getVolume and dBToFixed).
+    private static readonly Dictionary<int, uint> LmsGain = new() { [100] = 65536, [90] = 37120, [60] = 6656, [45] = 2816, [30] = 1230 };
+
     [Fact]
     public async Task Volume_IsTheDacsOwn_SetByTheAppsThePageAndTheServer_OrLeftFixed()
     {
-        var id = await Start(Dev("clock", volume: 40));
+        using var json = new FakeLmsJson();
+        var id = await Start(Dev("clock", volume: 40), lmsJson: json.Port);
         var dac = await Dac();
         Assert.True(dac.GetProperty("volumeAvailable").GetBoolean());
         Assert.Equal("dac", dac.GetProperty("volumeMode").GetString());
@@ -54,25 +91,24 @@ public sealed partial class EndToEndTests
         await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"volume\":\"dac\"}"));
         Assert.Equal("60", await Volume(id));
 
-        // A Squeezebox server's volume (audg, "adjust" on): -30 dB, as a level on a 60 dB curve.
+        // A Squeezebox server's volume (audg, "adjust" on): kept as one with the DAC's.
         var lms = new TcpListener(IPAddress.Loopback, 0);
         lms.Start();
         try
         {
             await Post("/api/services", $"{{\"squeezelite\":true,\"lmsServer\":\"127.0.0.1:{((IPEndPoint)lms.LocalEndpoint).Port}\"}}");
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-            using var player = await lms.AcceptTcpClientAsync(cts.Token);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var player = await lms.AcceptTcpClientAsync(cts.Token);
             var s = player.GetStream();
             var got = new System.Collections.Concurrent.ConcurrentQueue<(string Op, byte[] Data)>();
             _ = ReadPlayer(s, got, cts.Token);
             await Until(() => Task.FromResult(got.Any(x => x.Op == "HELO")));
-            static byte[] Audg(bool adjust, double db)
+            static byte[] Audg(int volume, bool adjust = true)
             {
                 var b = new byte[18];
                 b[8] = (byte)(adjust ? 1 : 0);
-                uint g = (uint)Math.Round(65536 * Math.Pow(10, db / 20));
-                BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(10), g);
-                BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(14), g);
+                BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(10), LmsGain[volume]);
+                BinaryPrimitives.WriteUInt32BigEndian(b.AsSpan(14), LmsGain[volume]);
                 return b;
             }
             // The player handles the server's messages in order: once it has answered a later one (its
@@ -83,30 +119,59 @@ public sealed partial class EndToEndTests
                 await ToPlayer(s, "setd", [0]);
                 await Until(() => Task.FromResult(got.Count(x => x.Op == "SETD") > n));
             }
-            // LMS sends its stored volume as a player connects (Player::init powers it on): the bridge
-            // applies no level on connect, so the DAC stays where it is, however loud the server's is.
-            await ToPlayer(s, "audg", Audg(true, 0));
-            await Handled();
-            Assert.Equal("60", await Volume(id));
-            // Once the server asks the player to play (it sends its volume again with every stream it
-            // starts), its volume is the listener's: it moves the DAC.
-            await ToPlayer(s, "strm", Strm('s', "/c44.flac", new Uri(files.Base).Port));
-            await ToPlayer(s, "audg", Audg(false, -30));     // the server's volume fixed at 100%: nothing changes
-            await Handled();
-            Assert.Equal("60", await Volume(id));
-            await ToPlayer(s, "audg", Audg(true, -30));
-            await Until(async () => await Volume(id) == "24");
+            async Task Reconnect()
+            {
+                player.Close();
+                player = await lms.AcceptTcpClientAsync(cts.Token);
+                s = player.GetStream();
+                got = new();
+                _ = ReadPlayer(s, got, cts.Token);
+                await Until(() => Task.FromResult(got.Any(x => x.Op == "HELO")));
+            }
 
-            // A reconnect starts over: the volume LMS sends as the player comes back isn't applied either.
-            player.Close();
-            using var back = await lms.AcceptTcpClientAsync(cts.Token);
-            s = back.GetStream();
-            got = new();
-            _ = ReadPlayer(s, got, cts.Token);
-            await Until(() => Task.FromResult(got.Any(x => x.Op == "HELO")));
-            await ToPlayer(s, "audg", Audg(true, 0));
+            // How many times the bridge has said something (it says how it took the server, once per connection).
+            int Said(string text) { lock (logs) return logs.Count(l => l.Contains(text, StringComparison.Ordinal)); }
+
+            // Connected: LMS is told the DAC's level, so its slider shows the DAC's.
+            await Until(() => Task.FromResult(json.Volumes.Contains("60") && Said("follows the DAC's (60%)") == 1));
+            // What LMS had stored, sent as the player connects, and its echo of what it was told: the DAC
+            // stays where it is, however loud LMS's was.
+            await ToPlayer(s, "audg", Audg(100));
+            await ToPlayer(s, "audg", Audg(60));
             await Handled();
-            Assert.Equal("24", await Volume(id));
+            Assert.Equal("60", await Volume(id));
+            // It sends its volume again with every stream it starts: the DAC's, so nothing moves.
+            await ToPlayer(s, "strm", Strm('s', "/c44.flac", new Uri(files.Base).Port));
+            await ToPlayer(s, "audg", Audg(60));
+            await ToPlayer(s, "audg", Audg(100, adjust: false));     // the server's volume fixed at 100%: nothing changes
+            await Handled();
+            Assert.Equal("60", await Volume(id));
+            // Its slider moved: the DAC goes to the number it shows.
+            await ToPlayer(s, "audg", Audg(30));
+            await Until(async () => await Volume(id) == "30");
+            Assert.DoesNotContain("30", json.Volumes);                 // and isn't sent back
+            // The DAC moved on the page: LMS's slider is moved to match.
+            await Http.PostAsync($"http://127.0.0.1:{port}/api/dacs/{id}/settings", new StringContent("{\"level\":45}"));
+            await Until(() => Task.FromResult(json.Volumes.Contains("45")));
+
+            // A reconnect starts over: LMS is told again, and what it sends as the player comes back isn't applied.
+            await Reconnect();
+            await Until(() => Task.FromResult(Said("follows the DAC's (45%)") == 1));
+            await ToPlayer(s, "audg", Audg(100));
+            await Handled();
+            Assert.Equal("45", await Volume(id));
+
+            // A server without JSON-RPC (Roon's) can't be told: where its slider is as it connects is left alone,
+            // and only its changes move the DAC, by as much as they move the slider (down 10 is down 10).
+            json.Answers = false;
+            await Reconnect();
+            await Until(() => Task.FromResult(Said("can't be told the DAC's volume") == 1));
+            await ToPlayer(s, "audg", Audg(100));
+            await Handled();
+            Assert.Equal("45", await Volume(id));
+            await ToPlayer(s, "audg", Audg(90));
+            await Until(async () => await Volume(id) == "35");
+            player.Close();
         }
         finally { lms.Stop(); }
     }

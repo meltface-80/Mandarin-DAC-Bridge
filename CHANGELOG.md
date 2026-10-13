@@ -3,6 +3,44 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.6] — 2026-10-13
+
+### Fixed
+
+- **Lyrion's stored volume still reached the DAC, when the music started.** 1.1.2 stopped the bridge
+  putting Lyrion's volume on the DAC as the player connected, but Lyrion sends it again with every
+  stream it starts, so a DAC at 30 with Lyrion's slider at 100 still went to 100 at the first track:
+  1.1.2 moved the jump, it didn't remove it. Now the two share one volume (the owner's choice). On
+  connecting, the bridge sets Lyrion's volume to the DAC's level (Lyrion's JSON-RPC) and tells it
+  again whenever the DAC moves elsewhere; Lyrion's slider sets the DAC to the number it shows, read
+  exactly from the gain Lyrion sends (`Slim/ServerVolume.cs`). Lyrion answers each level it is told
+  with that level; those echoes are waited for and never taken as a move, so neither a late copy of
+  what Lyrion had nor a late echo of an earlier level can move the DAC. A change made while another
+  app has the DAC is refused and Lyrion's slider is put back, so it isn't applied later. Roon's
+  Squeezebox support has no JSON-RPC: there, only its changes after connecting move the DAC, by as
+  much as they move its slider, never to where its slider happens to be. Class: a safety fix proven
+  against what the code was told rather than against the server's real behaviour. The stand-in now
+  sends what LMS's code sends (its stored volume, its echo, its re-send at each stream); the tests
+  fail if echoes aren't waited for, if the first echo isn't, if a change without JSON-RPC is taken
+  as a level, if a refused change isn't put back, or if Lyrion isn't told when the DAC moves.
+- **After a reconnect mid-track, Lyrion's slider did nothing until the next track** (1.1.2): it is
+  followed again from Lyrion's echo of the level it is told on reconnecting.
+- **A DAC set to Fixed when Lyrion connected** stays in step once switched to its own volume: the
+  bridge decides how to take Lyrion's volume at the first volume Lyrion sends after the switch.
+- **The "left alone" message filled the log** once per volume message (1.1.2); server discovery's
+  silent catches now say why they are silent.
+
+### Added
+
+- **`LMS_JSON_PORT`**: Lyrion's web port when it isn't 9000 and the server is set by address (a port
+  outside 1–65535 is ignored).
+
+### Changed
+
+- **One JSON-RPC request for Lyrion** (what plays and its volume), and the old gain-to-level curve,
+  no longer used, is gone. Two oversized files shrink: finding Roon on this machine moved out of
+  `Manager.cs` (`Roon/RoonRunning.cs`) and the Squeezebox test out of `EndToEndTests.cs`.
+
 ## [1.1.5] — 2026-10-13
 
 ### Changed
