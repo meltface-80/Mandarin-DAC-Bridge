@@ -57,7 +57,9 @@ The analyzers ship with the .NET SDK: nothing to install. The length gate and it
   rename every DAC).
 
 Never raise a baseline to make a change pass. If a change genuinely needs it, that is a question
-for the owner, asked before the change.
+for the owner, asked before the change. The gate enforces it: `length.py --baseline-from REV` fails
+an entry that is new or larger than at REV (`tools/check.sh` gives `HEAD`, CI the commit before, a
+pull request's base), so a baseline raised by hand, with its file grown to match, no longer passes.
 
 ## Splitting the big files
 

@@ -6,10 +6,12 @@ length-baseline.json: files that were already too long when the limit came in. T
 baseline only ever tightens: an entry that's out of date (the file shrank, or is gone) also fails, until
 `--ratchet` records it.
 
-    python3 tools/quality/length.py             check (exit 1 on a failure)
-    python3 tools/quality/length.py --ratchet   record files that shrank or went
+    python3 tools/quality/length.py                       check (exit 1 on a failure)
+    python3 tools/quality/length.py --baseline-from REV   also check the baseline against REV's
+    python3 tools/quality/length.py --ratchet             record files that shrank or went
 
-Never raise or add a baseline entry to get a change through: split the file.
+Never raise or add a baseline entry to get a change through: split the file. --baseline-from catches it
+(tools/check.sh passes HEAD, CI the commit before): an entry that is new or larger than at REV fails.
 """
 import json
 import re
@@ -63,6 +65,24 @@ def ratchet(counts: dict, baseline: dict, limits: dict = LIMITS) -> dict:
             if name in counts and counts[name] > limits["fail"]}
 
 
+def raised(baseline: dict, before: dict) -> list:
+    """Failures for baseline entries that are new, or larger than they were (before): raised by hand."""
+    failures = []
+    for name, n in sorted(baseline.items()):
+        was = before.get(name)
+        if was is None:
+            failures.append(f"{name}: added to the baseline ({n}). Entries are never added: split the file.")
+        elif n > was:
+            failures.append(f"{name}: raised in the baseline from {was} to {n}. Entries only shrink: split the file.")
+    return failures
+
+
+def baseline_at(rev: str, root: Path = ROOT):
+    """The baseline as it was at a git revision, or None when git can't show it."""
+    out = subprocess.run(["git", "show", f"{rev}:{BASELINE.relative_to(root).as_posix()}"], cwd=root, capture_output=True, text=True)
+    return json.loads(out.stdout) if out.returncode == 0 else None
+
+
 def tracked(root: Path = ROOT) -> dict:
     """Line counts of the code files git tracks."""
     out = subprocess.run(["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True).stdout
@@ -82,6 +102,14 @@ def main(argv: list) -> int:
         print("length-baseline.json brought up to date.")
         return 0
     failures, reports = judge(counts, baseline)
+    if "--baseline-from" in argv:
+        i = argv.index("--baseline-from")
+        rev = argv[i + 1] if i + 1 < len(argv) else ""
+        before = baseline_at(rev) if rev else None
+        if before is None:
+            failures.append(f"the baseline at {rev or '(no revision given)'} can't be read, so it can't be checked against it")
+        else:
+            failures += raised(baseline, before)
     for r in reports:
         print("  " + r)
     for f in failures:
