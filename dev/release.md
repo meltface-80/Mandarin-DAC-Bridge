@@ -148,3 +148,10 @@ tested from a clone: `git checkout <branch>`, then
   comment: Actions evaluates them anywhere in the file, and an invalid one fails the run at startup
   with no jobs.
 - A workflow that installs or builds runs the checks first (`uses: ./.github/workflows/checks.yml`).
+- A value from the event or the matrix reaches a command through `env:`, never written into the
+  command itself: a tag or a title is text anyone who can create one chooses, and in a command it
+  runs. `WorkflowTests` checks every workflow's `run:` lines.
+- Permissions are the least each job needs: `contents: read` for the workflow, and write only on the
+  job that writes (the release job attaches the builds).
+- A release builds the `.csproj`'s version (`tools/release/version.sh`); a tag that names another is
+  refused, and a build missing stops the release before anything is attached.

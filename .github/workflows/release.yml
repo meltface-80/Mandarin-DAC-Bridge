@@ -1,8 +1,13 @@
 # Builds Mandarin DAC Bridge for every platform (macOS, Linux, Windows; x64
 # and ARM) and attaches it to a GitHub
-# Release. On GitHub: Releases → Draft a new release → tag v1.0.0 → Publish.
-# A few minutes later the installer's link (releases/latest/download/…)
-# serves the new build.
+# Release. On GitHub: Releases → Draft a new release → tag vX.Y.Z (the
+# .csproj's <Version>; another tag is refused) → Publish. A few minutes later
+# the installer's link (releases/latest/download/…) serves the new build.
+#
+# Values from the event or the matrix reach a command through env, never
+# written into the command itself. Only the job that attaches the builds may
+# write to the repository. A build missing fails the run: a release is never
+# published with fewer than six.
 name: Release
 
 on:
@@ -11,7 +16,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   # Every gate and the whole suite on macOS, Windows and Linux (checks.yml): nothing is built unless all pass.
@@ -30,6 +35,9 @@ jobs:
           - { os: windows-latest, rid: win-x64 }
           - { os: windows-11-arm, rid: win-arm64 }
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      RID: ${{ matrix.rid }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -37,36 +45,59 @@ jobs:
           dotnet-version: '10.0.x'
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends clang zlib1g-dev
-      - name: Version from the tag
+      - name: Version (the .csproj's; a release's tag must name it)
         shell: bash
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          v="${GITHUB_REF_NAME#v}"
-          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || v="1.0.0"
+          v=$(bash tools/release/version.sh "$TAG")
           echo "VERSION=$v" >> "$GITHUB_ENV"
       - name: Native AOT build
-        run: dotnet publish src/MandarinDacBridge -c Release -r ${{ matrix.rid }} -p:Version=${{ env.VERSION }} -o out
+        shell: bash
+        run: dotnet publish src/MandarinDacBridge -c Release -r "$RID" -p:Version="$VERSION" -o out
+      # Run where it can: the Intel Mac build is made on an Apple silicon runner.
+      - name: The build says its version
+        if: matrix.rid != 'osx-x64'
+        shell: bash
+        run: |
+          exe=out/mandarin-dac-bridge; [ "$RUNNER_OS" = Windows ] && exe=out/mandarin-dac-bridge.exe
+          said=$("$exe" --version)
+          echo "$said"
+          [[ "$said" == *"$VERSION"* ]] || { echo "::error::the build says '$said', not $VERSION"; exit 1; }
       - name: Package
         if: runner.os != 'Windows'
-        run: tar -czf mandarin-dac-bridge-${{ matrix.rid }}.tar.gz -C out mandarin-dac-bridge
+        shell: bash
+        run: tar -czf "mandarin-dac-bridge-$RID.tar.gz" -C out mandarin-dac-bridge
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path out/mandarin-dac-bridge.exe -DestinationPath mandarin-dac-bridge-${{ matrix.rid }}.zip
+        run: Compress-Archive -Path out/mandarin-dac-bridge.exe -DestinationPath "mandarin-dac-bridge-$env:RID.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: mandarin-dac-bridge-${{ matrix.rid }}
           path: mandarin-dac-bridge-${{ matrix.rid }}.*
+          if-no-files-found: error
 
   release:
     needs: build
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+      - name: All six builds are here
+        shell: bash
+        run: |
+          ls -l mandarin-dac-bridge-* || true
+          n=$( (ls mandarin-dac-bridge-*.tar.gz mandarin-dac-bridge-*.zip 2>/dev/null || true) | wc -l)
+          [ "$n" -eq 6 ] || { echo "::error::$n builds, not 6: nothing is attached"; exit 1; }
       - uses: softprops/action-gh-release@v2
         with:
+          fail_on_unmatched_files: true
           files: |
             mandarin-dac-bridge-*.tar.gz
             mandarin-dac-bridge-*.zip

@@ -3,6 +3,28 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.19] — 2026-10-13
+
+### Fixed
+
+- **A release could be built under the wrong version, or published with builds missing.**
+  - The version came from the tag alone. A tag that wasn't `vX.Y.Z` built "1.0.0", and one naming
+    another version built that version, whatever the code said.
+  - A release now builds the `.csproj`'s version (`tools/release/version.sh`). A tag that names
+    another is refused, with the tag to use, and each build checks that it reports that version.
+  - A build that made no file was skipped silently, and the release went out with what there was.
+    Now a missing file fails its build, and the release checks all six are there before attaching
+    any.
+  - The whole workflow could write to the repository. Now only the job that attaches the builds can.
+  - Values from the event and the matrix reach commands through `env`, never written into them
+    (also in `checks.yml`).
+  - Class of error: a release step trusting its input (the tag, the files made) instead of checking
+    it.
+  - Gate: `WorkflowTests`, on the version script and on every workflow's commands and permissions.
+    They failed on the old workflows and with the old version rule.
+  - Not run as a real release: that is the owner's.
+  - Found by the 1.1.9 audit.
+
 ## [1.1.18] — 2026-10-13
 
 ### Fixed
