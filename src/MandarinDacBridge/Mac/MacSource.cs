@@ -71,6 +71,11 @@ internal sealed unsafe class MacSource : IDisposable
 
     public string Status { get; private set; } = "starting";
     public string ArtFile { get; private set; } = "";
+
+    // The cover file for a DAC: the apps' own, only while what that DAC plays is theirs (not every DAC's,
+    // and not after another app took the DAC).
+    public string? CoverFor(Bridge b) =>
+        ArtFile != "" && playingOn == b && track != null && b.Renderer.Current == track ? ArtFile : null;
     public string ArtUrl { get; private set; } = "";
 
     public MacSource(string dataDir, Func<Bridge?> target)
@@ -250,6 +255,9 @@ internal sealed unsafe class MacSource : IDisposable
             if (ours && (r.IsActive || r.Transport == "PAUSED_PLAYBACK")) Try(r.Stop);
             Detach();
             app = "";
+            trackId = "";
+            ArtFile = "";   // the cover goes with the track: shown no more once it stopped
+            ArtUrl = "";
             SetStatus("ready · play in the Music app or the Spotify app");
             return;
         }

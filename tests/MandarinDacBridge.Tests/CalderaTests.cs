@@ -113,6 +113,18 @@ public sealed partial class EndToEndTests
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(cfg));
         Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, File.GetUnixFileMode(Path.Combine(data, "caldera")));
 
+        // Renamed on its page: Plex is told the new name (Caldera is set up again under it, on the same port).
+        // 1.1.14 didn't. Renamed to the name it already has: nothing is restarted.
+        string PortIn(string[] args) => args.First(a => a.StartsWith("companion.port=", StringComparison.Ordinal));
+        var portBefore = PortIn(set);
+        await Post($"/api/dacs/{id}/settings", "{\"name\":\"Study\"}");
+        await Until(() => Task.FromResult(File.Exists(Path.Combine(cfg, "set-args")) && File.ReadAllLines(Path.Combine(cfg, "set-args")).Contains("companion.clientName=Study (Bridge)")));
+        Assert.Equal(portBefore, PortIn(File.ReadAllLines(Path.Combine(cfg, "set-args"))));
+        var setAt = File.GetLastWriteTimeUtc(Path.Combine(cfg, "set-args"));
+        await Post($"/api/dacs/{id}/settings", "{\"name\":\"Study\"}");
+        await Task.Delay(1500);   // time for a restart to have written set-args again, were there one
+        Assert.Equal(setAt, File.GetLastWriteTimeUtc(Path.Combine(cfg, "set-args")));
+
         // The DAC is shared while Caldera is on: let go while the bridge isn't playing.
         await Until(async () => !(await Dac()).GetProperty("exclusive").GetBoolean());
         await Until(async () => (await Dac()).GetProperty("caldera").GetString() == "ready · choose it in Plexamp");

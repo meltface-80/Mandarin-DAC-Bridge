@@ -3,6 +3,35 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.15] — 2026-10-13
+
+### Fixed
+
+- **Renaming a DAC didn't reach Plex.** Caldera takes the DAC's name only as it starts, and a rename
+  restarted Spotify's player but not Caldera's, so Plexamp kept the old name. Both are now restarted
+  (Caldera on the same port), which stops what they are playing on that DAC; a rename to the name it
+  already has restarts nothing (it restarted Spotify before). Gate: the Caldera test renames the DAC
+  and waits for Caldera to be set up under the new name on its port (it timed out before), then
+  renames it to the same name and checks nothing restarted (it failed with the comparison removed).
+- **A DAC switched off or unplugged while a connection was switched on could keep its players.** The
+  bridge could be closed between a connection checking it was still there and giving it a Squeezebox
+  player, a Soloist or a Caldera: those were never closed, and a Caldera left so played to the DAC
+  outside the one-app-at-a-time rule. Closing a bridge now waits for that step and closes whatever it
+  made. A Caldera's port is handed on only once it has stopped (it was freed while the old one could
+  still hold it), and a Caldera closed while being set up no longer starts its daemon. From reading
+  the code (the 1.1.9 audit and its review); the timing can't be made to happen reliably in a test.
+- **On a Mac, the Music app's cover showed for every DAC, and stayed after it stopped.** It is now that
+  DAC's only, while what the DAC plays is the app's. Not tried on a Mac; no test runs the Mac's apps.
+- **The now-playing screen fixed on one DAC (`/now?dac=…`) froze on the last track** once the DAC was
+  switched off, and showed "Untitled" once it stopped. It shows the idle screen. Checked by running
+  the page's choice of DAC in Node; the page's scripts have no tests yet (`dev/quality.md`).
+- **Switching Roon now playing off while a cover was asked for could fail that request.**
+
+### Changed
+
+- **Each DAC's players' lifecycle moved out of `Manager.cs`** into `ManagerPlayers.cs` (a part of
+  `Manager`), unchanged, before the fix.
+
 ## [1.1.14] — 2026-10-13
 
 ### Fixed

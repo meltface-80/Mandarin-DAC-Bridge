@@ -60,22 +60,45 @@ internal sealed partial class Manager
                 // Caldera and Roon Bridge play to the DAC themselves: it is shared whenever nothing plays through the bridge.
                 if (open) b.ForceShare = b.Caldera != null || RoonOn;
             }
-            if (dropCaldera != null && b.Caldera == null) lock (calderaPorts) calderaPorts.Remove(b.Id);
+            if (dropCaldera != null) ReleasePort(b.Id);
             if (!open) return;
             b.ApplyShare();
             b.Notify();
         }
     }
 
+    // Taken out of bridges under servicesGate, where Connect checks a bridge is open and makes its players:
+    // a Connect under way either sees it gone or has made its players before, and those are closed here.
+    // (1.1.14 could leave a Squeezebox player, a Soloist or a Caldera running for a bridge that was gone.)
     private void CloseBridge(string id)
     {
         Bridge? b;
-        lock (gate)
+        SlimPlayer? slim;
+        SoloistPlayer? spotify;
+        Caldera.CalderaPlayer? caldera;
+        lock (servicesGate)
         {
-            if (!bridges.Remove(id, out b)) return;
+            lock (gate)
+            {
+                if (!bridges.Remove(id, out b)) return;
+            }
+            (slim, spotify, caldera) = (b.Slim, b.Spotify, b.Caldera);
+            (b.Slim, b.Spotify, b.Caldera) = (null, null, null);
         }
         Removed?.Invoke(b);
+        slim?.Dispose();
+        spotify?.Dispose();
+        caldera?.Dispose();
+        if (caldera != null) ReleasePort(id);
         b.Dispose();
         qobuz?.Changed();
+    }
+
+    // A Caldera's port, once that Caldera has stopped, unless the DAC (or a new bridge for it) has a Caldera
+    // again: given to another DAC sooner, the old one could still be holding it.
+    private void ReleasePort(string id)
+    {
+        lock (servicesGate) lock (calderaPorts)
+            if (Get(id)?.Caldera == null) calderaPorts.Remove(id);
     }
 }

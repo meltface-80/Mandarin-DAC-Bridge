@@ -343,6 +343,7 @@ internal sealed partial class Manager : IDisposable
 
     public DacSettings SetSettings(string id, SettingsPatch patch)
     {
+        var before = Settings.For(id).Name;
         var s = Settings.Apply(id, patch);
         DacDevice? dev;
         Bridge? b;
@@ -352,12 +353,13 @@ internal sealed partial class Manager : IDisposable
             if (on && b == null) Open(dev);
             if (!on) CloseBridge(id);
         }
-        if (patch.Name != null && b != null && s.Enabled)
+        if (patch.Name != null && s.Name != before && b != null && s.Enabled)
         {
             Renamed?.Invoke(b);
             qobuz?.Changed();
             b.Slim?.Renamed();
-            if (b.Spotify != null) Connect(b, restartSpotify: true);
+            // Spotify and Plex take the name only as they start: restarted, which stops what they play.
+            if (b.Spotify != null || b.Caldera != null) Connect(b, restartSpotify: b.Spotify != null, restartCaldera: b.Caldera != null);
         }
         if (patch.Share is { } share && b != null) b.SetShare(share);
         if (patch.Volume != null && b != null)

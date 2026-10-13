@@ -35,8 +35,9 @@ internal sealed partial class Manager
     public string? Art(string id)
     {
         if (Get(id)?.Caldera?.ArtUrl is { Length: > 0 } u) return u;
-        if (mac?.ArtFile is { Length: > 0 } f) return f;
-        if (roonApi != null && Get(id) is { } b && ZoneFor(b, roonApi.Zones()) is { ImageKey.Length: > 0 } z) return roonApi.ImageUrl(z.ImageKey);
+        if (Get(id) is { } m && mac?.CoverFor(m) is { } f) return f;
+        var api = roonApi;   // read once: switching Roon now playing off meanwhile leaves it null
+        if (api != null && Get(id) is { } b && ZoneFor(b, api.Zones()) is { ImageKey.Length: > 0 } z) return api.ImageUrl(z.ImageKey);
         return null;
     }
 
