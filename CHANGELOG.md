@@ -3,6 +3,34 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.13] — 2026-10-13
+
+### Fixed
+
+- **A DSD file with a broken size hung its track for good.** A DFF chunk (or property) whose size
+  reads as negative moved the parser back to where it was, so it read the same bytes for ever: the
+  track never started, nothing could stop it, and every stop afterwards waited five seconds. A DSF
+  whose data was said to be smaller than its own header got a negative length. Such files are now
+  refused, and sizes that would carry the position past what was read are too. Class of error: a
+  size from a file trusted to move the position on. Gate: `DsdMalformedTests` (each case failed
+  before the fix).
+- **A DSD server that stalled held every stop up.** While a DSD track was being opened (its header,
+  or skipping to the seek point on a server that ignores ranges) the reads couldn't be cancelled, a
+  failed open left its connection open, and closing a response waited up to two seconds to read it
+  to its end. Cancelling now closes the connection at once, and a failed open releases it. Gates:
+  two stalled pretend servers, one on the header and one on the samples (both failed before).
+- **Two seeks at once could leave two feeds writing to the DAC.** Each seek waited for the old feed to
+  stop, then started its own, so two seeks arriving together each started one: both wrote to the
+  DAC, and the first one's audio stayed queued ahead of the second's. A seek now starts its feed only
+  when none is running, halting (and emptying the DAC's buffer of) any that another seek started
+  meanwhile. From reading the code (the 1.1.9 audit and its review); the timing it needs couldn't be
+  made to happen reliably in a test.
+
+### Changed
+
+- **`Renderer.cs` is under the 500-line limit** (542 → 275): its feed moved to `RendererFeed.cs` (a
+  part of `Renderer`) and the track types to `Track.cs`, unchanged.
+
 ## [1.1.12] — 2026-10-13
 
 ### Fixed

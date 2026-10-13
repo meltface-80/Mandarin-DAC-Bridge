@@ -36,6 +36,7 @@ internal sealed partial class Renderer
         mark = new Mark(0, track, offset, track.Info);
         reached = null;
         if (!paused) sink.Pause(false);
+        cts?.Cancel();   // the last Halt cancelled it already; this is for when its feed outlived Halt's wait
         cts?.Dispose();
         cts = new CancellationTokenSource();
         var ct = cts.Token;

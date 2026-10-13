@@ -183,9 +183,20 @@ internal sealed partial class Renderer : IDisposable
         if (IsActive || Transport == "PAUSED_PLAYBACK")
         {
             bool paused = Transport == "PAUSED_PLAYBACK";
-            await Halt();
-            if (paused) sink.Pause(true);
-            lock (gate) StartLocked(Current ?? cur, s, paused);
+            // Started only when no feed is running: another seek may have started one while this one waited
+            // for Halt, and two feeds would write to one sink (and its audio would stay queued ahead of this
+            // one's). That one is halted too, and the sink emptied, before this one starts.
+            for (int tries = 0; ; tries++)
+            {
+                await Halt();
+                if (paused) sink.Pause(true);
+                lock (gate)
+                {
+                    if (feeding != 0 && tries < 3) continue;
+                    StartLocked(Current ?? cur, s, paused);
+                    break;
+                }
+            }
         }
         else lock (gate) pendingOffset = s;
         Changed?.Invoke();
