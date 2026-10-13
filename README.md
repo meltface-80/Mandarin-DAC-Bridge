@@ -374,7 +374,8 @@ never touches that path.
 * **Decoding.** ffmpeg turns whatever the app sends (FLAC, WAV, AIFF, ALAC, raw L16/L24, MP3,
   AAC…) into 32-bit integer PCM at the track's own rate, which carries 16- and 24-bit audio
   exactly. Only when the DAC can't take that rate is the track resampled (SoX, 28-bit
-  precision), to the nearest rate in the same family (44.1 or 48 kHz). SoX or nothing: with an
+  precision), to the nearest rate in the same family (44.1 or 48 kHz), or, on a DAC that takes
+  no rate of that family, to its highest rate. SoX or nothing: with an
   ffmpeg built without SoX, such a track is refused, and the page says why (for a next track sent
   ahead for gapless play, the log does, and playback stops after the track before it). The
   installers and the Docker image bring an ffmpeg with SoX; Homebrew's plain `ffmpeg` and Chocolatey's `ffmpeg` have none

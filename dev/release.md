@@ -49,6 +49,13 @@ build: no version bump, no CHANGELOG entry, no test command, and no test image (
 ignores a push that touches only `docs/**` and `*.md`). `tools/check.sh gates` still runs, and the
 pull request's `Checks` run still has to pass. The change still gets a normal review.
 
+**Tests-and-gates exception** (the owner's decision, 2026-10-13): a change that touches only the
+tests and the gates (`tests/`, `tools/check.sh`, `tools/quality/`, `.github/workflows/checks.yml`)
+is not a build either: no version bump and no CHANGELOG entry, since nothing that ships changes. Its
+commit message says what it proves. The whole of `tools/check.sh` is green before the push, as for
+any change. Anything else that ships or decides what ships (`src/`, the `Dockerfile`, the
+installers, `release.yml`, `test-image.yml`) is a build.
+
 1. Make the code change, with its tests.
 2. Bump `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj`.
 3. Add a `CHANGELOG.md` entry (format below).
