@@ -12,19 +12,29 @@ the owner publishes a release is the release (`dev/release.md`).
     the network can answer first and give the real Core's id, which the Core's registry hands to
     anyone. The bridge then sent that device the extension's token. Whoever holds the token can
     register as the bridge and control every zone in Roon.
-  - Each token is now kept with the address of the Core that gave it, and sent only there. A Core
-    answering from another address gets no token; the log says so, and says to enable the bridge
-    again in Roon if the Core has really moved. Of the Cores that answer, the one a token was given
-    at is chosen first.
+  - Each token is now kept with the address (host and port) of the Core that gave it, and sent
+    only there. A Core answering from another address gets no token; the log says so, and says to
+    enable the bridge again in Roon if the Core has really moved. Such a Core is left after two
+    minutes if it isn't enabled, and the Core looked for again. Of the Cores that answer, the one
+    a token was given at is chosen first.
+  - A token is kept only under the id the Core gave as its own, and only under an id that is one:
+    an id with `|` in it would have named another id's address.
   - A token kept before this version is bound to the first Core it is sent to (trust on first
-    use).
+    use); if that binding can't be written, the token isn't sent.
   - Cost: a Core whose address changes (a new DHCP lease, `ROON_CORE` given as another name for
-    it) must be enabled again in Roon's Settings → Extensions.
+    it, switching between `ROON_CORE` and finding it on the network) must be enabled again in
+    Roon's Settings → Extensions.
+  - Not closed: a device that answers while the real Core doesn't, and fakes being enabled, makes
+    the bridge keep its "token" in place of the real one. It gets no token, but the bridge must
+    then be enabled again in Roon. With `ROON_CORE`, the address is the name as written, so it is
+    as trusted as that name's lookup.
   - Class of error: a secret sent to a peer identified only by what it says about itself.
-  - Gate: `RoonTokenTests` and `Roon_TheToken_IsntSent_ToACoreAtAnotherAddress`. A token sent
-    whatever the address failed four of them; the bridge not passing the address on failed the
-    end-to-end case; no preference for the Core that gave the token failed one.
-  - Not tried against a real Roon Core: a pretend Core stands in.
+  - Gate: `RoonTokenTests` and the `Roon_` cases in `RoonTests.cs`. Eight mutants each fail at
+    least one: a token sent whatever the address or port, ids not checked (the core id or the one
+    given in Registered), no binding of an old token, no preference for the Core that gave it or
+    preference by host alone, and a refused Core waited on for ever.
+  - Not tried against a real Roon Core: a pretend Core stands in. Not tested: a binding that can't
+    be written (the tests run as root here).
   - Found by the 2026-10-13 audit (S3).
 
 ## [1.1.21] — 2026-10-13

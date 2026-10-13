@@ -14,31 +14,33 @@ namespace MandarinDacBridge.Tests;
 
 public class RoonTokenTests
 {
-    private static Dictionary<string, string> Kept(string host) =>
-        new(StringComparer.Ordinal) { ["core-1"] = "tok-1", ["core-1|host"] = host };
+    private const string Real = "192.168.1.20:9330";
+
+    private static Dictionary<string, string> Kept(string address) =>
+        new(StringComparer.Ordinal) { ["core-1"] = "tok-1", ["core-1|host"] = address };
 
     [Fact]
     public void TheToken_GoesToTheCoreAtTheAddressItWasGivenAt()
     {
-        Assert.Equal("tok-1", RoonTokens.For(Kept("192.168.1.20"), "core-1", "192.168.1.20", out var elsewhere));
-        Assert.False(elsewhere);
+        Assert.Equal(new RoonTokens.Grant("tok-1", false, false), RoonTokens.For(Kept(Real), "core-1", Real));
+        Assert.Equal(Real, RoonTokens.Address("192.168.1.20", 9330));
     }
 
-    [Fact]
-    public void TheToken_IsntSent_ToACoreAnsweringFromAnotherAddress()
+    [Theory]
+    [InlineData("192.168.1.66:9330")]    // another machine
+    [InlineData("192.168.1.20:9999")]    // another program on the Core's machine
+    public void TheToken_IsntSent_ToACoreAnsweringFromAnotherAddress(string address)
     {
-        var all = Kept("192.168.1.20");
-        Assert.Equal("", RoonTokens.For(all, "core-1", "192.168.1.66", out var elsewhere));
-        Assert.True(elsewhere);
-        Assert.Equal("192.168.1.20", all["core-1|host"]);    // the impostor isn't remembered either
+        var all = Kept(Real);
+        Assert.Equal(new RoonTokens.Grant("", true, false), RoonTokens.For(all, "core-1", address));
+        Assert.Equal(Real, all["core-1|host"]);    // nor is that address remembered
     }
 
     [Fact]
     public void NoToken_NothingIsSent_AndNothingIsBound()
     {
         var all = new Dictionary<string, string>(StringComparer.Ordinal);
-        Assert.Equal("", RoonTokens.For(all, "core-1", "192.168.1.20", out var elsewhere));
-        Assert.False(elsewhere);
+        Assert.Equal(new RoonTokens.Grant("", false, false), RoonTokens.For(all, "core-1", Real));
         Assert.Empty(all);
     }
 
@@ -46,27 +48,42 @@ public class RoonTokenTests
     public void ATokenKeptBeforeAddressesWere_IsBoundToTheFirstCoreItGoesTo()
     {
         var all = new Dictionary<string, string>(StringComparer.Ordinal) { ["core-1"] = "tok-1" };
-        Assert.Equal("tok-1", RoonTokens.For(all, "core-1", "192.168.1.20", out _));
-        Assert.Equal("192.168.1.20", all["core-1|host"]);
-        Assert.Equal("", RoonTokens.For(all, "core-1", "192.168.1.66", out var elsewhere));
-        Assert.True(elsewhere);
+        Assert.Equal(new RoonTokens.Grant("tok-1", false, true), RoonTokens.For(all, "core-1", Real));
+        Assert.Equal(Real, all["core-1|host"]);
+        Assert.Equal(new RoonTokens.Grant("", true, false), RoonTokens.For(all, "core-1", "192.168.1.66:9330"));
     }
 
     [Fact]
     public void ATokenTheCoreGives_IsKeptWithItsAddress()
     {
-        var all = Kept("192.168.1.20");
-        RoonTokens.Keep(all, "core-1", "tok-2", "192.168.1.30");
-        Assert.Equal("tok-2", RoonTokens.For(all, "core-1", "192.168.1.30", out _));
-        Assert.Equal("", RoonTokens.For(all, "core-1", "192.168.1.20", out _));
+        var all = Kept(Real);
+        Assert.True(RoonTokens.Keep(all, "core-1", "tok-2", "192.168.1.30:9330"));
+        Assert.Equal("tok-2", RoonTokens.For(all, "core-1", "192.168.1.30:9330").Token);
+        Assert.Equal("", RoonTokens.For(all, "core-1", Real).Token);
+    }
+
+    // A Core that names itself "core-1|host" would otherwise write core-1's address with its "token".
+    [Fact]
+    public void AnIdThatWouldNameAnotherIdsAddress_IsNoCore()
+    {
+        var all = Kept(Real);
+        Assert.False(RoonTokens.Keep(all, "core-1|host", "192.168.1.66:9330", "192.168.1.66:9330"));
+        Assert.False(RoonTokens.Keep(all, "", "tok-2", "192.168.1.66:9330"));
+        Assert.Equal(Kept(Real), all);
+        Assert.Equal(new RoonTokens.Grant("", false, false), RoonTokens.For(all, "core-1|host", Real));
     }
 
     [Fact]
     public void OfTheCoresThatAnswer_TheOneATokenWasGivenAt_ComesFirst()
     {
-        List<(string, int, string)> found = [("192.168.1.66", 9330, "first"), ("192.168.1.20", 9330, "kept"), ("192.168.1.70", 9330, "other")];
-        Assert.Equal(["kept", "first", "other"], RoonTokens.Prefer(found, Kept("192.168.1.20")).Select(c => c.Name));
-        Assert.Equal(["first", "kept", "other"], RoonTokens.Prefer(found, new(StringComparer.Ordinal)).Select(c => c.Name));
+        List<(string, int, string)> found = [("192.168.1.66", 9330, "first"), ("192.168.1.20", 9999, "same machine"), ("192.168.1.20", 9330, "kept")];
+        Assert.Equal(["kept", "first", "same machine"], RoonTokens.Prefer(found, Kept(Real)).Select(c => c.Name));
+        Assert.Equal(["first", "same machine", "kept"], RoonTokens.Prefer(found, new(StringComparer.Ordinal)).Select(c => c.Name));
+        // Only an id's own address counts, not a value under a key that names none.
+        var planted = new Dictionary<string, string>(StringComparer.Ordinal) { ["x|host|host"] = "192.168.1.66:9330" };
+        Assert.Equal(["first", "same machine", "kept"], RoonTokens.Prefer(found, planted).Select(c => c.Name));
+        List<(string, int, string)> later = [("192.168.1.20", 9330, "kept"), ("192.168.1.66", 9330, "planted")];
+        Assert.Equal(["kept", "planted"], RoonTokens.Prefer(later, planted).Select(c => c.Name));
     }
 }
 
@@ -80,6 +97,8 @@ public sealed partial class EndToEndTests
         public int Port { get; } = FreePort();
         public System.Collections.Concurrent.ConcurrentQueue<string> Got { get; } = new();
         public string Zone = "";
+        public bool Enables = true;                 // as if enabled in Roon's Settings → Extensions
+        public string RegistersAs = "core-1";       // the core_id it gives in Registered
 
         public FakeRoonCore()
         {
@@ -128,7 +147,8 @@ public sealed partial class EndToEndTests
                 else if (first.EndsWith("registry:1/register", StringComparison.Ordinal))
                 {
                     // As if enabled in Roon's Settings → Extensions; then the Core pings.
-                    await Send(ws, "CONTINUE", "Registered", id, """{"core_id":"core-1","token":"tok-1","display_name":"Test Core"}""");
+                    if (!Enables) continue;
+                    await Send(ws, "CONTINUE", "Registered", id, $$"""{"core_id":"{{RegistersAs}}","token":"tok-1","display_name":"Test Core"}""");
                     await Send(ws, "REQUEST", "com.roonlabs.ping:1/ping", 900);
                 }
                 else if (first.EndsWith("transport:2/subscribe_zones", StringComparison.Ordinal))
@@ -214,17 +234,55 @@ public sealed partial class EndToEndTests
     public async Task Roon_TheToken_IsntSent_ToACoreAtAnotherAddress()
     {
         using var core = new FakeRoonCore();
-        await Start(Dev("clock"), roonCore: $"127.0.0.1:{core.Port}");
-        var tokens = Path.Combine(hosts[^1].Manager.Settings.Dir, "roon-api.json");
-        OwnerOnlyFile.WriteStrings(tokens, new(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20" });
-        await Post("/api/services", "{\"roonApi\":true}");
-        await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonApiStatus").GetString() == "connected to Test Core");
+        var tokens = await RoonWithTokens(core, new(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20:9330" });
+        await Until(async () => await RoonStatus() == "connected to Test Core");
 
         var register = Assert.Single(core.Got, g => g.StartsWith("MOO/1 REQUEST com.roonlabs.registry:1/register", StringComparison.Ordinal));
         Assert.DoesNotContain("tok-0", register, StringComparison.Ordinal);
         Assert.DoesNotContain("\"token\"", register, StringComparison.Ordinal);
         // Enabled again at this address: the token it gave is kept with it.
         var kept = OwnerOnlyFile.ReadStrings(tokens);
-        Assert.Equal(("tok-1", "127.0.0.1"), (kept["core-1"], kept["core-1|host"]));
+        Assert.Equal(("tok-1", $"127.0.0.1:{core.Port}"), (kept["core-1"], kept["core-1|host"]));
     }
+
+    // Registered under another id than the Core gave as its own, a token would bind that id here: "core-1|host"
+    // would even rewrite core-1's address with the "token".
+    [Theory]
+    [InlineData("core-1|host")]
+    [InlineData("core-2")]
+    public async Task Roon_ACoreRegisteringAsAnotherCore_KeepsNothing(string registersAs)
+    {
+        using var core = new FakeRoonCore { RegistersAs = registersAs };
+        var before = new Dictionary<string, string>(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20:9330" };
+        var tokens = await RoonWithTokens(core, before);
+        await Until(async () => await RoonStatus() == "connected to Test Core");
+        Assert.Equal(before, OwnerOnlyFile.ReadStrings(tokens));
+    }
+
+    // Refused the token and never enabled, a Core isn't waited on for ever: the enabled one may only have
+    // missed the last look.
+    [Fact]
+    public async Task Roon_ACoreRefusedTheToken_AndNeverEnabled_IsLeft_AndTheCoreLookedForAgain()
+    {
+        using var core = new FakeRoonCore { Enables = false };
+        var wait = Roon.RoonApi.ElsewhereWait;
+        Roon.RoonApi.ElsewhereWait = TimeSpan.FromMilliseconds(500);
+        try
+        {
+            await RoonWithTokens(core, new(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20:9330" });
+            await Until(async () => await RoonStatus() == $"Test Core at 127.0.0.1:{core.Port} wasn't enabled for the bridge: looking for the Roon Core again");
+        }
+        finally { Roon.RoonApi.ElsewhereWait = wait; }
+    }
+
+    private async Task<string> RoonWithTokens(FakeRoonCore core, Dictionary<string, string> kept)
+    {
+        await Start(Dev("clock"), roonCore: $"127.0.0.1:{core.Port}");
+        var tokens = Path.Combine(hosts[^1].Manager.Settings.Dir, "roon-api.json");
+        OwnerOnlyFile.WriteStrings(tokens, new(kept, StringComparer.Ordinal));
+        await Post("/api/services", "{\"roonApi\":true}");
+        return tokens;
+    }
+
+    private async Task<string?> RoonStatus() => (await Dacs()).RootElement.GetProperty("services").GetProperty("roonApiStatus").GetString();
 }
