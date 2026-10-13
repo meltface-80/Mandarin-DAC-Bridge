@@ -3,6 +3,48 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.27] — 2026-10-13
+
+### Changed
+
+- **QobuzProxy is installed only as it was pinned, and so is everything it needs.**
+  - QobuzProxy runs as the bridge (as root, in Docker). Its install was a plain
+    `pip install <GitHub archive of v1.7.7>`: whatever that archive held, plus the newest version
+    of each of its dependencies, none of it checked.
+  - Now:
+    - its dependencies, and setuptools to build it, come from `Qobuz/QobuzProxy.lock`, carried in
+      the program. It is QobuzProxy's own `uv.lock` at the v1.7.7 tag, exported with the SHA-256
+      of every file PyPI has for each. pip installs them with `--require-hashes`, and as
+      ready-made wheels only (`--only-binary :all:`), since a build from source would fetch its own
+      tools unchecked. Nothing else goes in;
+    - the archive is fetched by the bridge (at most 16 MiB, its SHA-256 logged), and its files are
+      checked against those of the tag, commit `10dedc9`. The check is on the files, not the
+      archive's bytes, because GitHub doesn't promise to compress an archive the same way for
+      ever. One that differs, or isn't an archive at all, isn't installed;
+    - it is then built and installed from that checked file, with nothing else fetched
+      (`--no-deps --no-build-isolation`).
+  - The wheels cover Python 3.10 to 3.14, and the bridge now looks for those versions first. On
+    another version, or a machine they have no build for, the install says so.
+  - pip's refusals are said plainly: a file that doesn't match its pinned hash, or no build for
+    this Python.
+  - `QOBUZPROXY_SOURCE` (a local copy, a fork) is still installed as given, unchecked, but its
+    dependencies now come from the lock too. The value is no longer shown or logged, since a URL
+    can carry a credential.
+  - An install made before this version keeps working. The page now offers **Install again** to
+    replace it with the pinned one; programs are fetched only when the owner asks.
+  - The pinned versions are the ones QobuzProxy itself locks, for example aiohttp 3.14.1 and
+    protobuf 7.35.0, rather than whatever is newest on the day.
+  - Gate: `QobuzSourceTests`. Twelve mutants each fail a case, among them: the top folder counted,
+    links let through, no unpacked-size limit, a file's content not hashed, the check letting
+    anything through, a non-archive throwing, pip's refusals not named, setuptools missing from
+    the lock, an entry without hashes. The pinned value was worked out twice: by this code from
+    `git archive` of the tag, and independently from git's own objects.
+  - Tried here (Linux, Python 3.13): the lock with `--require-hashes --only-binary :all:`, then
+    QobuzProxy built from the tag's archive with nothing else fetched. `pip check` was clean and
+    it imports. Not tried: the real GitHub archive (it can't be fetched from where this was made),
+    or a Mac or Windows install.
+  - Found by the 2026-10-13 audit (S7, third part).
+
 ## [1.1.26] — 2026-10-13
 
 ### Added

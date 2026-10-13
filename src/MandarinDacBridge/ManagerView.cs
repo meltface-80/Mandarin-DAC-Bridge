@@ -55,7 +55,7 @@ internal sealed partial class Manager
             CalderaVersion = Caldera.CalderaDownload.Version(config.DataDir), CalderaDownload = calderaDownload,
             PlexSignedIn = PlexToken != "", PlexAccount = PlexToken != "" ? Settings.Services().PlexAccount ?? "" : "",
             PlexCode = plexLink?.Code ?? "", PlexMessage = plexLink?.Message ?? "",
-            Qobuz = QobuzOn, QobuzInstalled = qobuz?.Installed ?? false, QobuzInstall = qobuz?.Install ?? "",
+            Qobuz = QobuzOn, QobuzInstalled = qobuz?.Installed ?? false, QobuzPinned = qobuz?.Pinned ?? false, QobuzInstall = qobuz?.Install ?? "",
             QobuzStatus = qobuz?.Status ?? "", QobuzSignedIn = qobuz?.SignedIn ?? false, QobuzWebPort = Qobuz.QobuzConnect.WebPort,
             MacPossible = OperatingSystem.IsMacOS(), MacApps = MacOn,
             MacDriver = OperatingSystem.IsMacOS() && Native.CoreAudio.FindDevice(Mac.MacSource.LoopbackUid) != Native.CoreAudio.Unknown, MacDac = MacTarget()?.Id ?? "", MacStatus = mac?.Status ?? "",

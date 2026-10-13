@@ -262,7 +262,7 @@ function renderConnections() {
         <div class="hint">Each DAC appears in the Qobuz app's device list, through <b>QobuzProxy</b>, in hi-res up to what the DAC takes.
           ${sv.qobuz ? "<br>" + qobuzState(sv) : ""}</div></div>
       <div class="ctl">
-        ${sv.qobuz && (!sv.qobuzInstalled || sv.qobuzInstall) ? `<button class="btn" id="c-qi"${sv.qobuzInstall && !sv.qobuzInstall.startsWith("install failed") ? " disabled" : ""}>${sv.qobuzInstalled ? "Install again" : "Install QobuzProxy"}</button>` : ""}
+        ${sv.qobuz && (!sv.qobuzInstalled || sv.qobuzInstall || !sv.qobuzPinned) ? `<button class="btn" id="c-qi"${sv.qobuzInstall && !sv.qobuzInstall.startsWith("install failed") ? " disabled" : ""}>${sv.qobuzInstalled ? "Install again" : "Install QobuzProxy"}</button>` : ""}
         ${sv.qobuz && sv.qobuzInstalled && !sv.qobuzSignedIn ? `<a class="btn" style="text-decoration:none;color:inherit" target="_blank" rel="noopener" href="${location.protocol}//${location.hostname}:${sv.qobuzWebPort}/">Sign in to Qobuz</a>` : ""}
         <button class="switch" role="switch" aria-checked="${sv.qobuz}" aria-label="Qobuz Connect" id="c-qb"></button>
       </div>

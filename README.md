@@ -231,7 +231,9 @@ through the bridge instead ([below](#this-mac-the-music-app-and-the-spotify-app)
 Switch on **Qobuz Connect** on the page (or set `QOBUZ=1`) and press **Install QobuzProxy**: it
 fetches [QobuzProxy](https://github.com/leolobato/qobuz-proxy) (MIT) from GitHub into a private
 Python environment in `DATA_DIR/qobuz` (Python 3.10 or later must be installed; the Docker image has
-it). Then **Sign in to Qobuz** opens QobuzProxy's own page (port 8689). Each DAC then appears in the
+it). Only the release the bridge was made with is installed, checked against its files, and only
+the versions of what it needs that were pinned with it, each checked against its hashes (Python 3.10
+to 3.14). An install from before 1.1.27 is offered **Install again**. Then **Sign in to Qobuz** opens QobuzProxy's own page (port 8689). Each DAC then appears in the
 Qobuz app's device list as `"<DAC> (Bridge)"`.
 
 QobuzProxy speaks Qobuz Connect and hands each track to the DAC's UPnP device, so Qobuz plays
@@ -461,7 +463,7 @@ Pi-hole's DNS), add it to `BRIDGE_HOSTNAMES`, or the page is refused. An optiona
 | `SOLOIST_API_KEY` | — | your Soloist API key (or type it on the page) |
 | `SOLOIST` | downloaded by the page, or on the PATH | the soloist program |
 | `QOBUZ` | — | `1` starts with Qobuz Connect on (QobuzProxy) |
-| `QOBUZPROXY_SOURCE` | the QobuzProxy release on GitHub | another place to install QobuzProxy from (a local copy, a fork) |
+| `QOBUZPROXY_SOURCE` | the QobuzProxy release on GitHub | another place to install QobuzProxy from (a local copy, a fork), unchecked |
 | `CALDERA` | — | `1` starts with Plex through Caldera Headless on (Linux) |
 | `MAC_APPS` | — | `1` starts with the Music and Spotify apps on (macOS) |
 | `ROON_BRIDGE` | — | `1` starts with Roon Bridge on (downloaded from Roon Labs, run beside the bridge) |

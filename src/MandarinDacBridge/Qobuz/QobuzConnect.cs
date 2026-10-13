@@ -9,8 +9,8 @@
 // audio-proxy port each speaker is given, as Mandarin is by its own).
 //
 // qobuz-proxy is Python. The bridge installs it on request, pinned to a
-// release, into a private Python environment in DATA_DIR/qobuz (needs
-// Python 3.10 or later), writes its config, starts it, and restarts it when
+// release and checked (QobuzSource.cs), into a private Python environment in
+// DATA_DIR/qobuz (needs Python 3.10 or later), writes its config, starts it, and restarts it when
 // the DACs change. Signing in to Qobuz happens in qobuz-proxy's own web page
 // (port 8689), linked from the bridge's.
 using System.Diagnostics;
@@ -28,9 +28,8 @@ internal sealed class QobuzConnect : IDisposable
     public const string Version = "1.7.7";
     public const int WebPort = 8689;
     public const int FirstProxyPort = 7120;
-    // QOBUZPROXY_SOURCE: another place to install it from (a local copy, a fork).
-    private static string Source => Environment.GetEnvironmentVariable("QOBUZPROXY_SOURCE") is { Length: > 0 } s ? s
-        : $"https://github.com/leolobato/qobuz-proxy/archive/refs/tags/v{Version}.tar.gz";
+    // QOBUZPROXY_SOURCE: another place to install it from (a local copy, a fork), unchecked.
+    private static string? Source => Environment.GetEnvironmentVariable("QOBUZPROXY_SOURCE") is { Length: > 0 } s ? s : null;
 
     private readonly string dir;
     private readonly Func<List<QobuzSpeaker>> speakers;
@@ -65,16 +64,25 @@ internal sealed class QobuzConnect : IDisposable
     private string Venv => Path.Combine(dir, "venv");
     private string VenvPython => OperatingSystem.IsWindows() ? Path.Combine(Venv, "Scripts", "python.exe") : Path.Combine(Venv, "bin", "python");
     public bool Installed => File.Exists(VenvPython) && File.Exists(Path.Combine(dir, "installed-" + Version));
+    // Installed as pinned (QobuzSource.cs), or from QOBUZPROXY_SOURCE as the owner chose; false for an install
+    // from before 1.1.27, which the page offers to install again.
+    public bool Pinned => Source != null || File.Exists(Path.Combine(dir, "pinned-" + Version));
 
     // A Python 3.10 or later: Homebrew's before the Mac's own (3.9), the py launcher on Windows.
     public static (string Exe, string[] Args, string Version)? FindPython()
     {
         var tries = new List<(string, string[])>();
-        if (OperatingSystem.IsWindows()) { tries.Add(("py", ["-3"])); tries.Add(("python", [])); tries.Add(("python3", [])); }
+        // The versions QobuzProxy.lock has builds for (3.10 to 3.14) first: on another, its install is refused.
+        if (OperatingSystem.IsWindows())
+        {
+            foreach (var v in new[] { "-3.14", "-3.13", "-3.12", "-3.11", "-3.10", "-3" }) tries.Add(("py", [v]));
+            tries.Add(("python", []));
+            tries.Add(("python3", []));
+        }
         else
         {
             foreach (var d in new[] { "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin" })
-                foreach (var v in new[] { "python3.13", "python3.12", "python3.11", "python3.10", "python3" })
+                foreach (var v in new[] { "python3.14", "python3.13", "python3.12", "python3.11", "python3.10", "python3" })
                     if (File.Exists(Path.Combine(d, v))) tries.Add((Path.Combine(d, v), []));
             tries.Add(("python3", []));
         }
@@ -113,7 +121,7 @@ internal sealed class QobuzConnect : IDisposable
         if (Interlocked.Exchange(ref installing, 1) == 1) return;
         try
         {
-            await Task.Run(() =>
+            await Task.Run(async () =>
             {
                 var py = FindPython() ?? throw new InvalidOperationException(
                     OperatingSystem.IsMacOS() ? "needs Python 3.10 or later: brew install python"
@@ -128,11 +136,39 @@ internal sealed class QobuzConnect : IDisposable
                         throw new InvalidOperationException(output.Contains("ensurepip") || output.Contains("venv")
                             ? "needs Python's venv: sudo apt install python3-venv" : "python -m venv: " + Last(output));
                 }
-                Install = $"installing QobuzProxy {Version} from GitHub…";
-                var (c2, o2) = Run(VenvPython, ["-m", "pip", "install", "--disable-pip-version-check", "--quiet", Source], 600_000);
-                if (c2 != 0) throw new InvalidOperationException("pip: " + Last(o2));
+                foreach (var old in Directory.GetFiles(dir, "pinned-*")) File.Delete(old);
+                // What it needs, each file a wheel checked against the lock (a build from source would fetch its
+                // own tools, unchecked).
+                Install = $"installing what QobuzProxy {Version} needs…";
+                var locked = Path.Combine(dir, "QobuzProxy.lock");
+                File.WriteAllText(locked, QobuzSource.Lock());
+                Pip(["install", "--require-hashes", "--no-deps", "--only-binary", ":all:", "-r", locked], py.Version);
+                if (Source is { } source)
+                {
+                    // The owner's own copy or fork, as given: never shown or logged (a URL can carry a credential).
+                    Install = "installing QobuzProxy from QOBUZPROXY_SOURCE…";
+                    Log("installing QobuzProxy from QOBUZPROXY_SOURCE, unchecked");
+                    Pip(["install", source], py.Version);
+                }
+                else
+                {
+                    // It, checked against the tag's files, built with nothing else fetched.
+                    Install = $"installing QobuzProxy {Version} from GitHub…";
+                    var archive = Path.Combine(dir, $"qobuz-proxy-{Version}.tar.gz");
+                    try
+                    {
+                        await Download.ToFile(QobuzSource.Url(Version), archive, stop.Token, max: QobuzSource.MaxArchive);
+                        QobuzSource.Check(archive, Version);
+                        Pip(["install", "--no-deps", "--no-build-isolation", archive], py.Version);
+                    }
+                    finally
+                    {
+                        try { File.Delete(archive); } catch (Exception) { /* held: the next install overwrites it */ }
+                    }
+                }
                 foreach (var old in Directory.GetFiles(dir, "installed-*")) File.Delete(old);
                 File.WriteAllText(Path.Combine(dir, "installed-" + Version), DateTime.UtcNow.ToString("O"));
+                if (Source == null) File.WriteAllText(Path.Combine(dir, "pinned-" + Version), DateTime.UtcNow.ToString("O"));
             });
             Install = "";
             Log($"QobuzProxy {Version} installed");
@@ -145,6 +181,20 @@ internal sealed class QobuzConnect : IDisposable
         }
         finally { Volatile.Write(ref installing, 0); }
     }
+
+    private void Pip(string[] args, string python)
+    {
+        var (code, output) = Run(VenvPython, ["-m", "pip", .. args.Take(1), "--disable-pip-version-check", "--quiet", .. args.Skip(1)], 600_000);
+        if (code != 0) throw new InvalidOperationException(PipSays(output, python));
+    }
+
+    // What pip's refusal means, said plainly.
+    internal static string PipSays(string output, string python) =>
+        output.Contains("DO NOT MATCH THE HASHES", StringComparison.Ordinal)
+            ? "a file from PyPI didn't match the hash pinned for it, so nothing was installed: try again later; if it happens again, please report it"
+        : output.Contains("No matching distribution", StringComparison.Ordinal) || output.Contains("Could not find a version that satisfies", StringComparison.Ordinal)
+            ? $"what QobuzProxy needs has no ready-made build for Python {python} on this machine: install Python 3.10 to 3.14 (64-bit) and press Install again"
+        : "pip: " + Last(output);
 
     private static string Last(string text) => text.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l != "") is { } l ? l[..Math.Min(240, l.Length)] : "";
 
