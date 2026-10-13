@@ -3,6 +3,37 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.18] — 2026-10-13
+
+### Fixed
+
+- **Windows: every track's end waited five seconds, and pausing in those seconds threw the end away and
+  unpaused the DAC.**
+  - At a track's end the bridge waits for what the DAC still holds to play out. On Windows, the
+    silence the DAC always has queued after the last samples was counted as played as soon as it
+    was handed over. The end looked unplayed until the wait's five-second limit ran out.
+  - So each track's end, and each change of format between tracks, waited five seconds. The
+    position shown also lagged by the silence queued.
+  - Silence now counts only once the DAC's clock has passed it (`Audio/Handed.cs`), so the wait ends
+    when the last sample has played, plus 60 ms for what is still on its way out of the DAC (as on
+    macOS). A clock that can't say for a moment no longer ends the wait.
+  - A pause during that wait ended it: the rest of the track was thrown away and the DAC unpaused,
+    while the page still showed it paused. The wait now goes on through a pause, and the end plays
+    when the pause ends, as on macOS (on Linux, likewise on a DAC that can pause; on one that can't,
+    pausing drops what the DAC holds, as it always has).
+  - Its five-second limit (for a DAC that stops taking samples) counts only time spent playing
+    (`Audio/DrainWait.cs`).
+  - A pause now also survives setting up the next track, as on the other sinks: seeking while paused
+    no longer starts playing.
+  - Resuming restarts a stream that only the DAC's own buffer still held.
+  - A DAC found gone on starting is reported, as it is while playing, and the feed stops writing to
+    it.
+  - Class of error: silence counted when handed rather than when played, and one sink's stop
+    condition differing from the others' (a pause read as "nothing more to play").
+  - Gate: `AudioTests`, on the counting and the wait, which failed with the old rules.
+  - Not tried on a real DAC under Windows (CI has none).
+  - Found by the 1.1.9 audit.
+
 ## [1.1.17] — 2026-10-13
 
 ### Fixed
