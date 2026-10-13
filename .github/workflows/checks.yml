@@ -62,7 +62,10 @@ jobs:
       # The native program each platform gets, and its own sound-device code run for real
       # (Core Audio on macOS, WASAPI on Windows, ALSA on Linux): it must list and diagnose without failing.
       - name: Native AOT build
-        run: dotnet publish src/MandarinDacBridge -c Release -r ${{ matrix.rid }} -o out
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+        run: dotnet publish src/MandarinDacBridge -c Release -r "$RID" -o out
       - name: Smoke run
         shell: bash
         run: |
