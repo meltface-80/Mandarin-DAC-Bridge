@@ -33,7 +33,16 @@ public sealed partial class EndToEndTests
                 var token = c.Request.Headers["X-Plex-Token"] ?? c.Request.QueryString["X-Plex-Token"] ?? "";
                 tokensSeen.Enqueue(token);
                 byte[] body;
-                if (c.Request.Url!.AbsolutePath == "/api/v2/user")
+                if (c.Request.Url!.AbsolutePath == "/api/v2/resources")
+                {
+                    // plex.tv's list of the account's servers: this one is the owner's.
+                    c.Response.ContentType = "application/json";
+                    body = Encoding.UTF8.GetBytes($$$"""
+                        [{"name":"Home","provides":"server","owned":true,"connections":[{"protocol":"http","address":"127.0.0.1","port":{{{plexPort}}},"uri":"http://127.0.0.1:{{{plexPort}}}","local":true}]},
+                         {"name":"A friend's","provides":"server","owned":false,"connections":[{"protocol":"http","address":"10.9.9.9","port":32400,"uri":"http://10.9.9.9:32400"}]}]
+                        """);
+                }
+                else if (c.Request.Url!.AbsolutePath == "/api/v2/user")
                 {
                     c.Response.ContentType = "application/json";
                     body = Encoding.UTF8.GetBytes("""{"id":1,"username":"miles","email":"miles@example.com"}""");
@@ -128,6 +137,40 @@ public sealed partial class EndToEndTests
         // Whose sign-in it is, on the page.
         await Until(async () => (await Dacs()).RootElement.GetProperty("services").GetProperty("plexAccount").GetString() == "miles");
 
+        // A device on the network tells Caldera to play from a server of its own, with no token: that
+        // server is never sent the owner's sign-in (1.1.9 sent it). With a token of its own, it gets that.
+        var strangerPort = FreePort();
+        using var stranger = new HttpListener();
+        stranger.Prefixes.Add($"http://127.0.0.1:{strangerPort}/");
+        stranger.Start();
+        var strangerSaw = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        _ = Task.Run(async () =>
+        {
+            while (stranger.IsListening)
+            {
+                HttpListenerContext c;
+                try { c = await stranger.GetContextAsync(); } catch (Exception) { return; }   // stopped
+                strangerSaw.Enqueue(c.Request.Headers["X-Plex-Token"] ?? "");
+                c.Response.StatusCode = 404;
+                c.Response.Close();
+            }
+        });
+        File.WriteAllText(Path.Combine(cfg, "timeline.xml"),
+            $"<MediaContainer commandID=\"2\"><Timeline type=\"music\" state=\"playing\" time=\"1000\" duration=\"100000\" key=\"/library/metadata/43\" ratingKey=\"43\" address=\"127.0.0.1\" port=\"{strangerPort}\" protocol=\"http\"/></MediaContainer>");
+        await Until(() => { lock (logs) return Task.FromResult(logs.Any(l => l.Contains($"127.0.0.1:{strangerPort} isn't one of your servers"))); });
+        Assert.Empty(strangerSaw);
+        File.WriteAllText(Path.Combine(cfg, "timeline.xml"),
+            $"<MediaContainer commandID=\"3\"><Timeline type=\"music\" state=\"playing\" time=\"1000\" duration=\"100000\" key=\"/library/metadata/44\" ratingKey=\"44\" address=\"127.0.0.1\" port=\"{strangerPort}\" protocol=\"http\" token=\"its-own-token\"/></MediaContainer>");
+        await Until(() => Task.FromResult(!strangerSaw.IsEmpty));
+        Assert.All(strangerSaw, t => Assert.Equal("its-own-token", t));
+        // The owner's server named, with a track "key" that would move the request to the stranger: refused.
+        int strangerBefore = strangerSaw.Count;
+        File.WriteAllText(Path.Combine(cfg, "timeline.xml"),
+            $"<MediaContainer commandID=\"4\"><Timeline type=\"music\" state=\"playing\" time=\"1000\" duration=\"100000\" key=\"@127.0.0.1:{strangerPort}/x\" ratingKey=\"45\" address=\"127.0.0.1\" port=\"{plexPort}\" protocol=\"http\"/></MediaContainer>");
+        await Until(() => { lock (logs) return Task.FromResult(logs.Any(l => l.Contains($"isn't a path on http://127.0.0.1:{plexPort}"))); });
+        Assert.Equal(strangerBefore, strangerSaw.Count);
+        stranger.Stop();
+
         // Signed out: the token is forgotten, here and in Caldera's settings; the player waits for a new sign-in.
         var so = JsonDocument.Parse(await (await Http.PostAsync($"http://127.0.0.1:{port}/api/services/plex/signout", null)).Content.ReadAsStringAsync()).RootElement;
         Assert.False(so.GetProperty("plexSignedIn").GetBoolean());
@@ -142,4 +185,139 @@ public sealed partial class EndToEndTests
         plex.Stop();
         Caldera.PlexLink.PlexTv = "https://plex.tv";
     }
+}
+
+// Which Plex servers may be sent the owner's sign-in, and how they are asked (Caldera/PlexServers.cs);
+// what may be passed on as a cover (Web.cs).
+public sealed class PlexServersTests : IDisposable
+{
+    private readonly HttpListener plexTv = new();
+    private readonly int plexTvPort = Free();
+    private volatile bool plexTvUp = true;
+    private int asked;
+
+    public PlexServersTests()
+    {
+        plexTv.Prefixes.Add($"http://127.0.0.1:{plexTvPort}/");
+        plexTv.Start();
+        _ = Task.Run(async () =>
+        {
+            while (plexTv.IsListening)
+            {
+                HttpListenerContext c;
+                try { c = await plexTv.GetContextAsync(); } catch (Exception) { return; }   // stopped
+                Interlocked.Increment(ref asked);
+                c.Response.StatusCode = plexTvUp ? 200 : 503;
+                c.Response.ContentType = "application/json";
+                c.Response.OutputStream.Write(Encoding.UTF8.GetBytes("""
+                    [{"name":"Home","provides":"server","owned":true,"connections":[{"protocol":"http","address":"192.168.1.10","port":32400,"uri":"http://192.168.1.10:32400"}]}]
+                    """));
+                c.Response.Close();
+            }
+        });
+        Caldera.PlexLink.PlexTv = $"http://127.0.0.1:{plexTvPort}";
+    }
+
+    public void Dispose()
+    {
+        Caldera.PlexLink.PlexTv = "https://plex.tv";
+        plexTv.Stop();
+    }
+
+    private static int Free()
+    {
+        var l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+        l.Start();
+        int p = ((IPEndPoint)l.LocalEndpoint).Port;
+        l.Stop();
+        return p;
+    }
+
+    [Theory]
+    [InlineData("http://192.168.1.10:32400", "/library/metadata/42", "http://192.168.1.10:32400/library/metadata/42")]
+    [InlineData("http://192.168.1.10:32400", "/library/metadata/42/thumb/1?t=9", "http://192.168.1.10:32400/library/metadata/42/thumb/1?t=9")]
+    [InlineData("http://192.168.1.10:32400", "/a@b", "http://192.168.1.10:32400/a@b")]
+    [InlineData("http://192.168.1.10:32400", "@evil.example:8080/x", null)]      // would move the host
+    [InlineData("http://192.168.1.10:32400", "//evil.example/x", null)]
+    [InlineData("http://192.168.1.10:32400", "http://evil.example/x", null)]
+    [InlineData("http://192.168.1.10:32400", "\\evil.example\\x", null)]
+    [InlineData("http://192.168.1.10:32400", "", null)]
+    [InlineData("ftp://192.168.1.10:32400", "/x", null)]
+    public void WhatIsAskedOfAServer_IsAPathOnThatVeryServer(string server, string path, string? url) =>
+        Assert.Equal(url, PlexServersOn(server, path));
+
+    private static string? PlexServersOn(string server, string path) => Caldera.PlexServers.On(server, path)?.ToString();
+
+    [Fact]
+    public void TheOwnersServers_AreTheOnesPlexTvListsAsOwned_AtEveryAddress_WithItsScheme()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""
+            [{"name":"Home","provides":"server","owned":true,"connections":[
+               {"protocol":"http","address":"192.168.1.10","port":32400,"uri":"http://192.168.1.10:32400"},
+               {"protocol":"https","address":"203.0.113.5","port":32400,"uri":"https://203-0-113-5.abc.plex.direct:32400"},
+               {"protocol":"http","address":"fe80::1","port":32400},
+               {"protocol":"http","address":"192.168.1.12","port":32400.5}]},
+             {"name":"A friend's","provides":"server","owned":false,"connections":[{"address":"10.9.9.9","port":32400,"uri":"http://10.9.9.9:32400"}]},
+             {"name":"A phone","provides":"client,player","owned":true,"connections":[{"address":"192.168.1.20","port":32500}]}]
+            """);
+        var owned = Caldera.PlexServers.Owned(doc.RootElement);
+        Assert.Equal(["http://192.168.1.10:32400", "http://[fe80::1]:32400", "https://203-0-113-5.abc.plex.direct:32400", "https://203.0.113.5:32400"],
+            owned.Order(StringComparer.Ordinal));
+        // Listed for https only: the same address over http is not the owner's (the token would go in the clear).
+        Assert.DoesNotContain(Caldera.PlexServers.Key("http://203.0.113.5:32400"), owned);
+    }
+
+    [Fact]
+    public async Task OwnershipComesFromPlexTv_AndAnUnknownAnswerIsNotANo()
+    {
+        var ct = CancellationToken.None;
+        Assert.True(await Caldera.PlexServers.IsOwned("http://192.168.1.10:32400", "tok-a", "client", ct));
+        Assert.False(await Caldera.PlexServers.IsOwned("http://192.168.1.11:32400", "tok-a", "client", ct));
+        Assert.False(await Caldera.PlexServers.IsOwned("https://192.168.1.10:32400", "tok-a", "client", ct));
+        Assert.False(await Caldera.PlexServers.IsOwned("http://192.168.1.10:32400", "", "client", ct));
+        // plex.tv down, for a new account: it can't say, which is not "not yours"; and it isn't asked again at once.
+        plexTvUp = false;
+        Assert.Null(await Caldera.PlexServers.IsOwned("http://192.168.1.10:32400", "tok-b", "client", ct));
+        int before = asked;
+        Assert.Null(await Caldera.PlexServers.IsOwned("http://192.168.1.10:32400", "tok-b", "client", ct));
+        Assert.Equal(before, asked);
+    }
+
+    [Fact]
+    public async Task APlexRequest_DoesNotFollowARedirect_WithTheToken()
+    {
+        var elsewhere = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        int otherPort = Free(), redirectPort = Free();
+        using var other = new HttpListener();
+        other.Prefixes.Add($"http://127.0.0.1:{otherPort}/");
+        other.Start();
+        _ = Task.Run(async () =>
+        {
+            try { var c = await other.GetContextAsync(); elsewhere.Enqueue(c.Request.Headers["X-Plex-Token"] ?? ""); c.Response.Close(); }
+            catch (Exception) { }   // stopped
+        });
+        using var redirect = new HttpListener();
+        redirect.Prefixes.Add($"http://127.0.0.1:{redirectPort}/");
+        redirect.Start();
+        _ = Task.Run(async () =>
+        {
+            try { var c = await redirect.GetContextAsync(); c.Response.StatusCode = 302; c.Response.RedirectLocation = $"http://127.0.0.1:{otherPort}/x"; c.Response.Close(); }
+            catch (Exception) { }   // stopped
+        });
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{redirectPort}/library/metadata/1");
+        req.Headers.TryAddWithoutValidation("X-Plex-Token", "secret");
+        using var res = await Caldera.PlexServers.Http.SendAsync(req);
+        Assert.Equal(HttpStatusCode.Found, res.StatusCode);
+        await Task.Delay(300);   // time for a followed redirect to have arrived, were it followed
+        Assert.Empty(elsewhere);
+    }
+
+    [Theory]
+    [InlineData("image/jpeg", "image/jpeg")]
+    [InlineData("IMAGE/PNG", "image/png")]
+    [InlineData("image/webp", "image/webp")]
+    [InlineData(null, "image/jpeg")]
+    [InlineData("image/svg+xml", null)]
+    [InlineData("text/html", null)]
+    public void ACoverIsPassedOnOnlyAsAPicture(string? from, string? passed) => Assert.Equal(passed, Web.CoverType(from));
 }

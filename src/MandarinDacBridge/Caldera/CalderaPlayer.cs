@@ -22,7 +22,7 @@ using System.Text.RegularExpressions;
 
 namespace MandarinDacBridge.Caldera;
 
-internal sealed record CalderaSetup(string Program, string Home, string Token);
+internal sealed record CalderaSetup(string Program, string Home, string Token, string ClientId);
 
 internal sealed partial class CalderaPlayer : IDisposable
 {
@@ -254,21 +254,57 @@ internal sealed partial class CalderaPlayer : IDisposable
         bridge.Notify();
     }
 
+    // What the bridge last said about looking tracks up, so a repeated reason is logged once.
+    private string lookUpNote = "";
+
+    private void Note(string note)
+    {
+        if (note != lookUpNote && note != "") Log(note);
+        lookUpNote = note;
+    }
+
+    // The token for the server a timeline names (PlexServers.cs): the timeline's own; else the account's,
+    // if the server is the owner's; else none ("" ). Null: plex.tv can't say just now, so ask again later.
+    private async Task<string?> TokenFor(TimelineState t)
+    {
+        if (t.Token != "") return t.Token;
+        var s = setup();
+        return await PlexServers.IsOwned(t.Server, s.Token, s.ClientId, stop.Token) switch
+        {
+            true => s.Token,
+            false => "",
+            null => null,
+        };
+    }
+
     private async Task FetchMetadata(TimelineState t)
     {
-        var token = t.Token != "" ? t.Token : setup().Token;
+        meta = new LiveMeta("", "", "", "", t.Duration);
+        format = "";
+        ArtUrl = "";
+        if (PlexServers.On(t.Server, t.Key) is not { } url) { Note($"Plex: the track named isn't a path on {t.Server}: it isn't looked up"); return; }
+        var token = await TokenFor(t);
+        if (token == null)
+        {
+            Note("Plex: plex.tv can't say just now which servers are yours: what plays is looked up once it can");
+            ratingKey = "";   // asked again at a later poll
+            return;
+        }
+        if (token == "") { Note($"Plex: {t.Server} isn't one of your servers and sent no token, so it isn't sent your sign-in: what it plays isn't shown"); return; }
+        Note("");
         try
         {
-            var req = new HttpRequestMessage(HttpMethod.Get, t.Server + t.Key);
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
             req.Headers.TryAddWithoutValidation("Accept", "application/json");
             req.Headers.TryAddWithoutValidation("X-Plex-Token", token);
-            using var res = await Sources.Http.SendAsync(req, stop.Token);
+            using var res = await PlexServers.Http.SendAsync(req, stop.Token);
             res.EnsureSuccessStatusCode();
             using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(stop.Token));
             var (m, f, thumb) = Metadata(doc.RootElement);
             meta = m;
             format = f;
-            ArtUrl = thumb != "" ? $"{t.Server}{thumb}{(thumb.Contains('?') ? '&' : '?')}X-Plex-Token={Uri.EscapeDataString(token)}" : "";
+            ArtUrl = thumb != "" && PlexServers.On(t.Server, thumb) is { } art
+                ? $"{art}{(art.Query != "" ? '&' : '?')}X-Plex-Token={Uri.EscapeDataString(token)}" : "";
         }
         catch (Exception e)
         {

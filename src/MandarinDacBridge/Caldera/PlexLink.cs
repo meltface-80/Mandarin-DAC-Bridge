@@ -18,7 +18,7 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
     public string Code { get; private set; } = "";
     public string Message { get; private set; } = "";
 
-    private static HttpRequestMessage Request(HttpMethod method, string url, string clientId)
+    internal static HttpRequestMessage Request(HttpMethod method, string url, string clientId)
     {
         var r = new HttpRequestMessage(method, url);
         r.Headers.TryAddWithoutValidation("Accept", "application/json");

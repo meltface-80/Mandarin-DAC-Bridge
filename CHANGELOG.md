@@ -3,6 +3,32 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.12] — 2026-10-13
+
+### Fixed
+
+- **Your Plex sign-in could be sent to a server that isn't yours.** To show what Caldera plays, the
+  bridge looks the track up on the server Caldera's Plex Companion timeline names, and when the
+  timeline carried no token it sent your plex.tv sign-in (an account-wide token). The server named
+  comes from whoever told Caldera to play, and any device on the network can. Now:
+  - a server gets the token the timeline came with; failing that, your sign-in only if it is one of
+    your own servers by plex.tv's own list (its resources, every address, with its scheme: a server
+    listed for HTTPS isn't sent the sign-in over plain HTTP); otherwise nothing, and what it plays
+    isn't looked up (the log says why, once);
+  - what is asked is a path on that very server, checked on the URL actually requested (a track key
+    like `@other.host/x` would have moved the request elsewhere), with no redirects followed (a
+    redirect carried the sign-in to whatever host it named) and a 15-second limit (a server that
+    never answered froze what the page shows);
+  - plex.tv's list is kept for the account and asked again hourly; while plex.tv can't be asked, a
+    track is looked up again later rather than treated as not yours;
+  - covers passed on to the page are pictures only (JPEG, PNG, WebP, GIF; never SVG, which can carry
+    script), marked so the browser takes them as nothing else.
+  Class of error: a secret sent to an address taken from the network. Gates: end to end, a pretend
+  server named with no token is never contacted, with a token of its own gets that, and a hostile
+  track key on your own server's address is refused; case by case, the paths, schemes, the owned
+  list, plex.tv down, a redirect, the cover types. Each protection removed on purpose failed them.
+  Found by the 1.1.9 audit and its multi-agent review; not tried with a real Plex server or Plexamp.
+
 ## [1.1.11] — 2026-10-13
 
 ### Fixed
