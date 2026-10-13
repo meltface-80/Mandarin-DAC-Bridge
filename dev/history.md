@@ -28,3 +28,4 @@ version's story; this is the index.
 | 1.1.19 | `dev` | A release builds the `.csproj`'s version, refuses a tag naming another, and never goes out with a build missing (`quality/release-hardening`). |
 | 1.1.20 | `dev` | Controllers can ask only for http and https streams; ffmpeg held to the network's protocols (`audit/security-ffmpeg-input`). |
 | 1.1.21 | `dev` | DSD headers held to what DSD is; a file that never makes a whole block refused, not held (`audit/security-dsd-header-bounds`). |
+| 1.1.22 | `dev` | Roon's token sent only to the Core at the address that gave it (`audit/security-roon-token-binding`). |
