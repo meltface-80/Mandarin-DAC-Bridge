@@ -40,6 +40,7 @@ internal sealed class ServicesView
     // Qobuz Connect through QobuzProxy.
     public bool Qobuz { get; set; }
     public bool QobuzInstalled { get; set; }
+    public bool QobuzPinned { get; set; }
     public string QobuzInstall { get; set; } = "";
     public string QobuzStatus { get; set; } = "";
     public bool QobuzSignedIn { get; set; }
