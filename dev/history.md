@@ -32,3 +32,4 @@ version's story; this is the index.
 | 1.1.23 | `dev` | A cover is only what its server itself sends, said to be a picture, of a picture's size (`audit/security-cover-proxy`). |
 | 1.1.24 | `dev` | A browser must reach the bridge by one of its own names to read it too, not only to change it (`audit/security-rebinding-reads`). |
 | 1.1.25 | `dev` | Soloist, Caldera and Roon Bridge saved whole before unpacking, and logged with their size and SHA-256 (`audit/security-download-hashes`). |
+| 1.1.26 | `dev` | A release carries SHA256SUMS; the Mac and Windows installers refuse a build that doesn't match, and leave the running bridge alone until the new one is ready (`audit/security-release-sums`). |

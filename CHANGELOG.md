@@ -3,6 +3,40 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.26] — 2026-10-13
+
+### Added
+
+- **A release now carries checksums, and the installers check the build they download against
+  them.**
+  - The Mac and Windows installers downloaded the bridge from the latest release and ran it with
+    nothing to check it against. A corrupted download, or a build re-uploaded wrongly, would have
+    been installed and started at every login.
+  - `release.yml` now attaches `SHA256SUMS`, the SHA-256 of each of the six builds. The installers
+    find the latest release's tag once, and fetch the build and `SHA256SUMS` from that same
+    release, so a release published mid-install can't mix them. Then:
+    - a build that doesn't match, or that the sums don't list, is refused;
+    - a release from before this one (no `SHA256SUMS`) is installed unchecked, as before;
+    - GitHub out of reach, or an error other than "not there", stops the installer. It is never
+      taken as "no checksums" or "no release".
+  - In every one of those cases, the bridge already installed is left as it was. The installers
+    used to stop the running bridge before downloading; now they stop it only to put the new one
+    in place.
+  - What this guards against: corruption, and a build and sums that don't belong together. It
+    doesn't guard against someone who can replace a release's files: they can replace
+    `SHA256SUMS` too. The installer script itself (`curl … | bash`, `irm … | iex`) can't check
+    itself, and a build from the source isn't checked against anything.
+  - Gate: `InstallerTests` runs each installer's own functions, taken from the script, against a
+    pretend GitHub:
+    - finding the tag, including no release and GitHub out of reach;
+    - telling a file from "not there" from a failure;
+    - the checksum check, including a build that can't be read.
+    Seven mutants each fail a case. The PowerShell cases ran here on PowerShell 7.6 and run on the
+    Windows and Linux runners.
+  - Not tried: Windows PowerShell 5.1 (what the Windows one-liner runs), a real release, or a real
+    install. The first release from `main` after this merges is the first with `SHA256SUMS`.
+  - Found by the 2026-10-13 audit (S7, second part).
+
 ## [1.1.25] — 2026-10-13
 
 ### Added
