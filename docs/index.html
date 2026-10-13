@@ -732,6 +732,7 @@ docker compose down --rmi local --volumes</pre>
         "services:\n  dac-bridge:\n" +
         "    build: " + REPO + "\n" +
         "    image: mandarin-dac-bridge\n" +
+        "    pull_policy: build\n" +
         "    container_name: mandarin-dac-bridge\n" +
         "    restart: unless-stopped\n" +
         "    network_mode: host\n" +
@@ -744,7 +745,8 @@ docker compose down --rmi local --volumes</pre>
         (port !== "55500" ? '      PORT: "' + port + '"\n' : "") +
         (ip ? '      BRIDGE_IP: "' + esc(ip) + '"\n' : "") + "\n" +
         "volumes:\n  dac-bridge-data:\n    name: dac-bridge-data";
-      note = "To update later, in the same folder: docker compose up -d --build. " +
+      note = "To update later, in the same folder: docker compose up -d --build, or Update in Dockge or Portainer: " +
+        "it builds the latest code from GitHub (pull_policy: build; there is no image to pull). " +
         "(A clone of the repository works too: git clone, then docker compose up -d --build in it.)";
     }
     $("cmd").innerHTML = out;

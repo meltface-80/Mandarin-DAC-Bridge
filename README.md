@@ -118,6 +118,10 @@ docker compose up -d --build
 ```
 
 Then open **http://<server-ip>:55500**. To update: `git pull && docker compose up -d --build`.
+The Compose file says `pull_policy: build`: the bridge is always built, never pulled (there is no
+published image), so **Update** in Dockge or Portainer works too, building the latest code. A
+Compose file made before 1.1.7 needs that line added under `dac-bridge:`, or Update fails with
+*pull access denied for mandarin-dac-bridge*.
 The image builds the bridge with the .NET 10 SDK, then keeps only the native program and ffmpeg.
 
 You can use `docker run` instead of Compose. This builds straight from GitHub, so no clone is
