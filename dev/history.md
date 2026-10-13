@@ -26,3 +26,4 @@ version's story; this is the index.
 | 1.1.17 | `dev` | A stalled download gives up after a minute instead of blocking the Download button (`fix/download-timeouts`). |
 | 1.1.18 | `dev` | Windows: a track's end no longer waits five seconds, and a pause there holds it instead of dropping it and unpausing (`fix/wasapi-pause-drain`). |
 | 1.1.19 | `dev` | A release builds the `.csproj`'s version, refuses a tag naming another, and never goes out with a build missing (`quality/release-hardening`). |
+| 1.1.20 | `dev` | Controllers can ask only for http and https streams; ffmpeg held to the network's protocols (`audit/security-ffmpeg-input`). |

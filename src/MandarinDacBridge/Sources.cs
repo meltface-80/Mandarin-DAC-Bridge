@@ -110,6 +110,8 @@ internal static partial class Sources
     {
         if (IsLive(uri))
             return live.TryGetValue(uri[5..], out var open) ? open(ct) : throw new InvalidOperationException($"{uri} isn't playing");
+        // Every way in meets ffmpeg here: a stream on the network, nothing else (StreamUri.cs).
+        uri = StreamUri.Stream(uri) ?? throw new InvalidOperationException("only http and https streams can be played");
         if (IsDsd(mime, uri) && dac.Dsd == "dop")
         {
             try
@@ -169,17 +171,23 @@ internal sealed class FfmpegSource : IPcmSource
 
     private FfmpegSource(Process p) { proc = p; stdout = p.StandardOutput.BaseStream; }
 
+    // ffmpeg's arguments for a track (a stream on the network: Sources.Open), held to StreamUri's protocols.
+    internal static List<string> Args(string uri, double offset, RawPcm? raw, List<string> filters)
+    {
+        var args = new List<string> { "-hide_banner", "-nostdin", "-loglevel", "info" };
+        args.AddRange(["-protocol_whitelist", StreamUri.FfmpegProtocols, "-reconnect", "1", "-reconnect_delay_max", "5", "-user_agent", Sources.UserAgent]);
+        if (offset > 0) args.AddRange(["-ss", offset.ToString("0.000", CultureInfo.InvariantCulture)]);
+        if (raw != null) args.AddRange(["-f", raw.Format, "-ar", raw.Rate.ToString(), "-ac", raw.Channels.ToString()]);
+        args.AddRange(["-i", uri, "-map", "0:a:0", "-vn", "-sn"]);
+        if (filters.Count > 0) args.AddRange(["-af", string.Join(",", filters)]);
+        args.AddRange(["-c:a", "pcm_s32le", "-f", "wav", "pipe:1"]);
+        return args;
+    }
+
     public static FfmpegSource Open(string ffmpeg, string uri, double offset, RawPcm? raw, List<string> filters, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(ffmpeg) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
-        foreach (var a in new[] { "-hide_banner", "-nostdin", "-loglevel", "info" }) psi.ArgumentList.Add(a);
-        if (uri.StartsWith("http", StringComparison.OrdinalIgnoreCase))
-            foreach (var a in new[] { "-reconnect", "1", "-reconnect_delay_max", "5", "-user_agent", Sources.UserAgent }) psi.ArgumentList.Add(a);
-        if (offset > 0) { psi.ArgumentList.Add("-ss"); psi.ArgumentList.Add(offset.ToString("0.000", CultureInfo.InvariantCulture)); }
-        if (raw != null) foreach (var a in new[] { "-f", raw.Format, "-ar", raw.Rate.ToString(), "-ac", raw.Channels.ToString() }) psi.ArgumentList.Add(a);
-        foreach (var a in new[] { "-i", uri, "-map", "0:a:0", "-vn", "-sn" }) psi.ArgumentList.Add(a);
-        if (filters.Count > 0) { psi.ArgumentList.Add("-af"); psi.ArgumentList.Add(string.Join(",", filters)); }
-        foreach (var a in new[] { "-c:a", "pcm_s32le", "-f", "wav", "pipe:1" }) psi.ArgumentList.Add(a);
+        foreach (var a in Args(uri, offset, raw, filters)) psi.ArgumentList.Add(a);
 
         Process p;
         try { p = Process.Start(psi) ?? throw new InvalidOperationException("ffmpeg didn't start"); }

@@ -15,10 +15,18 @@ public sealed class SoxrTests : IDisposable
     // Nothing in it may contain "soxr": the pretend ffmpegs look for that in their arguments.
     private readonly string dir = Path.Combine(Path.GetTempPath(), "mdb-resampler-" + Guid.NewGuid().ToString("N"));
 
-    public SoxrTests() => Directory.CreateDirectory(dir);
+    private readonly FileServer files;
+
+    // The tones are fetched over http, as every track is (Sources.Open plays nothing else).
+    public SoxrTests()
+    {
+        Directory.CreateDirectory(dir);
+        files = new FileServer(dir);
+    }
 
     public void Dispose()
     {
+        files.Dispose();
         try { Directory.Delete(dir, true); }
         catch (IOException) { /* a temporary folder; the system clears it */ }
         catch (UnauthorizedAccessException) { /* the same, on Windows while a killed stand-in lets go */ }
@@ -74,7 +82,7 @@ public sealed class SoxrTests : IDisposable
         p.StandardError.ReadToEnd();
         p.WaitForExit();
         Assert.Equal(0, p.ExitCode);
-        return f;
+        return $"{files.Base}/{Path.GetFileName(f)}";
     }
 
     [Theory]
