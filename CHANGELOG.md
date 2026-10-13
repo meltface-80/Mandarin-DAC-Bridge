@@ -3,6 +3,20 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.14] — 2026-10-13
+
+### Fixed
+
+- **A controller could be left showing the wrong state, or miss a change for good.** Each UPnP event
+  (how Audirvana and Mandarin see a track end or the next one begin) was sent on its own, so a later
+  one could overtake an earlier one and leave a controller showing PLAYING after the bridge had
+  stopped. And an event that couldn't be delivered was taken as known: its change was never sent
+  again. Now a subscriber's events go one at a time, in order, and what an undelivered event carried
+  goes again a second later (three times running at most, then with the next change). An answer
+  other than success counts as undelivered. Class of error: fire-and-forget delivery of ordered
+  state. Gate: `UpnpEventsTests`, with a pretend controller that answers slowly or fails once (both
+  failed before the fix). Found by the 1.1.9 audit; not tried with a real Audirvana or Mandarin.
+
 ## [1.1.13] — 2026-10-13
 
 ### Fixed
