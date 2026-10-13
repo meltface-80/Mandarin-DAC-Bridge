@@ -39,6 +39,8 @@ public class ComposeTests
         return missing;
     }
 
+    internal static string RepoRoot() => Root();
+
     private static string Root()
     {
         for (var d = new DirectoryInfo(AppContext.BaseDirectory); d != null; d = d.Parent)
