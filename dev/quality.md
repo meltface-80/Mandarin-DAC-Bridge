@@ -75,8 +75,8 @@ same commit. Order — where every change lands first, then the logic most often
    helpers: `VolumeTests.cs`, `CalderaTests.cs` and `SqueezeboxTests.cs` so far.
 2. **`UnitTests.cs`** → the same, by area.
 3. **`Manager.cs`** → each connection's wiring (Squeezebox, Spotify, Caldera, Qobuz, Roon, the Mac)
-   and the page's view. (The settings went to `Settings.cs` in 1.1.4, and finding Roon on this machine
-   to `Roon/RoonRunning.cs` in 1.1.6.)
+   and the page's view. (The settings went to `Settings.cs` in 1.1.4, finding Roon on this machine
+   to `Roon/RoonRunning.cs` in 1.1.6, and the `Bridge` class to `Bridge.cs` in 1.1.10.)
 4. **`SoloistPlayer.cs`** → its sound path (private PulseAudio and the pipe), the WebSocket, the
    metadata (needed before the Spotify now-playing fix).
 5. **`Page/index.html`** → its script and styles into their own files (with the page-scripts gate).
