@@ -40,7 +40,10 @@ internal static partial class Sources
     {
         AllowAutoRedirect = true,
         ConnectTimeout = TimeSpan.FromSeconds(10),
-        PooledConnectionLifetime = TimeSpan.FromMinutes(5)
+        PooledConnectionLifetime = TimeSpan.FromMinutes(5),
+        // A response closed before its end (a stop, a seek) is dropped at once, not read on to its end
+        // first: that held a stop up for two seconds on a stalled server.
+        MaxResponseDrainSize = 0
     }) { Timeout = Timeout.InfiniteTimeSpan };
 
     static Sources() => Http.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
@@ -300,11 +303,28 @@ internal sealed class DsdSource : IPcmSource
         var req = new HttpRequestMessage(HttpMethod.Get, uri);
         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(start, null);
         var res = Sources.Http.Send(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        res.EnsureSuccessStatusCode();
-        var stream = res.Content.ReadAsStream(ct);
-        if (res.StatusCode != System.Net.HttpStatusCode.PartialContent) Skip(stream, start, ct);
-        var info = new TrackInfo(dopRate, h.Channels, 1, Dsd.Name(h.Rate), h.Rate, false, h.Seconds, true);
-        return new DsdSource(res, stream, new DopPacker(h, consumed), info);
+        try
+        {
+            // A stalled server can't hold a stop up: cancelling closes the response, which ends the read.
+            using var stopping = ct.Register(res.Dispose);
+            res.EnsureSuccessStatusCode();
+            var stream = res.Content.ReadAsStream(ct);
+            if (res.StatusCode != System.Net.HttpStatusCode.PartialContent) Skip(stream, start, ct);
+            ct.ThrowIfCancellationRequested();
+            var info = new TrackInfo(dopRate, h.Channels, 1, Dsd.Name(h.Rate), h.Rate, false, h.Seconds, true);
+            return new DsdSource(res, stream, new DopPacker(h, consumed), info);
+        }
+        catch (Exception) when (ct.IsCancellationRequested)
+        {
+            // Closed by the cancellation, at whatever step it reached: a cancellation, not a failure.
+            res.Dispose();
+            throw new OperationCanceledException(ct);
+        }
+        catch (Exception)
+        {
+            res.Dispose();
+            throw;
+        }
     }
 
     private static byte[] FetchHead(string uri, CancellationToken ct, int bytes = 65536)
@@ -312,17 +332,26 @@ internal sealed class DsdSource : IPcmSource
         var req = new HttpRequestMessage(HttpMethod.Get, uri);
         req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(0, bytes - 1);
         using var res = Sources.Http.Send(req, HttpCompletionOption.ResponseHeadersRead, ct);
-        res.EnsureSuccessStatusCode();
-        using var s = res.Content.ReadAsStream(ct);
-        var buf = new byte[bytes];
-        int have = 0;
-        while (have < bytes)
+        try
         {
-            int n = s.Read(buf, have, bytes - have);
-            if (n <= 0) break;
-            have += n;
+            using var stopping = ct.Register(res.Dispose);   // as in Open: cancelling ends a stalled read
+            res.EnsureSuccessStatusCode();
+            using var s = res.Content.ReadAsStream(ct);
+            var buf = new byte[bytes];
+            int have = 0;
+            while (have < bytes)
+            {
+                int n = s.Read(buf, have, bytes - have);
+                if (n <= 0) break;
+                have += n;
+            }
+            ct.ThrowIfCancellationRequested();
+            return buf[..have];
         }
-        return buf[..have];
+        catch (Exception e) when (ct.IsCancellationRequested && e is not OperationCanceledException)
+        {
+            throw new OperationCanceledException(ct);   // closed by the cancellation: not a failure
+        }
     }
 
     private static void Skip(Stream s, long n, CancellationToken ct)
@@ -331,7 +360,9 @@ internal sealed class DsdSource : IPcmSource
         while (n > 0)
         {
             ct.ThrowIfCancellationRequested();
-            int r = s.Read(junk, 0, (int)Math.Min(junk.Length, n));
+            int r;
+            try { r = s.Read(junk, 0, (int)Math.Min(junk.Length, n)); }
+            catch (Exception) when (ct.IsCancellationRequested) { throw new OperationCanceledException(ct); }
             if (r <= 0) return;
             n -= r;
         }

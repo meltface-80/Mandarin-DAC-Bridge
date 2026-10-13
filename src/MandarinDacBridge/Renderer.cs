@@ -22,33 +22,7 @@ using MandarinDacBridge.Audio;
 
 namespace MandarinDacBridge;
 
-internal sealed class UpnpException(int code, string description) : Exception(description)
-{
-    public int Code { get; } = code;
-}
-
-internal sealed class Track(string uri, string meta)
-{
-    public string Uri { get; } = uri;
-    public string Meta { get; } = meta;
-    public Didl Didl { get; } = Xml.ParseDidl(meta, uri);
-    public string Mime { get; set; } = "";
-    public double Duration { get; set; }
-    public TrackInfo? Info { get; set; }
-    public bool Taken { get; set; }
-    public LiveMeta? Live { get; set; }
-}
-
-// What a Squeezebox server or Spotify says is playing. Position (when given)
-// was so at At (ms) and runs on from there while the track plays.
-internal sealed record LiveMeta(string Title, string Artist, string Album, string Art, double Duration, double? Position = null, long At = 0);
-
-internal sealed record Mark(long Frame, Track Track, double Offset, TrackInfo? Info);
-
-internal sealed record NowPlaying(string Transport, string Status, string Error, string Title, string Artist, string Album,
-    long Position, long Duration, string Format, string Physical, bool Muted, string Art = "");
-
-internal sealed class Renderer : IDisposable
+internal sealed partial class Renderer : IDisposable
 {
     private readonly ISink sink;
     private readonly string ffmpeg;
@@ -209,9 +183,20 @@ internal sealed class Renderer : IDisposable
         if (IsActive || Transport == "PAUSED_PLAYBACK")
         {
             bool paused = Transport == "PAUSED_PLAYBACK";
-            await Halt();
-            if (paused) sink.Pause(true);
-            lock (gate) StartLocked(Current ?? cur, s, paused);
+            // Started only when no feed is running: another seek may have started one while this one waited
+            // for Halt, and two feeds would write to one sink (and its audio would stay queued ahead of this
+            // one's). That one is halted too, and the sink emptied, before this one starts.
+            for (int tries = 0; ; tries++)
+            {
+                await Halt();
+                if (paused) sink.Pause(true);
+                lock (gate)
+                {
+                    if (feeding != 0 && tries < 3) continue;
+                    StartLocked(Current ?? cur, s, paused);
+                    break;
+                }
+            }
         }
         else lock (gate) pendingOffset = s;
         Changed?.Invoke();
@@ -220,247 +205,6 @@ internal sealed class Renderer : IDisposable
     public void SetMute(bool on) { Muted = on; Changed?.Invoke(); }
 
     // ------------------------------------------------------------ the audio path
-
-    // Everything stops and the sink drops what it holds; the DAC stays held.
-    public async Task Halt()
-    {
-        Task done;
-        lock (gate)
-        {
-            run++;
-            cts?.Cancel();
-            source?.Dispose();
-            source = null;
-            done = feedDone;
-        }
-        try { await done.WaitAsync(TimeSpan.FromSeconds(5)); } catch (Exception) { /* it stops by itself */ }
-        lock (gate)
-        {
-            sink.Flush();
-            written = 0;
-            drained = true;
-            marks.Clear();
-        }
-    }
-
-    private void StartLocked(Track track, double offset, bool paused)
-    {
-        int r = ++run;
-        Status = "OK";
-        Error = "";
-        Transport = paused ? "PAUSED_PLAYBACK" : "TRANSITIONING";
-        mark = new Mark(0, track, offset, track.Info);
-        reached = null;
-        if (!paused) sink.Pause(false);
-        cts?.Dispose();
-        cts = new CancellationTokenSource();
-        var ct = cts.Token;
-        feeding = r;
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        feedDone = tcs.Task;
-        var thread = new Thread(() =>
-        {
-            Native.Libc.FavourThisThread();   // real-time priority where allowed (Linux)
-            try { Feed(r, track, offset, ct); }
-            catch (OperationCanceledException) { }
-            catch (Exception e) { Fail(r, e); }
-            finally
-            {
-                lock (gate) if (feeding == r) feeding = 0;
-                tcs.TrySetResult();
-            }
-        }) { IsBackground = true, Name = "feed", Priority = ThreadPriority.AboveNormal };
-        thread.Start();
-    }
-
-    private bool Stale(int r) => r != Volatile.Read(ref run);
-
-    private void Feed(int r, Track first, double offset, CancellationToken ct)
-    {
-        var t = first;
-        double off = offset;
-        while (t != null)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (t.Mime == "" && !Sources.IsLive(t.Uri)) t.Mime = ContentType(t.Uri, ct);
-            IPcmSource src;
-            try
-            {
-                src = Sources.Open(t.Uri, t.Mime, off, dac(), ffmpeg, log, ct);
-            }
-            catch (Exception e) when (t != first && !ct.IsCancellationRequested)
-            {
-                // The next track won't play: let this one finish, then stop.
-                log("next track: " + e.Message);
-                break;
-            }
-            lock (gate)
-            {
-                if (Stale(r)) { src.Dispose(); return; }
-                source = src;
-            }
-            try
-            {
-                var info = src.Info;
-                t.Info = info;
-                if (t.Duration <= 0 && info.Duration > 0) t.Duration = info.Duration;
-                if (fmt is not { } f || f.Rate != info.Rate || f.Channels != info.Channels)
-                {
-                    if (!drained) { sink.Drain(ct); AfterDrain(); }
-                    var physical = sink.Configure(info.Rate, info.Channels);
-                    lock (gate) { fmt = (info.Rate, info.Channels, physical); written = 0; marks.Clear(); }
-                }
-                Track? now = null;
-                lock (gate)
-                {
-                    if (Stale(r)) return;
-                    var m = new Mark(written, t, off, info);
-                    marks.Add(m);
-                    if (t == first) { Announce(m); now = NewlyReached(); }
-                    if (Transport == "TRANSITIONING") Transport = "PLAYING";
-                }
-                Changed?.Invoke();
-                if (now != null) Reached?.Invoke(now);
-                Pump(src, info, ct);
-            }
-            finally
-            {
-                lock (gate) { if (source == src) source = null; }
-                src.Dispose();
-            }
-            if (Stale(r)) return;
-            Decoded?.Invoke(t);
-            t = AwaitNext(r, ct);
-            off = 0;
-        }
-        if (!drained) { sink.Drain(ct); AfterDrain(); }
-        lock (gate)
-        {
-            if (Stale(r)) return;
-            Transport = "STOPPED";
-            mark = null;
-        }
-        arbiter.Touch();
-        Changed?.Invoke();
-        Finished?.Invoke(false);
-    }
-
-    // Called from a Decoded handler that has just asked for the next track (a
-    // Squeezebox server sends it only then): it is waited for until the DAC
-    // has almost nothing left, rather than half a second.
-    public void ExpectNext() => Volatile.Write(ref expectNext, Volatile.Read(ref run));
-
-    // The next track once this one is decoded: given already, or given while this one plays out.
-    private Track? AwaitNext(int r, CancellationToken ct)
-    {
-        double least = Volatile.Read(ref expectNext) == r ? 0.05 : 0.5;
-        for (;;)
-        {
-            if (Stale(r)) return null;
-            lock (gate)
-            {
-                if (Next is { Taken: false } n) { n.Taken = true; return n; }
-                double left = fmt is { } f ? (written - sink.Played) / (double)f.Rate : 0;
-                if (left < least) return null;
-            }
-            ct.WaitHandle.WaitOne(least < 0.5 ? 10 : 100);
-            ct.ThrowIfCancellationRequested();
-        }
-    }
-
-    private void Pump(IPcmSource src, TrackInfo info, CancellationToken ct)
-    {
-        int frameBytes = info.Channels * 4;
-        var buf = new byte[1 << 16];
-        int have = 0;
-        for (;;)
-        {
-            int n = src.Read(buf.AsSpan(have), ct);
-            ct.ThrowIfCancellationRequested();
-            if (n <= 0) return;
-            have += n;
-            int usable = have - have % frameBytes;
-            if (usable == 0) continue;
-            var span = buf.AsSpan(0, usable);
-            if (Muted)
-            {
-                if (info.Dop) Dsd.MuteDop(span);
-                else span.Clear();
-            }
-            sink.Write(span, ct);
-            lock (gate) { written += usable / frameBytes; drained = false; }
-            buf.AsSpan(usable, have - usable).CopyTo(buf);
-            have -= usable;
-        }
-    }
-
-    private void AfterDrain()
-    {
-        lock (gate)
-        {
-            written = 0;
-            marks.Clear();
-            drained = true;
-        }
-    }
-
-    // Every 100 ms: the track the DAC has reached, and the owner kept current while it plays.
-    private void OnClock()
-    {
-        bool changed = false;
-        Track? now = null;
-        lock (gate)
-        {
-            if (marks.Count == 0) return;
-            long played = sink.Played;
-            Mark? m = null;
-            foreach (var x in marks) if (x.Frame <= played) m = x;
-            if (m != null && m != mark) { changed = Announce(m); now = NewlyReached(); }
-        }
-        if (IsActive) arbiter.Touch();
-        if (changed) Changed?.Invoke();
-        if (now != null) Reached?.Invoke(now);
-    }
-
-    // The track being heard, the first time it is. With gate held.
-    private Track? NewlyReached()
-    {
-        if (mark == null || mark.Track == reached) return null;
-        reached = mark.Track;
-        return reached;
-    }
-
-    // The DAC has reached this mark's track. With gate held.
-    private bool Announce(Mark m)
-    {
-        mark = m;
-        if (m.Track == Current) return false;
-        Current = m.Track;
-        if (Next == m.Track) Next = null;
-        return true;
-    }
-
-    private void Fail(int r, Exception e)
-    {
-        lock (gate)
-        {
-            if (Stale(r)) return;
-            log("play: " + e.Message);
-            run++;
-            source?.Dispose();
-            source = null;
-            sink.Flush();
-            written = 0;
-            marks.Clear();
-            drained = true;
-            Transport = "STOPPED";
-            Status = "ERROR_OCCURRED";
-            Error = e.Message;
-            mark = null;
-        }
-        Changed?.Invoke();
-        Finished?.Invoke(true);
-    }
 
     // The Content-Type a URL answers with, when nothing else says (raw L16/L24 needs it).
     private static string ContentType(string uri, CancellationToken ct)

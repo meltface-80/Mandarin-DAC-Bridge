@@ -81,7 +81,8 @@ same commit. Order — where every change lands first, then the logic most often
 4. **`SoloistPlayer.cs`** → its sound path (private PulseAudio and the pipe), the WebSocket, the
    metadata (needed before the Spotify now-playing fix).
 5. **`Page/index.html`** → its script and styles into their own files (with the page-scripts gate).
-6. **`Renderer.cs`**. (`SlimPlayer.cs` is under the limit since 1.1.2: server discovery and the
+6. **`Renderer.cs`**: done in 1.1.13 (its feed to `RendererFeed.cs`, a part of `Renderer`, and the track
+   types to `Track.cs`). (`SlimPlayer.cs` is under the limit since 1.1.2: server discovery and the
    strm parser moved to `Slim/SlimDiscovery.cs` and `Slim/Strm.cs`.)
 
 Each move keeps behaviour identical, and the existing suite is the proof: it must pass before and
