@@ -12,7 +12,7 @@ fixes this by taking each DAC itself:
 
 * It **holds every USB DAC exclusively**, playing or not, so no other app can grab it.
 * It **switches the DAC to each track's own rate** and plays the samples unchanged
-  (bit-perfect passthrough, with DSD as DoP).
+  (bit-perfect passthrough; DSD as DoP where DoP is on, see [How it works](#how-it-works)).
 * It **offers each DAC on the network as a UPnP renderer**, `"<DAC name> (Bridge)"`, which both
   Audirvana and Mandarin can play to.
 * It **lets only one app control a DAC at a time.** Whichever app starts playing owns the DAC.
@@ -97,7 +97,8 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/mel
 
 ### Publishing a build (for the repository owner)
 
-On GitHub, go to **Releases → Draft a new release**, create a tag such as `v1.0.0` and click
+On GitHub, go to **Releases → Draft a new release**, create a tag `v` + the `<Version>` in
+`src/MandarinDacBridge/MandarinDacBridge.csproj` on `main` (for example `v1.1.6`) and click
 **Publish**. GitHub Actions (`.github/workflows/release.yml`) then tests the code, builds it for
 Apple silicon and Intel Macs, Linux x64 and arm64, and Windows x64 and ARM64, and attaches
 `mandarin-dac-bridge-<platform>.tar.gz` (`.zip` for Windows) to the release. The installers always
@@ -117,7 +118,10 @@ docker compose up -d --build
 ```
 
 Then open **http://<server-ip>:55500**. To update: `git pull && docker compose up -d --build`.
-The image builds the bridge with the .NET 10 SDK, then keeps only the native program and ffmpeg.
+The image builds the bridge with the .NET 10 SDK, then keeps only the native program, ffmpeg, and
+what the optional connections need: PulseAudio (Spotify Soloist), Python (QobuzProxy) and bzip2
+(Roon Bridge). Soloist, QobuzProxy, Caldera and Roon Bridge themselves are not in it: the page
+downloads them from their publishers into the settings volume when you ask.
 
 You can use `docker run` instead of Compose. This builds straight from GitHub, so no clone is
 needed (it needs `git` on the host):
@@ -156,9 +160,10 @@ docker run -d \
 
 ## More ways to play
 
-UPnP is always on. Everything here is optional, and goes through the same exclusive,
-rate-switched path and the same rule: whatever is playing keeps the others out until it stops
-(and for 10 seconds after).
+UPnP is always on. Everything here is optional. Squeezebox, Spotify, Qobuz and the Mac's apps go
+through the same exclusive, rate-switched path and the same rule: whatever is playing keeps the
+others out until it stops (and for 10 seconds after). Caldera (Plex) and Roon Bridge play to the DAC
+themselves: the bridge lets go of it for them while nothing plays through the bridge.
 
 ### Squeezebox (squeezelite)
 
@@ -353,7 +358,7 @@ cage and Chromium to show it from boot:
 | Rate switching | the DAC's physical format, set per track (integer, widest depth) | the exclusive stream's format, per track (32, 24 or 16-bit) | `hw` params, set per track (S32_LE, S24_LE, S24_3LE or S16_LE) |
 | Bit-perfect | up to 24-bit (Core Audio's float path carries 24 bits exactly) | up to 32-bit | up to 32-bit |
 | DSD | DoP (off by default; switch it on per DAC) | DoP (off by default; switch it on per DAC) | DoP, on automatically when the DAC reports native DSD |
-| Optional | Music and Spotify apps, Qobuz | Qobuz | Spotify Connect, Qobuz, Plex |
+| Optional | Squeezebox, Qobuz, Roon Bridge, Roon now playing, the Music and Spotify apps | Squeezebox, Qobuz, Roon Bridge, Roon now playing | Squeezebox, Spotify Connect, Qobuz, Plex, Roon Bridge, Roon now playing |
 
 The program calls Core Audio, WASAPI and ALSA directly from C#
 (`Native/CoreAudio.cs`, `Native/Wasapi.cs`, `Native/Alsa.cs`). On a Mac, Core Audio's real-time thread reads the
@@ -362,8 +367,17 @@ never touches that path.
 
 * **Decoding.** ffmpeg turns whatever the app sends (FLAC, WAV, AIFF, ALAC, raw L16/L24, MP3,
   AAC…) into 32-bit integer PCM at the track's own rate, which carries 16- and 24-bit audio
-  exactly. Only when the DAC can't take that rate is the track resampled (SoX, 28-bit
-  precision), to the nearest rate in the same family (44.1 or 48 kHz).
+  exactly. Only when the DAC can't take that rate is the track resampled, to the nearest rate in
+  the same family (44.1 or 48 kHz): with SoX at 28-bit precision, or, when this ffmpeg was built
+  without SoX, with ffmpeg's own resampler at its best settings (the log says so). The Docker
+  image's ffmpeg has SoX; Homebrew's and Chocolatey's don't (Homebrew's `ffmpeg-full` and winget's
+  `Gyan.FFmpeg` do).
+* **Bit depth.** A track deeper than the DAC's widest format (24-bit on a DAC that takes 24 at most,
+  or anything over 24-bit on a Mac) loses its lowest bits on the way, with no dither.
+* **DSD.** DSF and DFF files go to the DAC as DoP, untouched, where DoP is on for that DAC: on Linux
+  it is on by itself for a DAC that reports native DSD; on a Mac and Windows, switch it on on the
+  DAC's page. DSD64 to DSD512, as far as the DAC's PCM rates reach. Otherwise (DoP off, or a DSD rate
+  whose DoP rate the DAC can't take) ffmpeg converts the DSD to PCM, which is not bit-perfect.
 * **Gapless.** If the app sends the next track ahead of time (`SetNextAVTransportURI`) and it has
   the same rate, it plays straight on with no gap. A next track at a different rate waits for the
   first to finish, then the DAC switches rate.
@@ -439,9 +453,22 @@ password is planned.
 | `ROON_CORE` | found by itself | the Roon Core, `host:port`, if it can't be found on the network |
 | `SOLOIST_VERBOSE` | — | `1` runs Spotify Soloist with its detailed log (in `DATA_DIR/soloist/<dac>/soloist.log`) |
 
-On the Mac these go in `~/Library/LaunchAgents/app.mandarin.dacbridge.plist`. On Windows, set them
-as user environment variables (`setx PORT 55501`) and sign in again. In Docker, they go under
-`environment:` in `docker-compose.yml`.
+Each switch variable (`SQUEEZELITE`, `SPOTIFY`, `QOBUZ`, `CALDERA`, `MAC_APPS`, `ROON_BRIDGE`,
+`ROON_API`) only sets how the bridge starts the first time, and so do `LMS_SERVER` and
+`SOLOIST_API_KEY`: once that switch, address or key has been set on the page, the page's choice wins.
+
+On the Mac these go in the `EnvironmentVariables` of
+`~/Library/LaunchAgents/app.mandarin.dacbridge.plist`, then `launchctl unload` and `launchctl load`
+that file. Running the installer again (to update) writes the file afresh, so add them again after
+an update; what is set on the page is kept. On Windows, set them as user environment variables
+(`setx LOCK_GRACE_S 20`) and sign in again; the installer expects port 55500, so leave `PORT` alone
+there. In Docker, they go under `environment:` in `docker-compose.yml`, or as `-e` with `docker
+run`.
+
+**The settings volume.** `docker run` and the site's Compose file keep the settings in a volume named
+`dac-bridge-data`. The repository's `docker-compose.yml` doesn't name its volume, so Compose puts the
+folder's name in front (`mandarin-dac-bridge_dac-bridge-data` for a clone in `Mandarin-DAC-Bridge`):
+switching between the two starts with empty settings. `docker volume ls` shows which holds yours.
 
 ### Troubleshooting
 
@@ -496,15 +523,23 @@ also the real ALSA path.
 
 | File | What it does |
 |---|---|
-| `Program.cs` | starts everything (`BridgeHost`); `--list`, `--version` |
-| `Manager.cs` | finds the DACs; one bridge (sink, renderer, arbiter) per DAC; settings |
-| `Devices.cs` | what each DAC is and what it takes |
+| `Program.cs` | starts everything (`BridgeHost`); `--list`, `--diagnose`, `--loopback-test` (Mac), `--version` |
+| `Config.cs`, `Settings.cs` | the environment variables; `settings.json` (each DAC's settings, the connections, the secrets) |
+| `OwnerOnlyFile.cs` | files only their owner can read (settings and secrets), written whole or not at all |
+| `Manager.cs` | finds the DACs; one bridge (sink, renderer, arbiter) per DAC; the connections; the page's view |
+| `Devices.cs`, `DevicesWindows.cs` | what each DAC is and what it takes |
 | `Renderer.cs` | the transport, the position, the audio path |
 | `Sources.cs` | ffmpeg decoding, resampling only when needed, DSD as DoP |
 | `Dsd.cs` | DSF/DFF parsing and DoP packing |
-| `Audio/` | the sinks: `CoreAudioSink` (hog mode, physical format, IOProc), `AlsaSink` (`hw:`), `ClockSink` (tests) |
-| `Native/` | the C calls: Core Audio, ALSA |
 | `Arbiter.cs` | which app is in control |
+| `Audio/` | the sinks: `CoreAudioSink` (hog mode, physical format, IOProc), `WasapiSink` (exclusive mode), `AlsaSink` (`hw:`), `ClockSink` (tests); each system's DAC volume |
+| `Native/` | the C calls: Core Audio, WASAPI, ALSA |
 | `Upnp/` | SSDP, the device description, SOAP control, GENA events |
+| `Slim/` | the Squeezebox player (SlimProto), finding the server, its volume |
+| `Spotify/` | Spotify Soloist: its download, the player, its private PulseAudio and pipe |
+| `Qobuz/` | QobuzProxy: its install and its speakers |
+| `Caldera/` | Caldera Headless: its download, the Plex sign-in, the player |
+| `Roon/` | Roon Bridge beside the bridge, and Roon now playing (the extension API) |
+| `Mac/` | the Music and Spotify apps through the DAC Bridge output; the loopback test |
 | `Web.cs` | the HTTP server (Kestrel): the page, the API, UPnP |
-| `Page/` | the page, built into the program |
+| `Page/` | the page and the now-playing screen, built into the program |
