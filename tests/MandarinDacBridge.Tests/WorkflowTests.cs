@@ -11,7 +11,8 @@ namespace MandarinDacBridge.Tests;
 public partial class WorkflowTests
 {
     private static string Root => ComposeTests.RepoRoot();
-    private static string Workflow(string name) => File.ReadAllText(Path.Combine(Root, ".github", "workflows", name));
+    // As checked out: with CRLF line ends on Windows, read as LF.
+    private static string Workflow(string name) => File.ReadAllText(Path.Combine(Root, ".github", "workflows", name)).ReplaceLineEndings("\n");
 
     // tools/release/version.sh, as release.yml runs it: (exit code, what it printed, what it complained of).
     private static (int Code, string Out, string Err) Version(string tag, string csproj)
