@@ -44,6 +44,30 @@ public class RoonTokenTests
         Assert.Empty(all);
     }
 
+    // Enabled in one Core, the bridge leaves any other, whatever id it gives.
+    [Theory]
+    [InlineData("core-2")]
+    [InlineData("")]
+    [InlineData("core-1|host")]
+    public void ACoreTheBridgeIsntEnabledIn_IsLeft_WhenItIsEnabledInAnother(string coreId)
+    {
+        Assert.Equal(new RoonTokens.Grant("", true, false), RoonTokens.For(Kept(Real), coreId, "192.168.1.66:9330"));
+        // Not when its token has no address yet, nor when the bridge isn't enabled anywhere.
+        Assert.Equal(new RoonTokens.Grant("", false, false), RoonTokens.For(new(StringComparer.Ordinal) { ["core-1"] = "tok-1" }, coreId, "192.168.1.66:9330"));
+        Assert.Equal(new RoonTokens.Grant("", false, false), RoonTokens.For(new(StringComparer.Ordinal) { ["core-1|host"] = Real }, coreId, "192.168.1.66:9330"));
+    }
+
+    [Fact]
+    public void Forgetting_KeepsTheTokens_AndDropsTheirAddresses()
+    {
+        var all = Kept(Real);
+        all["core-2"] = "tok-2";
+        Assert.True(RoonTokens.Forget(all));
+        Assert.Equal(new Dictionary<string, string>(StringComparer.Ordinal) { ["core-1"] = "tok-1", ["core-2"] = "tok-2" }, all);
+        Assert.False(RoonTokens.Forget(all));
+        Assert.Equal(new RoonTokens.Grant("tok-1", false, true), RoonTokens.For(all, "core-1", "192.168.1.30:9330"));
+    }
+
     [Fact]
     public void ATokenKeptBeforeAddressesWere_IsBoundToTheFirstCoreItGoesTo()
     {
@@ -70,7 +94,7 @@ public class RoonTokenTests
         Assert.False(RoonTokens.Keep(all, "core-1|host", "192.168.1.66:9330", "192.168.1.66:9330"));
         Assert.False(RoonTokens.Keep(all, "", "tok-2", "192.168.1.66:9330"));
         Assert.Equal(Kept(Real), all);
-        Assert.Equal(new RoonTokens.Grant("", false, false), RoonTokens.For(all, "core-1|host", Real));
+        Assert.Equal(new RoonTokens.Grant("", true, false), RoonTokens.For(all, "core-1|host", Real));
     }
 
     [Fact]
@@ -97,7 +121,6 @@ public sealed partial class EndToEndTests
         public int Port { get; } = FreePort();
         public System.Collections.Concurrent.ConcurrentQueue<string> Got { get; } = new();
         public string Zone = "";
-        public bool Enables = true;                 // as if enabled in Roon's Settings → Extensions
         public string RegistersAs = "core-1";       // the core_id it gives in Registered
 
         public FakeRoonCore()
@@ -147,7 +170,6 @@ public sealed partial class EndToEndTests
                 else if (first.EndsWith("registry:1/register", StringComparison.Ordinal))
                 {
                     // As if enabled in Roon's Settings → Extensions; then the Core pings.
-                    if (!Enables) continue;
                     await Send(ws, "CONTINUE", "Registered", id, $$"""{"core_id":"{{RegistersAs}}","token":"tok-1","display_name":"Test Core"}""");
                     await Send(ws, "REQUEST", "com.roonlabs.ping:1/ping", 900);
                 }
@@ -229,18 +251,38 @@ public sealed partial class EndToEndTests
         Assert.NotEqual("So What", (await Dac()).GetProperty("player").GetProperty("title").GetString());
     }
 
-    // Before 1.1.22 a Core claiming the id the token was given for got it, wherever it answered from.
+    // Before 1.1.22 a Core claiming the id the token was given for got it, wherever it answered from. Now a
+    // Core other than the one the bridge was enabled in isn't even registered with: it could say the bridge
+    // was enabled and have its "token" kept, at its address.
+    [Theory]
+    [InlineData("core-1")]
+    [InlineData("core-2")]
+    public async Task Roon_ACoreOtherThanTheOneEnabled_IsLeft_AndGetsNoToken(string enabledIn)
+    {
+        using var core = new FakeRoonCore();
+        var before = new Dictionary<string, string>(StringComparer.Ordinal) { [enabledIn] = "tok-0", [enabledIn + "|host"] = "192.168.1.20:9330" };
+        var tokens = await RoonWithTokens(core, before);
+        await Until(async () => await RoonStatus() == $"Test Core at 127.0.0.1:{core.Port} isn't the Roon Core the bridge was enabled in: looking for that one (if it has moved, switch Roon now playing off and on)");
+
+        Assert.DoesNotContain(core.Got, g => g.Contains("registry:1/register", StringComparison.Ordinal));
+        Assert.DoesNotContain(core.Got, g => g.Contains("tok-0", StringComparison.Ordinal));
+        Assert.Equal(before, OwnerOnlyFile.ReadStrings(tokens));
+    }
+
+    // The owner's way to take up a Core that has moved: Roon now playing switched off and on. The token is
+    // kept, so Roon needn't be asked again.
     [Fact]
-    public async Task Roon_TheToken_IsntSent_ToACoreAtAnotherAddress()
+    public async Task Roon_SwitchedOffAndOn_TheCoreThatMoved_IsTakenUp()
     {
         using var core = new FakeRoonCore();
         var tokens = await RoonWithTokens(core, new(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20:9330" });
-        await Until(async () => await RoonStatus() == "connected to Test Core");
+        await Until(async () => (await RoonStatus())!.Contains("isn't the Roon Core the bridge was enabled in", StringComparison.Ordinal));
+        await Post("/api/services", "{\"roonApi\":false}");
+        Assert.Equal(new Dictionary<string, string>(StringComparer.Ordinal) { ["core-1"] = "tok-0" }, OwnerOnlyFile.ReadStrings(tokens));
 
-        var register = Assert.Single(core.Got, g => g.StartsWith("MOO/1 REQUEST com.roonlabs.registry:1/register", StringComparison.Ordinal));
-        Assert.DoesNotContain("tok-0", register, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"token\"", register, StringComparison.Ordinal);
-        // Enabled again at this address: the token it gave is kept with it.
+        await Post("/api/services", "{\"roonApi\":true}");
+        await Until(async () => await RoonStatus() == "connected to Test Core");
+        Assert.Contains(core.Got, g => g.StartsWith("MOO/1 REQUEST com.roonlabs.registry:1/register", StringComparison.Ordinal) && g.Contains("\"token\":\"tok-0\"", StringComparison.Ordinal));
         var kept = OwnerOnlyFile.ReadStrings(tokens);
         Assert.Equal(("tok-1", $"127.0.0.1:{core.Port}"), (kept["core-1"], kept["core-1|host"]));
     }
@@ -253,26 +295,10 @@ public sealed partial class EndToEndTests
     public async Task Roon_ACoreRegisteringAsAnotherCore_KeepsNothing(string registersAs)
     {
         using var core = new FakeRoonCore { RegistersAs = registersAs };
-        var before = new Dictionary<string, string>(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20:9330" };
+        var before = new Dictionary<string, string>(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = $"127.0.0.1:{core.Port}" };
         var tokens = await RoonWithTokens(core, before);
         await Until(async () => await RoonStatus() == "connected to Test Core");
         Assert.Equal(before, OwnerOnlyFile.ReadStrings(tokens));
-    }
-
-    // Refused the token and never enabled, a Core isn't waited on for ever: the enabled one may only have
-    // missed the last look.
-    [Fact]
-    public async Task Roon_ACoreRefusedTheToken_AndNeverEnabled_IsLeft_AndTheCoreLookedForAgain()
-    {
-        using var core = new FakeRoonCore { Enables = false };
-        var wait = Roon.RoonApi.ElsewhereWait;
-        Roon.RoonApi.ElsewhereWait = TimeSpan.FromMilliseconds(500);
-        try
-        {
-            await RoonWithTokens(core, new(StringComparer.Ordinal) { ["core-1"] = "tok-0", ["core-1|host"] = "192.168.1.20:9330" });
-            await Until(async () => await RoonStatus() == $"Test Core at 127.0.0.1:{core.Port} wasn't enabled for the bridge: looking for the Roon Core again");
-        }
-        finally { Roon.RoonApi.ElsewhereWait = wait; }
     }
 
     private async Task<string> RoonWithTokens(FakeRoonCore core, Dictionary<string, string> kept)

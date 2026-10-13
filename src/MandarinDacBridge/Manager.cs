@@ -156,6 +156,7 @@ internal sealed partial class Manager : IDisposable
             else if (!RoonApiOn && roonApi != null) { drop = roonApi; roonApi = null; }
         }
         drop?.Dispose();
+        drop?.ForgetAddresses();    // the owner's way to take up a Roon Core that has moved
     }
 
     // Roon Bridge beside the bridge, while switched on (Roon/RoonBridgeHost.cs).

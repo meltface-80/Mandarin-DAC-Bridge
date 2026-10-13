@@ -223,33 +223,25 @@ internal sealed class RoonApi : IDisposable
             ["required_services"] = new JsonArray("com.roonlabs.transport:2"), ["optional_services"] = new JsonArray(),
             ["provided_services"] = new JsonArray("com.roonlabs.ping:1")
         };
+        // Enabled in a Core elsewhere, the bridge talks to no other (RoonTokens.cs).
         var address = RoonTokens.Address(host, port);
         var grant = Token(coreId, address);
+        if (grant.Elsewhere)
+            throw new NotFound($"{CoreName} at {address} isn't the Roon Core the bridge was enabled in: looking for that one (if it has moved, switch Roon now playing off and on)");
         if (grant.Token != "") reg["token"] = grant.Token;
-        int registered = 0;
         Send("com.roonlabs.registry:1/register", reg, (verb, nm, body) =>
         {
             if (nm != "Registered") return;
-            Interlocked.Exchange(ref registered, 1);
             var j = Json(body);
             // Kept only for the id this Core gave as its own; another would bind that id to this address.
-            if (Str(j, "core_id") is var c && c != "" && c != coreId) Log($"{CoreName} registered the bridge as Core {c}, not {coreId}: its token isn't kept");
+            if (Str(j, "core_id") is var c && c != "" && c != coreId) Log($"{CoreName} registered the bridge under another Core's id: its token isn't kept");
             else if (Str(j, "token") is { Length: > 0 } tok) SaveToken(coreId, tok, address);
             Log($"enabled in {CoreName}");
             SetStatus($"connected to {CoreName}");
             Send("com.roonlabs.transport:2/subscribe_zones", new JsonObject { ["subscription_key"] = 0 }, (_, zn, zb) => Zoned(zn, zb));
         });
-        // A Core refused the token waits for the owner to enable the bridge in it; if that doesn't come, the
-        // Core that was enabled is looked for again (it may only have missed the last look).
-        if (grant.Elsewhere && await Task.WhenAny(reader, Task.Delay(ElsewhereWait, stop.Token)) != reader && Volatile.Read(ref registered) == 0)
-        {
-            socket.Abort();
-            throw new NotFound($"{CoreName} at {address} wasn't enabled for the bridge: looking for the Roon Core again");
-        }
         await reader;
     }
-
-    internal static TimeSpan ElsewhereWait = TimeSpan.FromMinutes(2);    // shorter in the tests
 
     // ------------------------------------------------------------ zones
 
@@ -312,11 +304,24 @@ internal sealed class RoonApi : IDisposable
         {
             var all = Tokens();
             var grant = RoonTokens.For(all, coreId, address);
-            if (grant.Elsewhere) Log($"{CoreName} answered from {address}, not where it was enabled: not sending it the token (if the Core has moved, enable the bridge again in Roon)");
             if (!grant.Bound) return grant;
             try { OwnerOnlyFile.WriteStrings(tokenFile, all); return grant; }
             catch (Exception e) { Log("couldn't keep the token's address, so it isn't sent: " + e.Message); return grant with { Token = "" }; }
         }
+    }
+
+    // Switched off by the owner: the next Core a token goes to is trusted on first use (RoonTokens.cs).
+    public void ForgetAddresses()
+    {
+        try
+        {
+            lock (tokenGate)
+            {
+                var all = OwnerOnlyFile.ReadStrings(tokenFile);
+                if (RoonTokens.Forget(all)) OwnerOnlyFile.WriteStrings(tokenFile, all);
+            }
+        }
+        catch (Exception e) { Log("couldn't forget the Cores' addresses: " + e.Message); }
     }
 
     private void SaveToken(string coreId, string token, string address)
