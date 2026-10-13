@@ -30,3 +30,4 @@ version's story; this is the index.
 | 1.1.21 | `dev` | DSD headers held to what DSD is; a file that never makes a whole block refused, not held (`audit/security-dsd-header-bounds`). |
 | 1.1.22 | `dev` | Roon's token sent only to the Core at the address that gave it (`audit/security-roon-token-binding`). |
 | 1.1.23 | `dev` | A cover is only what its server itself sends, said to be a picture, of a picture's size (`audit/security-cover-proxy`). |
+| 1.1.24 | `dev` | A browser must reach the bridge by one of its own names to read it too, not only to change it (`audit/security-rebinding-reads`). |
