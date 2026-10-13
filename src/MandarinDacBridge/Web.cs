@@ -60,14 +60,14 @@ internal static partial class Web
         return Encoding.UTF8.GetString(ms.ToArray());
     }
 
-    public static async Task Handle(HttpContext ctx, Manager manager, Events events)
+    public static async Task Handle(HttpContext ctx, Manager manager, Events events, IReadOnlyCollection<string> names)
     {
         var p = ctx.Request.Path.Value ?? "/";
         var method = ctx.Request.Method;
         Match m;
 
         var h0 = ctx.Request.Headers;
-        if (SameOrigin.Refusal(method, h0["Sec-Fetch-Site"].ToString(), h0.Origin.ToString(), ctx.Request.Host.Value ?? "") is { } no)
+        if (SameOrigin.Refusal(method, h0["Sec-Fetch-Site"].ToString(), h0.Origin.ToString(), ctx.Request.Host.Value ?? "", names) is { } no)
         {
             Log.Write($"refused {method} {p}: {no}");
             await Send(ctx, 403, "text/plain", "refused: " + no);

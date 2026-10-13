@@ -5,6 +5,7 @@
 //   DATA_DIR             settings.json lives here (data/ beside the program)
 //   FFMPEG               the decoder (ffmpeg on the PATH, or Homebrew's)
 //   BRIDGE_IP            the address to advertise, when the machine has several
+//   BRIDGE_HOSTNAMES     other names the page is reached by (your own DNS names), comma-separated
 //   LOCK_GRACE_S         how long a controller keeps a DAC after it stops (10)
 //   MANDARIN_PORT        Mandarin's own port, to recognise its streams (3500)
 //   BRIDGE_ALL_OUTPUTS   1 = offer every output, not only USB DACs
@@ -35,6 +36,7 @@ internal sealed class Config
     public string Ffmpeg { get => ffmpeg.Length > 0 ? ffmpeg : Found.Value; init => ffmpeg = value; }
     private static readonly Lazy<string> Found = new(FindFfmpeg);
     public string BindIp { get; init; } = "";
+    public string[] HostNames { get; init; } = [];
     public TimeSpan LockGrace { get; init; } = TimeSpan.FromSeconds(10);
     public int MandarinPort { get; init; } = 3500;
     public bool AllOutputs { get; init; }
@@ -54,6 +56,8 @@ internal sealed class Config
     public string RoonCore { get; init; } = "";
     public TimeSpan ScanEvery { get; init; } = TimeSpan.FromSeconds(3);
     public string Hostname { get; init; } = System.Net.Dns.GetHostName().Replace(".local", "");
+    // The names a browser may reach the bridge by for a change to go ahead (SameOrigin.cs), besides addresses.
+    public string[] Names() => [Hostname, BindIp, .. HostNames];
     public string Platform { get; init; } = OperatingSystem.IsMacOS() ? "darwin" : OperatingSystem.IsLinux() ? "linux" : OperatingSystem.IsWindows() ? "windows" : "other";
     // Tests: DACs given rather than found (JSON), and played to a clock rather than a device.
     public string? TestDevices { get; init; }
@@ -69,6 +73,7 @@ internal sealed class Config
             DataDir = Env("DATA_DIR") ?? Path.Combine(AppContext.BaseDirectory, "data"),
             Ffmpeg = Env("FFMPEG") ?? "",
             BindIp = Env("BRIDGE_IP") ?? "",
+            HostNames = (Env("BRIDGE_HOSTNAMES") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             LockGrace = TimeSpan.FromSeconds(double.TryParse(Env("LOCK_GRACE_S"), System.Globalization.CultureInfo.InvariantCulture, out var g) ? g : 10),
             MandarinPort = int.TryParse(Env("MANDARIN_PORT"), out var mp) ? mp : 3500,
             AllOutputs = Env("BRIDGE_ALL_OUTPUTS") == "1",

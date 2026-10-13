@@ -112,7 +112,8 @@ namespace MandarinDacBridge
                 k.AddServerHeader = false;
             });
             app = builder.Build();
-            app.Run(ctx => Web.Handle(ctx, Manager, Events));
+            var names = config.Names();
+            app.Run(ctx => Web.Handle(ctx, Manager, Events, names));
             await app.StartAsync();
 
             Log.Write($"Mandarin DAC Bridge {Config.Version} on {config.Platform}");

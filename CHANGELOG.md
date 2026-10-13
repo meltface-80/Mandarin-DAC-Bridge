@@ -3,6 +3,21 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.11] — 2026-10-13
+
+### Fixed
+
+- **Another website could still change the bridge, by pointing a name of its own at it (DNS
+  rebinding).** 1.1.3 refuses a change that a browser says comes from another site. But a site that
+  points its own name at the bridge's address makes its page and the bridge one site in the
+  browser's eyes, and the browser says "same-origin": switching connections on, starting downloads
+  and turning a DAC up went through again. Now a change from a browser must also be addressed to the
+  bridge by an address, `localhost`, or this machine's name (with or without `.local`), or a name in
+  the new **`BRIDGE_HOSTNAMES`** (for a name of your own in your DNS). Programs that aren't browsers
+  are unaffected. Class of error: trusting what the browser says about the origin without checking
+  which name it was given. Gate: the same-origin tests now send a rebound name, end to end and case
+  by case (they failed with the check removed on purpose). Found by the 1.1.9 audit.
+
 ## [1.1.10] — 2026-10-13
 
 ### Fixed
