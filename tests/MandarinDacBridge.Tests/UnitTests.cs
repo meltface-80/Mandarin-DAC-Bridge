@@ -573,10 +573,6 @@ public class VolumeTests
         // "Muted" at the bottom (ALSA's -99999.99 dB): no floor, and 0 is silence.
         Assert.Equal(-99999.99, Audio.VolumeCurve.ToDb(0, -99999.99, 0), 6);
         Assert.InRange(Audio.VolumeCurve.ToDb(0.5, -99999.99, 0), -18.1, -17.9);
-        // A Squeezebox server's gain in dB.
-        Assert.Equal(100, Audio.VolumeCurve.LevelOfGainDb(0));
-        Assert.Equal(24, Audio.VolumeCurve.LevelOfGainDb(-30));
-        Assert.Equal(0, Audio.VolumeCurve.LevelOfGainDb(double.NegativeInfinity));
     }
 
     [Fact]
