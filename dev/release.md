@@ -53,7 +53,10 @@ pull request's `Checks` run still has to pass. The change still gets a normal re
 2. Bump `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj`.
 3. Add a `CHANGELOG.md` entry (format below).
 4. `tools/check.sh` — the gates and the whole suite (`dev/quality.md`).
-5. Commit in one commit: code + version + CHANGELOG.
+5. Commit in one commit: code + version + CHANGELOG. One exception (the owner's decision,
+   2026-10-12): a pure move out of an oversized file, with behaviour unchanged and the baseline
+   ratcheted, may come first as a commit of its own on the same branch, so the fix that follows is
+   reviewed apart from the move. The branch's last commit carries the version and the CHANGELOG.
 6. Push the branch (cut from `dev`).
 7. Wait for that commit's **Test image** run (`test-image.yml`) to finish green — check it through
    the GitHub API (workflow runs for the branch, matching the pushed SHA). Its `checks` jobs (every

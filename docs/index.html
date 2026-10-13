@@ -191,7 +191,7 @@
      (Caldera Headless); on a Mac, the Music and Spotify apps play through it too. Beside Roon Bridge, with a
      now-playing screen. On macOS, Windows and Linux.</p>
   <div class="badges">
-    <span class="badge">v1.0.0</span>
+    <span class="badge">v1.1.3</span>
     <span class="badge plain">macOS 14+ · macOS 27</span>
     <span class="badge plain">Windows 10 · 11</span>
     <span class="badge plain">Linux · Docker</span>
@@ -253,8 +253,9 @@
         <p>Audirvana or Mandarin, whichever is playing, is in control. The other is kept out until it stops,
           and the page shows who has each DAC and who was kept out.</p></div>
       <div class="card"><h3><span class="em">💿</span>DSD as DoP</h3>
-        <p>DSF and DFF files go to the DAC as DoP, untouched (DSD64 to DSD256). DoP is on automatically when a
-          DAC reports native DSD; elsewhere, switch it on per DAC.</p></div>
+        <p>DSF and DFF files go to the DAC as DoP, untouched (DSD64 to DSD512, as far as the DAC's rates reach).
+          DoP is on automatically on Linux when a DAC reports native DSD; on a Mac and Windows, switch it on per DAC.
+          Where DoP is off, DSD is converted to PCM.</p></div>
       <div class="card"><h3><span class="em">⏭️</span>Gapless</h3>
         <p>When an app sends the next track ahead of time, a track at the same rate follows with no gap. A
           different rate plays out first, then the DAC switches.</p></div>
@@ -291,7 +292,8 @@
       <div class="note"><b>What it installs:</b> Homebrew (if missing; the same one Mandarin uses) and Homebrew's
         <code>ffmpeg-full</code>, ffmpeg built with SoX, the resampler the bridge needs (a few hundred MB, once; it sits
         beside Mandarin's ffmpeg). Then the bridge itself, one program in
-        <code>~/Mandarin-DAC-Bridge</code>. <b>To update</b>, paste the same line again; your settings are kept.</div>
+        <code>~/Mandarin-DAC-Bridge</code>. <b>To update</b>, paste the same line again; what you set on the page is
+        kept (environment variables added to the launch file by hand are not: add them again).</div>
       <details class="firstrun">
         <summary><b>Prefer to install by hand?</b></summary>
         <div class="out" style="margin-top:14px">
@@ -303,6 +305,7 @@
 <pre>brew install ffmpeg-full
 mkdir -p ~/Mandarin-DAC-Bridge
 tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
+xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser: let macOS run it
 ~/Mandarin-DAC-Bridge/mandarin-dac-bridge --list    # the DACs it can see
 ~/Mandarin-DAC-Bridge/mandarin-dac-bridge           # run it; Control-C stops it</pre>
           </div>
@@ -414,8 +417,10 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
 <section id="more">
   <div class="wrap">
     <h2>More ways to play</h2>
-    <p class="lead">UPnP is always on. These are optional, and go through the same exclusive, rate-switched path and
-      the same one-app-at-a-time rule: whatever is playing keeps the others out until it stops.</p>
+    <p class="lead">UPnP is always on. These are optional. Squeezebox, Spotify, Qobuz and the Mac's apps go through the
+      same exclusive, rate-switched path and the same one-app-at-a-time rule: whatever is playing keeps the others out
+      until it stops. Caldera (Plex) and Roon Bridge play to the DAC themselves, and the bridge lets go of it for them
+      while nothing plays through it.</p>
     <div class="info-cards">
       <div class="info-card" id="squeezebox">
         <div class="sym">Squeezebox · squeezelite</div>
@@ -493,7 +498,7 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
         <p>Switch on <b>Roon Bridge</b> under <i>Connections</i> and press <b>Download Roon Bridge</b>. Like RoPieee, the
           bridge fetches Roon's own build from Roon Labs. On Linux and in Docker it's unpacked, checked with Roon's own
           check, and run by the bridge (no root, no system service; it updates itself). On a Mac the app goes into
-          Applications and is opened; on Windows Roon's installer opens. Then in Roon: <i>Settings → Audio</i>, and enable
+          your own Applications folder (<code>~/Applications</code>) and is opened; on Windows Roon's installer opens. Then in Roon: <i>Settings → Audio</i>, and enable
           the DACs under this machine's name.</p>
         <p>Roon Bridge plays to the DACs itself, so while it's on the bridge lets go of each DAC whenever nothing plays
           through it, and takes it back when an app plays to the bridge (once Roon has let go). A Roon Bridge installed
@@ -539,7 +544,9 @@ tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
       </div>
       <div class="note">It stops the bridge, removes it from login, and deletes <code>~/Mandarin-DAC-Bridge</code>
         (the program, its settings and its log). Homebrew and ffmpeg stay, because Mandarin uses them too. If
-        nothing else needs ffmpeg-full: <code>brew uninstall ffmpeg-full</code>.</div>
+        nothing else needs ffmpeg-full: <code>brew uninstall ffmpeg-full</code>. The DAC Bridge output, if you installed it, stays
+        until <code>driver.sh</code> removes it (<a href="#mac-apps">above</a>), and a Roon Bridge the bridge downloaded
+        stays in <code>~/Applications</code>.</div>
       <details class="firstrun">
         <summary><b>By hand instead</b></summary>
         <div class="codebox" style="margin-top:14px">
@@ -591,7 +598,8 @@ docker compose down --rmi local --volumes</pre>
       machine can use it), choose how DSD files go (Auto, DoP or PCM), share it with other players while idle, and hand
       the DAC over to another app at once (Release). Squeezebox, Spotify, Qobuz, Plex and the Mac's apps are switched on
       under <i>Connections</i>.
-      The rest are environment variables.</p>
+      The rest are environment variables. A switch, server address or key set by a variable only sets how the bridge
+      starts: once it is set on the page, the page's choice wins.</p>
     <div class="tablewrap">
       <table>
         <thead><tr><th>Variable</th><th>Default</th><th>What it does</th></tr></thead>
@@ -603,6 +611,7 @@ docker compose down --rmi local --volumes</pre>
           <tr><td>BRIDGE_ALL_OUTPUTS</td><td>&mdash;</td><td><code>1</code> also offers non-USB outputs.</td></tr>
           <tr><td>BRIDGE_NAME_SUFFIX</td><td>" (Bridge)"</td><td>Added to each DAC's name on the network.</td></tr>
           <tr><td>DATA_DIR</td><td>data/</td><td>Where <code>settings.json</code> lives (<code>/data</code> in Docker).</td></tr>
+          <tr><td>FFMPEG</td><td>on the PATH, or Homebrew's</td><td>The decoder.</td></tr>
           <tr><td>SQUEEZELITE</td><td>&mdash;</td><td><code>1</code> starts with Squeezebox on (the page's switch, once used, wins).</td></tr>
           <tr><td>LMS_SERVER</td><td>&mdash;</td><td>The Squeezebox server's address, if it isn't found by itself.</td></tr>
           <tr><td>SPOTIFY</td><td>&mdash;</td><td><code>1</code> starts with Spotify Connect on (Spotify Soloist, Linux).</td></tr>
@@ -632,7 +641,7 @@ docker compose down --rmi local --volumes</pre>
           <tr><td>Apple Music</td><td>The Music app, through DAC Bridge</td><td>&mdash;</td><td>&mdash;</td></tr>
           <tr><td>Qobuz Connect</td><td>QobuzProxy</td><td>QobuzProxy</td><td>QobuzProxy</td></tr>
           <tr><td>Plex</td><td>&mdash;</td><td>&mdash;</td><td>Caldera Headless</td></tr>
-          <tr><td>Settings live</td><td><code>~/Library/LaunchAgents/app.mandarin.dacbridge.plist</code></td><td>user environment variables (<code>setx PORT 55501</code>), then sign in again</td><td><code>environment:</code> in the compose file, or <code>-e</code></td></tr>
+          <tr><td>Settings live</td><td><code>~/Library/LaunchAgents/app.mandarin.dacbridge.plist</code> (written afresh by each update)</td><td>user environment variables (<code>setx LOCK_GRACE_S 20</code>), then sign in again; leave <code>PORT</code> at 55500</td><td><code>environment:</code> in the compose file, or <code>-e</code></td></tr>
         </tbody>
       </table>
     </div>
@@ -732,6 +741,7 @@ docker compose down --rmi local --volumes</pre>
         "services:\n  dac-bridge:\n" +
         "    build: " + REPO + "\n" +
         "    image: mandarin-dac-bridge\n" +
+        "    pull_policy: build\n" +
         "    container_name: mandarin-dac-bridge\n" +
         "    restart: unless-stopped\n" +
         "    network_mode: host\n" +
@@ -744,7 +754,8 @@ docker compose down --rmi local --volumes</pre>
         (port !== "55500" ? '      PORT: "' + port + '"\n' : "") +
         (ip ? '      BRIDGE_IP: "' + esc(ip) + '"\n' : "") + "\n" +
         "volumes:\n  dac-bridge-data:\n    name: dac-bridge-data";
-      note = "To update later, in the same folder: docker compose up -d --build. " +
+      note = "To update later, in the same folder: docker compose up -d --build, or Update in Dockge or Portainer: " +
+        "it builds the latest code from GitHub (pull_policy: build; there is no image to pull). " +
         "(A clone of the repository works too: git clone, then docker compose up -d --build in it.)";
     }
     $("cmd").innerHTML = out;

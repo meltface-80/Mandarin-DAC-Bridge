@@ -11,6 +11,7 @@
 //   BRIDGE_NAME_SUFFIX   added to each DAC's name on the network (" (Bridge)")
 //   SQUEEZELITE          1 = each DAC is a Squeezebox player too (also a switch on the page)
 //   LMS_SERVER           the Squeezebox server (Lyrion, Roon) to use, instead of looking for one
+//   LMS_JSON_PORT        that server's web port, if it isn't 9000 (for its JSON-RPC: what it plays, its volume)
 //   SPOTIFY              1 = each DAC is a Spotify Connect speaker too, through Spotify Soloist (Linux; also on the page)
 //   SOLOIST_API_KEY      your Soloist API key (or typed on the page; kept in settings.json, never shown again)
 //   SOLOIST              the soloist program (else on the PATH, or downloaded by the page into DATA_DIR/soloist)
@@ -41,6 +42,7 @@ internal sealed class Config
     // Defaults for the page's switches (the page's choice, once made, is kept in settings.json).
     public bool Squeezelite { get; init; }
     public string LmsServer { get; init; } = "";
+    public int LmsJsonPort { get; init; } = 9000;
     public bool Spotify { get; init; }
     public string Soloist { get; init; } = "";
     public string SoloistKey { get; init; } = "";
@@ -73,6 +75,7 @@ internal sealed class Config
             NameSuffix = Environment.GetEnvironmentVariable("BRIDGE_NAME_SUFFIX") ?? " (Bridge)",
             Squeezelite = Env("SQUEEZELITE") == "1",
             LmsServer = Env("LMS_SERVER") ?? "",
+            LmsJsonPort = int.TryParse(Env("LMS_JSON_PORT"), System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var jp) && jp is > 0 and < 65536 ? jp : 9000,
             Spotify = Env("SPOTIFY") == "1",
             Soloist = Env("SOLOIST") ?? "",
             SoloistKey = Env("SOLOIST_API_KEY") ?? "",
