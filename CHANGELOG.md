@@ -3,6 +3,22 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.7] — 2026-10-13
+
+### Fixed
+
+- **Update in Dockge (or Portainer) failed with "pull access denied for mandarin-dac-bridge".** The
+  Compose files (the repository's and the one the site writes) build the bridge and name the image
+  `mandarin-dac-bridge`, which exists nowhere to pull. Dockge's Update runs `docker compose pull`
+  first, which asked Docker Hub for it and failed; and a plain `docker compose up -d` kept the image
+  it already had instead of building the new code. Both files now say `pull_policy: build`: pull
+  skips the bridge and every `up` builds the latest code. A Compose file made before this needs the
+  line added under `dac-bridge:` (README, *Install with Docker*). Class of error: a Compose file that
+  builds its image but leaves the pull policy at its default; the new `ComposeTests` fail on any
+  service in either file that builds without `pull_policy: build`. Tried with Docker 29 and Compose
+  5.6: `pull` fails before and is skipped after, and `up` rebuilds only with the line. Not tried in
+  Dockge itself.
+
 ## [1.1.4] — 2026-10-12
 
 ### Fixed

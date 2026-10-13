@@ -10,3 +10,4 @@ version's story; this is the index.
 | 1.1.1 | `main` (#9), not published as a release | Test images on GitHub's container registry: `<version>-test` per branch, `dev` for the dev branch (`feature/test-image`). |
 | 1.1.2 | `dev` | A Squeezebox server's volume no longer moves the DAC on connect (`fix/volume-on-connect`). |
 | 1.1.4 | `dev` | Settings and secrets files: kept when unreadable, owner-only from the start; Caldera's folder owner-only (`fix/settings-and-secrets`). |
+| 1.1.7 | `dev` | Compose files build the bridge on Update and never pull it: Dockge's and Portainer's Update work (`fix/compose-update`). |

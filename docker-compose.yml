@@ -3,6 +3,9 @@ services:
   dac-bridge:
     build: .
     image: mandarin-dac-bridge
+    # Built here, never pulled: there is no published image to pull, so `docker compose pull` (Dockge's
+    # and Portainer's Update) skips it, and every `up` builds the current code.
+    pull_policy: build
     container_name: mandarin-dac-bridge
     restart: unless-stopped
     # UPnP, Squeezebox and Spotify discovery are multicast/broadcast: the container must be on the host's network.
