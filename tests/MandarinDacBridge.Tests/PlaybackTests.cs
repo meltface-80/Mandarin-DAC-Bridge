@@ -14,13 +14,15 @@ public sealed partial class EndToEndTests
     public async Task PlaysInRealTime_KeepsOthersOut_Gapless_Seeks_Pauses_ChangesRate()
     {
         if (!HasFfmpeg()) return;
+        Make("d96.flac", 96000, 6, "s32");   // room for a slow runner's controller calls
         var id = await Start(Dev("clock"));
 
-        // Audirvana loads and plays a 96 kHz track with a 96 kHz one next (gapless).
-        Assert.Equal(200, (await Av(id, "SetAVTransportURI", new() { ["CurrentURI"] = Url("a96.flac"), ["CurrentURIMetaData"] = "" }, Aud)).Status);
+        // Audirvana loads and plays a 96 kHz track (six seconds) with a 96 kHz one next (gapless).
+        Assert.Equal(200, (await Av(id, "SetAVTransportURI", new() { ["CurrentURI"] = Url("d96.flac"), ["CurrentURIMetaData"] = "" }, Aud)).Status);
         Assert.Equal(200, (await Av(id, "SetNextAVTransportURI", new() { ["NextURI"] = Url("b96.flac"), ["NextURIMetaData"] = "" }, Aud)).Status);
         Assert.Equal(200, (await Av(id, "Play", new() { ["Speed"] = "1" }, Aud)).Status);
         await Until(async () => await State(id) == "PLAYING");
+        var playing = System.Diagnostics.Stopwatch.StartNew();
 
         // Mandarin (no User-Agent) tries to take over while it plays: kept out, with 705.
         var r = await Av(id, "SetAVTransportURI", new() { ["CurrentURI"] = Url("c44.flac"), ["CurrentURIMetaData"] = "" });
@@ -32,15 +34,20 @@ public sealed partial class EndToEndTests
         Assert.Equal("96 kHz · 24-bit · FLAC", v1.GetProperty("player").GetProperty("format").GetString());
         Assert.NotEqual(JsonValueKind.Null, v1.GetProperty("control").GetProperty("blocked").ValueKind);
 
-        // The position follows the DAC's clock.
-        await Task.Delay(1200);
+        // The position follows the DAC's clock: about the time since it started playing, however long the
+        // calls above took (a slow Windows runner took over three seconds, past a shorter first track's end).
+        // Two seconds in at least, so that a clock that doesn't run can't pass.
+        await Task.Delay(2200);
+        var asked = playing.Elapsed.TotalSeconds;
         var pos = (await Av(id, "GetPositionInfo")).Out;
-        Assert.Equal(Url("a96.flac"), pos["TrackURI"]);
-        Assert.Matches(@"^0:00:0[12]$", pos["RelTime"]);
-        Assert.Equal("0:00:03", pos["TrackDuration"]);
+        var answered = playing.Elapsed.TotalSeconds;
+        Assert.Equal(Url("d96.flac"), pos["TrackURI"]);
+        var rel = TimeSpan.Parse(pos["RelTime"], System.Globalization.CultureInfo.InvariantCulture).TotalSeconds;
+        Assert.InRange(rel, Math.Floor(asked) - 1, answered + 1);
+        Assert.Equal("0:00:06", pos["TrackDuration"]);
 
         // The next track takes over when the DAC gets to it; NextURI empties.
-        await Until(async () => (await Av(id, "GetPositionInfo")).Out["TrackURI"] == Url("b96.flac"), 6000);
+        await Until(async () => (await Av(id, "GetPositionInfo")).Out["TrackURI"] == Url("b96.flac"), 10000);
         var mi = (await Av(id, "GetMediaInfo")).Out;
         Assert.Equal(Url("b96.flac"), mi["CurrentURI"]);
         Assert.Equal("", mi.GetValueOrDefault("NextURI", ""));
