@@ -3,6 +3,29 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.24] — 2026-10-13
+
+### Fixed
+
+- **Another website could read the bridge's page through a name of its own.**
+  - A site can point a name of its own at the bridge's address (DNS rebinding). To the browser,
+    its page and the bridge are then one site. Changes were already refused unless the browser
+    had reached the bridge by one of its own names, but reads were not. Such a page could read
+    `/api/dacs` and `/api/services`: the Plex account, the Qobuz email, the hostname, what is
+    playing.
+  - Anything from a browser, a read too, now goes ahead only when the browser reached the bridge
+    by its address, `localhost`, or one of this machine's names (`BRIDGE_HOSTNAMES` adds one).
+    Programs that aren't browsers (UPnP controllers, a Squeezebox server, `curl`) are unaffected.
+  - Who notices: someone who opens the page by a name the bridge doesn't know now gets a refusal
+    naming `BRIDGE_HOSTNAMES`, where before they could look but not change anything.
+  - Not closed: a browser too old to send `Sec-Fetch-Site` says nothing on a read from the
+    page's own site, so it can't be told from a program.
+  - Class of error: a check on who is asking applied to changes but not to reads of private
+    data.
+  - Gate: `AReadFromABrowser_MustBeAddressedToThisMachine`, and reads added to the end-to-end
+    rebinding case. Both failed before the fix (5 cases).
+  - Found by the 2026-10-13 audit (S5).
+
 ## [1.1.23] — 2026-10-13
 
 ### Fixed

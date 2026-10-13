@@ -436,9 +436,9 @@ browser, only the bridge's own page can change anything: a request that another 
 to the bridge (to switch a connection on, start a download or turn a DAC up) is refused. Programs
 that aren't browsers (Audirvana, Mandarin, a Squeezebox server, `curl`) aren't affected. A browser
 must also have reached the bridge by its address, `localhost`, or the machine's own name (with or
-without `.local`): another site can't point a name of its own at the bridge to get round this. If
-you open the page by a name of your own (from your router's or Pi-hole's DNS), add it to
-`BRIDGE_HOSTNAMES`, or changes made on the page are refused. An optional password is planned.
+without `.local`), to change anything or to read it: another site can't point a name of its own at
+the bridge to get round this. If you open the page by a name of your own (from your router's or
+Pi-hole's DNS), add it to `BRIDGE_HOSTNAMES`, or the page is refused. An optional password is planned.
 
 ### Settings (all optional)
 

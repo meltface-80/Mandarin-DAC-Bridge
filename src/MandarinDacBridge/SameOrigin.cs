@@ -1,4 +1,5 @@
-// SameOrigin.cs — from a browser, only the bridge's own page may change anything.
+// SameOrigin.cs — from a browser, only the bridge's own page may change anything, and only a page
+// addressed to this machine may read it.
 //
 // A request that changes something (a POST to the API, a SOAP action, a subscription) is refused when
 // the browser says it comes from another site. Otherwise any page of any site, opened in a browser
@@ -9,9 +10,12 @@
 //
 // A browser also says which name it reached the bridge by (Host). Another site can point a name of its
 // own at the bridge's address (DNS rebinding): its page and the bridge then look like one site to the
-// browser, and Sec-Fetch-Site says same-origin. So a change from a browser goes ahead only when it was
-// addressed to an address, to localhost, or to one of this machine's names: its hostname (with or
-// without .local), BRIDGE_IP, and the names in BRIDGE_HOSTNAMES (for a name of your own in your DNS).
+// browser, and Sec-Fetch-Site says same-origin: that page could change things, and read what the bridge
+// shows (the Plex account, the Qobuz email, what's playing). So anything from a browser, a read too, goes
+// ahead only when it was addressed to an address, to localhost, or to one of this machine's names: its
+// hostname (with or without .local), BRIDGE_IP, and the names in BRIDGE_HOSTNAMES (for a name of your own
+// in your DNS). Before 1.1.24 only a change was. A browser too old to say Sec-Fetch-Site says nothing on a
+// read from the page's own site, so it can't be told from a program there.
 using System.Net;
 
 namespace MandarinDacBridge;
@@ -22,10 +26,10 @@ internal static class SameOrigin
     // this machine's (Config.Names).
     public static string? Refusal(string method, string fetchSite, string origin, string host, IReadOnlyCollection<string> names)
     {
-        if (method is "GET" or "HEAD" or "OPTIONS") return null;
         bool browser = fetchSite != "" || origin != "";
         if (browser && !Ours(NameIn(host), names))
             return $"addressed to {NameIn(host)}, which isn't this machine's name or address (BRIDGE_HOSTNAMES adds a name)";
+        if (method is "GET" or "HEAD" or "OPTIONS") return null;
         if (fetchSite != "") return fetchSite is "same-origin" or "none" ? null : $"sent from another site ({fetchSite})";
         if (origin == "") return null;
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var o)) return $"sent from an unknown origin ({origin})";
