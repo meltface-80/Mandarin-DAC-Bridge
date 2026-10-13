@@ -12,6 +12,9 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
     // plex.tv (the tests answer for it).
     internal static string PlexTv = "https://plex.tv";
 
+    // How long one question to plex.tv is waited on: Sources.Http itself waits for ever (it streams tracks).
+    internal static TimeSpan Ask = TimeSpan.FromSeconds(15);
+
     private readonly object gate = new();
     private CancellationTokenSource? polling;
 
@@ -34,13 +37,14 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
         {
             using var req = Request(HttpMethod.Get, $"{PlexTv}/api/v2/user", clientId);
             req.Headers.TryAddWithoutValidation("X-Plex-Token", token);
-            using var res = await Sources.Http.SendAsync(req);
+            using var cts = new CancellationTokenSource(Ask);
+            using var res = await Sources.Http.SendAsync(req, cts.Token);
             if (!res.IsSuccessStatusCode) return "";
-            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
+            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cts.Token));
             foreach (var k in new[] { "username", "title", "email" })
                 if (doc.RootElement.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s) return s;
         }
-        catch (Exception) { /* offline, or plex.tv changed */ }
+        catch (Exception) { /* offline, plex.tv slow or changed: the name stays unknown until the bridge next starts or signs in */ }
         return "";
     }
 
@@ -63,13 +67,21 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
         }
         try
         {
-            using var res = await Sources.Http.SendAsync(Request(HttpMethod.Post, $"{PlexTv}/api/v2/pins", clientId), cts.Token);
+            using var one = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+            one.CancelAfter(Ask);
+            using var res = await Sources.Http.SendAsync(Request(HttpMethod.Post, $"{PlexTv}/api/v2/pins", clientId), one.Token);
             res.EnsureSuccessStatusCode();
-            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cts.Token));
+            using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(one.Token));
             var id = doc.RootElement.GetProperty("id").GetInt64();
             Code = doc.RootElement.GetProperty("code").GetString() ?? "";
             Message = "";
             _ = Poll(id, cts);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested) { /* signed out, or a newer code asked for: that says what's what */ }
+        catch (OperationCanceledException)
+        {
+            Code = "";
+            Message = "plex.tv didn't answer: try again";
         }
         catch (Exception e)
         {
@@ -85,9 +97,17 @@ internal sealed class PlexLink(string clientId, Action<string> gotToken)
             while (!cts.IsCancellationRequested)
             {
                 await Task.Delay(2000, cts.Token);
-                using var res = await Sources.Http.SendAsync(Request(HttpMethod.Get, $"{PlexTv}/api/v2/pins/{id}", clientId), cts.Token);
-                if (!res.IsSuccessStatusCode) continue;
-                using var doc = JsonDocument.Parse(await res.Content.ReadAsStringAsync(cts.Token));
+                using var one = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                one.CancelAfter(Ask);
+                string body;
+                try
+                {
+                    using var res = await Sources.Http.SendAsync(Request(HttpMethod.Get, $"{PlexTv}/api/v2/pins/{id}", clientId), one.Token);
+                    if (!res.IsSuccessStatusCode) continue;
+                    body = await res.Content.ReadAsStringAsync(one.Token);
+                }
+                catch (OperationCanceledException) when (!cts.IsCancellationRequested) { continue; }   // that one went unanswered: ask again
+                using var doc = JsonDocument.Parse(body);
                 if (doc.RootElement.TryGetProperty("authToken", out var t) && t.ValueKind == JsonValueKind.String && t.GetString() is { Length: > 0 } token)
                 {
                     Code = "";

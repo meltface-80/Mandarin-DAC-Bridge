@@ -64,21 +64,25 @@ internal static partial class RoonDownload
             throw new InvalidOperationException("unpacking Roon Bridge needs bzip2: sudo apt install bzip2 (it's in the Docker image)");
         var file = Path.Combine(root, pkg);
         progress("downloading from Roon Labs…");
-        using (var res = await Sources.Http.GetAsync($"{Base}/{pkg}", HttpCompletionOption.ResponseHeadersRead, ct))
-        {
-            res.EnsureSuccessStatusCode();
-            await using var body = await res.Content.ReadAsStreamAsync(ct);
-            await using var f = File.Create(file);
-            await body.CopyToAsync(f, ct);
-        }
         try
         {
-            if (OperatingSystem.IsLinux()) return await UnpackLinux(dataDir, file, progress, ct);
-            if (OperatingSystem.IsMacOS()) return await InstallMac(root, file, progress, ct);
+            await using (var body = await Download.Open($"{Base}/{pkg}", ct))
+            await using (var f = File.Create(file))
+                await body.CopyToAsync(f, ct);
+            // Roon's own scripts and Apple's tools, run on what came: ten minutes at most, so a step that hangs
+            // can't hold the page's Download for ever.
+            using var steps = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            steps.CancelAfter(TimeSpan.FromMinutes(10));
+            if (OperatingSystem.IsLinux()) return await UnpackLinux(dataDir, file, progress, steps.Token);
+            if (OperatingSystem.IsMacOS()) return await InstallMac(root, file, progress, steps.Token);
             // Windows: Roon's own installer, to click through on this machine's screen.
             Process.Start(new ProcessStartInfo(file) { UseShellExecute = true })?.Dispose();
             file = "";
             return "installer opened";
+        }
+        catch (OperationCanceledException e) when (!ct.IsCancellationRequested)
+        {
+            throw new TimeoutException("setting Roon Bridge up took over ten minutes: try again", e);
         }
         finally { if (file != "") try { File.Delete(file); } catch (Exception) { /* left behind */ } }
     }
@@ -133,7 +137,11 @@ internal static partial class RoonDownload
             (code, output) = await Run("/usr/bin/ditto", [app, MacApp], ct);
             if (code != 0) throw new InvalidOperationException("couldn't copy Roon Bridge: " + Last(output));
         }
-        finally { await Run("/usr/bin/hdiutil", ["detach", mount, "-quiet"], CancellationToken.None); }
+        finally
+        {
+            using var detach = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+            await Run("/usr/bin/hdiutil", ["detach", mount, "-quiet"], detach.Token);
+        }
         return "installed";
     }
 
@@ -142,6 +150,11 @@ internal static partial class RoonDownload
         var psi = new ProcessStartInfo(exe) { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false };
         foreach (var a in args) psi.ArgumentList.Add(a);
         using var p = Process.Start(psi) ?? throw new InvalidOperationException($"{exe} didn't start");
+        // Given up on: stopped, with whatever it started, rather than left running.
+        using var kill = ct.Register(() =>
+        {
+            try { p.Kill(entireProcessTree: true); } catch (Exception) { /* already gone */ }
+        });
         var o = p.StandardOutput.ReadToEndAsync(ct);
         var e = p.StandardError.ReadToEndAsync(ct);
         await p.WaitForExitAsync(ct);

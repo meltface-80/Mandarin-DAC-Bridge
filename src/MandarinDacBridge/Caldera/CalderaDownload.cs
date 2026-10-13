@@ -6,7 +6,6 @@
 using System.Formats.Tar;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
-using System.Text.Json;
 
 namespace MandarinDacBridge.Caldera;
 
@@ -42,27 +41,20 @@ internal static class CalderaDownload
         var tmp = target + ".new";
         if (Directory.Exists(tmp)) Directory.Delete(tmp, true);
         Directory.CreateDirectory(tmp);
-        using (var res = await Sources.Http.GetAsync($"{Base}/latest/caldera-music-linux-{arch}.tar.gz", HttpCompletionOption.ResponseHeadersRead, ct))
+        try
         {
-            res.EnsureSuccessStatusCode();
-            await using var body = await res.Content.ReadAsStreamAsync(ct);
+            await using var body = await Download.Open($"{Base}/latest/caldera-music-linux-{arch}.tar.gz", ct);
             await using var gz = new GZipStream(body, CompressionMode.Decompress);
             await TarFile.ExtractToDirectoryAsync(gz, tmp, overwriteFiles: true, ct);
+        }
+        catch (Exception)
+        {
+            try { Directory.Delete(tmp, true); } catch (Exception) { /* held: the next download starts by removing it */ }
+            throw;
         }
         if (!File.Exists(Path.Combine(tmp, "bin", "caldera-music"))) throw new InvalidDataException("Caldera's archive has no caldera-music program in it");
         if (Directory.Exists(target)) Directory.Delete(target, true);
         Directory.Move(tmp, target);
         return Version(dataDir);
-    }
-
-    // The newest version Caldera publishes ("1.1.0"), or "" if it can't be read.
-    public static async Task<string> Latest(CancellationToken ct)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(await Sources.Http.GetStringAsync($"{Base}/latest/latest.json", ct));
-            return doc.RootElement.TryGetProperty("version", out var v) ? v.GetString() ?? "" : "";
-        }
-        catch (Exception) { return ""; }
     }
 }

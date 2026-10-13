@@ -3,6 +3,38 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.17] — 2026-10-13
+
+### Fixed
+
+- **A download that stalled left the page's Download doing nothing until the bridge restarted.**
+  - Spotify Soloist, Caldera Headless and Roon Bridge were fetched with no time limit. A publisher
+    that answered and then sent nothing (or a connection lost without a reset) was waited on for
+    ever, and the download stayed "in progress", so each later click did nothing.
+  - A download now gives up when nothing has come for a minute, says so ("… sent nothing for 60
+    seconds: try again later", or that the publisher couldn't be reached), and can be started again.
+    One that is slow but still sending is never cut short.
+  - Setting Roon Bridge up (Roon's check, Apple's tools) gives up after ten minutes, and the step
+    that hung is stopped rather than left running.
+  - A download that fails no longer leaves a part-written file behind.
+  - plex.tv is given 15 seconds per question: whose sign-in it is, the code to enter, and each check
+    that it was entered. Before, one unanswered question held the sign-in up for its whole 15
+    minutes.
+  - Class of error: a request through the streaming client (`Sources.Http`, which has no timeout
+    because a track streams for as long as it plays) with nothing to end it.
+  - Gate: `DownloadTests` and `PlexLinkTests`, against a pretend publisher and a pretend plex.tv
+    that never answer, stop sending, or are slow but sending. Each check failed with its limit taken
+    out. A test lists each file that uses `Sources.Http` with what ends its requests, so a new one
+    has to say. The unused `CalderaDownload.Latest`, the one other use with no limit, is removed.
+  - Found by the 1.1.9 audit.
+
+### Changed
+
+- **A UPnP events test no longer depends on the runner's speed.** `EventsGoOneAtATime_InOrder` waited
+  for exactly five events. Changes within 150 ms of each other go as one, by design, so a slow runner
+  (macOS CI) sent four, and the test timed out. It now waits for the last state and checks the order
+  and that one event at a time was in flight. Reproduced by shortening the gap between changes.
+
 ## [1.1.16] — 2026-10-13
 
 ### Fixed
