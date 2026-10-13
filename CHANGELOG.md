@@ -3,6 +3,89 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.14] — 2026-10-13
+
+### Fixed
+
+- **A controller could be left showing the wrong state, or miss a change for good.** Each UPnP event
+  (how Audirvana and Mandarin see a track end or the next one begin) was sent on its own, so a later
+  one could overtake an earlier one and leave a controller showing PLAYING after the bridge had
+  stopped. And an event that couldn't be delivered was taken as known: its change was never sent
+  again. Now a subscriber's events go one at a time, in order, and what an undelivered event carried
+  goes again a second later (three times running at most, then with the next change). An answer
+  other than success counts as undelivered. Class of error: fire-and-forget delivery of ordered
+  state. Gate: `UpnpEventsTests`, with a pretend controller that answers slowly or fails once (both
+  failed before the fix). Found by the 1.1.9 audit; not tried with a real Audirvana or Mandarin.
+
+## [1.1.13] — 2026-10-13
+
+### Fixed
+
+- **A DSD file with a broken size hung its track for good.** A DFF chunk (or property) whose size
+  reads as negative moved the parser back to where it was, so it read the same bytes for ever: the
+  track never started, nothing could stop it, and every stop afterwards waited five seconds. A DSF
+  whose data was said to be smaller than its own header got a negative length. Such files are now
+  refused, and sizes that would carry the position past what was read are too. Class of error: a
+  size from a file trusted to move the position on. Gate: `DsdMalformedTests` (each case failed
+  before the fix).
+- **A DSD server that stalled held every stop up.** While a DSD track was being opened (its header,
+  or skipping to the seek point on a server that ignores ranges) the reads couldn't be cancelled, a
+  failed open left its connection open, and closing a response waited up to two seconds to read it
+  to its end. Cancelling now closes the connection at once, and a failed open releases it. Gates:
+  two stalled pretend servers, one on the header and one on the samples (both failed before).
+- **Two seeks at once could leave two feeds writing to the DAC.** Each seek waited for the old feed to
+  stop, then started its own, so two seeks arriving together each started one: both wrote to the
+  DAC, and the first one's audio stayed queued ahead of the second's. A seek now starts its feed only
+  when none is running, halting (and emptying the DAC's buffer of) any that another seek started
+  meanwhile. From reading the code (the 1.1.9 audit and its review); the timing it needs couldn't be
+  made to happen reliably in a test.
+
+### Changed
+
+- **`Renderer.cs` is under the 500-line limit** (542 → 275): its feed moved to `RendererFeed.cs` (a
+  part of `Renderer`) and the track types to `Track.cs`, unchanged.
+
+## [1.1.12] — 2026-10-13
+
+### Fixed
+
+- **Your Plex sign-in could be sent to a server that isn't yours.** To show what Caldera plays, the
+  bridge looks the track up on the server Caldera's Plex Companion timeline names, and when the
+  timeline carried no token it sent your plex.tv sign-in (an account-wide token). The server named
+  comes from whoever told Caldera to play, and any device on the network can. Now:
+  - a server gets the token the timeline came with; failing that, your sign-in only if it is one of
+    your own servers by plex.tv's own list (its resources, every address, with its scheme: a server
+    listed for HTTPS isn't sent the sign-in over plain HTTP); otherwise nothing, and what it plays
+    isn't looked up (the log says why, once);
+  - what is asked is a path on that very server, checked on the URL actually requested (a track key
+    like `@other.host/x` would have moved the request elsewhere), with no redirects followed (a
+    redirect carried the sign-in to whatever host it named) and a 15-second limit (a server that
+    never answered froze what the page shows);
+  - plex.tv's list is kept for the account and asked again hourly; while plex.tv can't be asked, a
+    track is looked up again later rather than treated as not yours;
+  - covers passed on to the page are pictures only (JPEG, PNG, WebP, GIF; never SVG, which can carry
+    script), marked so the browser takes them as nothing else.
+  Class of error: a secret sent to an address taken from the network. Gates: end to end, a pretend
+  server named with no token is never contacted, with a token of its own gets that, and a hostile
+  track key on your own server's address is refused; case by case, the paths, schemes, the owned
+  list, plex.tv down, a redirect, the cover types. Each protection removed on purpose failed them.
+  Found by the 1.1.9 audit and its multi-agent review; not tried with a real Plex server or Plexamp.
+
+## [1.1.11] — 2026-10-13
+
+### Fixed
+
+- **Another website could still change the bridge, by pointing a name of its own at it (DNS
+  rebinding).** 1.1.3 refuses a change that a browser says comes from another site. But a site that
+  points its own name at the bridge's address makes its page and the bridge one site in the
+  browser's eyes, and the browser says "same-origin": switching connections on, starting downloads
+  and turning a DAC up went through again. Now a change from a browser must also be addressed to the
+  bridge by an address, `localhost`, or this machine's name (with or without `.local`), or a name in
+  the new **`BRIDGE_HOSTNAMES`** (for a name of your own in your DNS). Programs that aren't browsers
+  are unaffected. Class of error: trusting what the browser says about the origin without checking
+  which name it was given. Gate: the same-origin tests now send a rebound name, end to end and case
+  by case (they failed with the check removed on purpose). Found by the 1.1.9 audit.
+
 ## [1.1.10] — 2026-10-13
 
 ### Fixed

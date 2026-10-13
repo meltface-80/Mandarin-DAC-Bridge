@@ -58,7 +58,7 @@ internal static class Dsd
     {
         // 'DSD ' chunk (28 bytes), then 'fmt ' (52), then 'data' (12 + samples).
         long at = (long)BinaryPrimitives.ReadUInt64LittleEndian(b[4..]);
-        if (b.Length < at + 52 || Tag(b, at) != "fmt ") return null;
+        if (at < 28 || at > b.Length - 52 || Tag(b, at) != "fmt ") return null;
         var f = b[(int)at..];
         long fmtSize = (long)BinaryPrimitives.ReadUInt64LittleEndian(f[4..]);
         int channels = (int)BinaryPrimitives.ReadUInt32LittleEndian(f[24..]);
@@ -66,10 +66,12 @@ internal static class Dsd
         int bits = (int)BinaryPrimitives.ReadUInt32LittleEndian(f[32..]);
         long samples = (long)BinaryPrimitives.ReadUInt64LittleEndian(f[36..]);
         int blockSize = (int)BinaryPrimitives.ReadUInt32LittleEndian(f[44..]);
+        // Sizes from the file are trusted to move the position forward only within what was read.
+        if (fmtSize < 52 || fmtSize > b.Length - at) return null;
         at += fmtSize;
         if (b.Length < at + 12 || Tag(b, at) != "data") return null;
         long dataSize = (long)BinaryPrimitives.ReadUInt64LittleEndian(b[(int)(at + 4)..]) - 12;
-        if (channels <= 0 || rate <= 0 || blockSize <= 0) return null;
+        if (channels <= 0 || rate <= 0 || blockSize <= 0 || dataSize < 0 || samples < 0) return null;
         return new DsdHeader("dsf", rate, channels, at + 12, dataSize, blockSize, bits == 1,
             (samples + 7) / 8, (double)samples / rate);
     }
@@ -85,6 +87,9 @@ internal static class Dsd
         {
             var id = Tag(b, at);
             long size = (long)BinaryPrimitives.ReadUInt64BigEndian(b[(int)(at + 4)..]);
+            // A size past what a long holds reads as negative, and would move the position back or not
+            // at all: such a file is refused rather than read for ever.
+            if (size < 0) return null;
             if (id == "PROP")
             {
                 long p = at + 16;   // after 'SND '
@@ -93,6 +98,7 @@ internal static class Dsd
                 {
                     var sid = Tag(b, p);
                     long ssize = (long)BinaryPrimitives.ReadUInt64BigEndian(b[(int)(p + 4)..]);
+                    if (ssize < 0 || ssize > end - p - 12) return null;   // within PROP, and never backwards
                     if (sid == "FS  " && p + 16 <= end) rate = (int)BinaryPrimitives.ReadUInt32BigEndian(b[(int)(p + 12)..]);
                     if (sid == "CHNL" && p + 14 <= end) channels = BinaryPrimitives.ReadUInt16BigEndian(b[(int)(p + 12)..]);
                     if (sid == "CMPR" && p + 16 <= end) compressed = Tag(b, p + 12) != "DSD ";
@@ -105,6 +111,7 @@ internal static class Dsd
                 return new DsdHeader("dff", rate, channels, at + 12, size, 0, false, size / channels, (double)(size / channels) * 8 / rate);
             }
             else if (id == "DST ") return null;
+            if (size > long.MaxValue - at - 13) return null;
             at += 12 + size + (size & 1);
         }
         return null;

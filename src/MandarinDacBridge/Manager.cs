@@ -235,7 +235,7 @@ internal sealed partial class Manager : IDisposable
     }
     private string PlexToken => Settings.Services().PlexToken ?? "";
     private Caldera.CalderaSetup CalderaSetup() =>
-        new(Caldera.CalderaDownload.Program(config.DataDir), Caldera.CalderaDownload.Home(config.DataDir), PlexToken);
+        new(Caldera.CalderaDownload.Program(config.DataDir), Caldera.CalderaDownload.Home(config.DataDir), PlexToken, PlexClientId);
 
     // Each DAC's Caldera answers Plex on its own port: 32500, 32501, …
     private int CalderaPort(string id)

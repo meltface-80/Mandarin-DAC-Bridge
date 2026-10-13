@@ -17,3 +17,7 @@ version's story; this is the index.
 | 1.1.8 | `dev` | `dev` and `main` the same code again: 1.1.6 and the docs from `main`, 1.1.7 from `dev` (`fix/dev-gets-main`). |
 | 1.1.9 | `dev` | SoX or nothing: every install gets ffmpeg with SoX, the bridge picks it, and without it a track that needs resampling is refused (`fix/sox-everywhere`). |
 | 1.1.10 | `dev` | Spotify keeps playing after its player restarts (`fix/spotify-restart`). |
+| 1.1.11 | `dev` | Changes from a browser must be addressed to this machine: DNS rebinding refused (`fix/host-check`). |
+| 1.1.12 | `dev` | The Plex sign-in goes only to your own servers; covers are pictures only (`fix/plex-token-servers`). |
+| 1.1.13 | `dev` | Broken DSD files and stalled DSD servers can't hang a track; one feed per DAC (`fix/renderer-races`). |
+| 1.1.14 | `dev` | UPnP events in order, one at a time, and resent when undelivered (`fix/gena-order`). |

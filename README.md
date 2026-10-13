@@ -248,7 +248,8 @@ the Plex web app. The Plex token stays in `settings.json` (owner-only) and is ne
 Caldera keeps its own copy in its folder (`DATA_DIR/caldera`), its owner's only too. The bridge hands
 the token to Caldera by running `caldera-music --set` for a moment, so while that runs it is on that
 program's command line, where other accounts on the same machine could see it.
-The page says which Plex account is signed in; **Sign out of Plex** forgets it (here and in Caldera's
+To show what Caldera plays, the bridge asks the Plex server it plays from; your sign-in is sent only to
+your own servers (as plex.tv lists them), never to one another device named. The page says which Plex account is signed in; **Sign out of Plex** forgets it (here and in Caldera's
 settings), so you can sign in with another. Plexamp lists the DACs for any account on the network,
 but plays only for the one signed in.
 
@@ -430,8 +431,11 @@ itself.
 Anyone who can open the page can change the bridge, so keep port 55500 on your home network. From a
 browser, only the bridge's own page can change anything: a request that another website's page sends
 to the bridge (to switch a connection on, start a download or turn a DAC up) is refused. Programs
-that aren't browsers (Audirvana, Mandarin, a Squeezebox server, `curl`) aren't affected. An optional
-password is planned.
+that aren't browsers (Audirvana, Mandarin, a Squeezebox server, `curl`) aren't affected. A browser
+must also have reached the bridge by its address, `localhost`, or the machine's own name (with or
+without `.local`): another site can't point a name of its own at the bridge to get round this. If
+you open the page by a name of your own (from your router's or Pi-hole's DNS), add it to
+`BRIDGE_HOSTNAMES`, or changes made on the page are refused. An optional password is planned.
 
 ### Settings (all optional)
 
@@ -439,6 +443,7 @@ password is planned.
 |---|---|---|
 | `PORT` | `55500` | the page and the UPnP devices |
 | `BRIDGE_IP` | — | the address to advertise, if the machine is on several networks |
+| `BRIDGE_HOSTNAMES` | — | other names you open the page by (your own DNS names), comma-separated |
 | `LOCK_GRACE_S` | `10` | how long an app keeps a DAC after it stops or pauses |
 | `MANDARIN_PORT` | `3500` | Mandarin's port, used to recognise its streams |
 | `BRIDGE_ALL_OUTPUTS` | — | `1` also offers non-USB outputs |
