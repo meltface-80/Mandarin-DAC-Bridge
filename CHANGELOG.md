@@ -3,6 +3,30 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.22] — 2026-10-13
+
+### Fixed
+
+- **Roon's token could go to any device claiming to be the Core.**
+  - The bridge finds a Roon Core by asking the network, and it took the first answer. Anything on
+    the network can answer first and give the real Core's id, which the Core's registry hands to
+    anyone. The bridge then sent that device the extension's token. Whoever holds the token can
+    register as the bridge and control every zone in Roon.
+  - Each token is now kept with the address of the Core that gave it, and sent only there. A Core
+    answering from another address gets no token; the log says so, and says to enable the bridge
+    again in Roon if the Core has really moved. Of the Cores that answer, the one a token was given
+    at is chosen first.
+  - A token kept before this version is bound to the first Core it is sent to (trust on first
+    use).
+  - Cost: a Core whose address changes (a new DHCP lease, `ROON_CORE` given as another name for
+    it) must be enabled again in Roon's Settings → Extensions.
+  - Class of error: a secret sent to a peer identified only by what it says about itself.
+  - Gate: `RoonTokenTests` and `Roon_TheToken_IsntSent_ToACoreAtAnotherAddress`. A token sent
+    whatever the address failed four of them; the bridge not passing the address on failed the
+    end-to-end case; no preference for the Core that gave the token failed one.
+  - Not tried against a real Roon Core: a pretend Core stands in.
+  - Found by the 2026-10-13 audit (S3).
+
 ## [1.1.21] — 2026-10-13
 
 ### Fixed

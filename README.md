@@ -336,7 +336,9 @@ the bridge isn't in the way at all, so the pages and the now-playing screen lear
 from Roon itself, through its extension API (as RoPieee's display does). Switch on **Roon now
 playing** under *Connections* (or set `ROON_API=1`), then in Roon go to *Settings → Extensions* and
 enable **Mandarin DAC Bridge** (once: it stays enabled). The bridge finds the Roon Core on the
-network by itself (set `ROON_CORE=host:port` if it can't, e.g. across subnets). Each DAC shows its
+network by itself (set `ROON_CORE=host:port` if it can't, e.g. across subnets). The token Roon gives
+the bridge is sent only to the Core at the address it was given at: if the Core's address changes,
+enable the bridge in *Settings → Extensions* again. Each DAC shows its
 Roon zone's title, artist, album, cover and position: the zone named like the DAC (its Squeezebox
 name, or Roon Bridge's name for it), or the one chosen under **Roon zone** on the DAC's page.
 

@@ -197,7 +197,7 @@ internal sealed class RoonApi : IDisposable
         SetStatus("looking for a Roon Core on the network");
         var cores = await Sood.Find(TimeSpan.FromSeconds(3), stop.Token);
         if (cores.Count == 0) throw new NotFound("no Roon Core found on the network (set ROON_CORE=host:port if it can't be found)");
-        return cores[0];
+        return RoonTokens.Prefer(cores, Tokens())[0];
     }
 
     private async Task Session(string host, int port, string name)
@@ -223,12 +223,12 @@ internal sealed class RoonApi : IDisposable
             ["required_services"] = new JsonArray("com.roonlabs.transport:2"), ["optional_services"] = new JsonArray(),
             ["provided_services"] = new JsonArray("com.roonlabs.ping:1")
         };
-        if (Token(coreId) is { Length: > 0 } t) reg["token"] = t;
+        if (Token(coreId, host) is { Length: > 0 } t) reg["token"] = t;
         Send("com.roonlabs.registry:1/register", reg, (verb, nm, body) =>
         {
             if (nm != "Registered") return;
             var j = Json(body);
-            if (Str(j, "token") is { Length: > 0 } tok) SaveToken(Str(j, "core_id") is { Length: > 0 } c ? c : coreId, tok);
+            if (Str(j, "token") is { Length: > 0 } tok) SaveToken(Str(j, "core_id") is { Length: > 0 } c ? c : coreId, tok, host);
             Log($"enabled in {CoreName}");
             SetStatus($"connected to {CoreName}");
             Send("com.roonlabs.transport:2/subscribe_zones", new JsonObject { ["subscription_key"] = 0 }, (_, zn, zb) => Zoned(zn, zb));
@@ -281,13 +281,28 @@ internal sealed class RoonApi : IDisposable
 
     // ------------------------------------------------------------ tokens (owner-only: they keep the extension enabled)
 
-    private string Token(string coreId)
+    private Dictionary<string, string> Tokens()
     {
-        try { return OwnerOnlyFile.ReadStrings(tokenFile).GetValueOrDefault(coreId, ""); }
-        catch (Exception e) { Log("couldn't read the token: " + e.Message); return ""; }
+        try { return OwnerOnlyFile.ReadStrings(tokenFile); }
+        catch (Exception e) { Log("couldn't read the token: " + e.Message); return new(StringComparer.Ordinal); }
     }
 
-    private void SaveToken(string coreId, string token)
+    // Only to the Core at the address it was given at (RoonTokens.cs).
+    private string Token(string coreId, string host)
+    {
+        lock (tokenGate)
+        {
+            var all = Tokens();
+            bool had = all.ContainsKey(coreId + "|host");
+            var token = RoonTokens.For(all, coreId, host, out var elsewhere);
+            if (elsewhere) Log($"{CoreName} answered from {host}, not where it was enabled: not sending it the token (if the Core has moved, enable the bridge again in Roon)");
+            else if (token != "" && !had)
+                try { OwnerOnlyFile.WriteStrings(tokenFile, all); } catch (Exception e) { Log("couldn't keep the token's address: " + e.Message); }
+            return token;
+        }
+    }
+
+    private void SaveToken(string coreId, string token, string host)
     {
         try
         {
@@ -295,7 +310,7 @@ internal sealed class RoonApi : IDisposable
             lock (tokenGate)
             {
                 var all = OwnerOnlyFile.ReadStrings(tokenFile);
-                all[coreId] = token;
+                RoonTokens.Keep(all, coreId, token, host);
                 OwnerOnlyFile.WriteStrings(tokenFile, all);
             }
         }
