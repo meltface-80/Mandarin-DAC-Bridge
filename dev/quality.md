@@ -72,7 +72,7 @@ same commit. Order — where every change lands first, then the logic most often
 1. **`EndToEndTests.cs`** → one file per area (`PlaybackTests`, `SqueezeboxTests`, `SpotifyTests`,
    `CalderaTests`, `QobuzTests`, `RoonTests`, `VolumeTests`) over a shared `BridgeFixture`. Until
    the fixture exists, an area moves out as a part of the same class (`partial`), sharing its
-   helpers: `VolumeTests.cs`, `CalderaTests.cs` and `SqueezeboxTests.cs` so far.
+   helpers: `VolumeTests.cs`, `CalderaTests.cs`, `SqueezeboxTests.cs` and `SpotifyTests.cs` so far.
 2. **`UnitTests.cs`** → the same, by area.
 3. **`Manager.cs`** → each connection's wiring (Squeezebox, Spotify, Caldera, Qobuz, Roon, the Mac)
    and the page's view. (The settings went to `Settings.cs` in 1.1.4, finding Roon on this machine
