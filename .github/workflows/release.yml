@@ -7,7 +7,8 @@
 # Values from the event or the matrix reach a command through env, never
 # written into the command itself. Only the job that attaches the builds may
 # write to the repository. A build missing fails the run: a release is never
-# published with fewer than six.
+# published with fewer than six. SHA256SUMS goes with them: the installers
+# check the build they download against it, and refuse one that differs.
 name: Release
 
 on:
@@ -95,9 +96,16 @@ jobs:
           ls -l mandarin-dac-bridge-* || true
           n=$( (ls mandarin-dac-bridge-*.tar.gz mandarin-dac-bridge-*.zip 2>/dev/null || true) | wc -l)
           [ "$n" -eq 6 ] || { echo "::error::$n builds, not 6: nothing is attached"; exit 1; }
+      - name: Checksums (the installers check the build they download against them)
+        shell: bash
+        run: |
+          sha256sum mandarin-dac-bridge-*.tar.gz mandarin-dac-bridge-*.zip > SHA256SUMS
+          cat SHA256SUMS
+          [ "$(wc -l < SHA256SUMS)" -eq 6 ] || { echo "::error::SHA256SUMS doesn't list the six builds"; exit 1; }
       - uses: softprops/action-gh-release@v2
         with:
           fail_on_unmatched_files: true
           files: |
             mandarin-dac-bridge-*.tar.gz
             mandarin-dac-bridge-*.zip
+            SHA256SUMS

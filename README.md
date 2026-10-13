@@ -57,8 +57,9 @@ macOS 14 or newer (macOS 27 included), Apple silicon or Intel. No Docker needed.
 The installer uses the same Homebrew as Mandarin, and adds Homebrew's **ffmpeg-full**: ffmpeg
 built with SoX, the resampler the bridge needs (a few hundred MB, once). It sits beside the plain
 ffmpeg Mandarin uses and doesn't replace it. It downloads the bridge from this repository's latest
-**Release** into `~/Mandarin-DAC-Bridge`. If there is no Release yet, it builds the bridge on the
-Mac instead, which takes a few minutes, once. If macOS asks to let **mandarin-dac-bridge** find
+**Release** into `~/Mandarin-DAC-Bridge`, and checks it against that release's checksums: a download
+that doesn't match is refused, and the bridge already there is left as it was. If there is no
+Release yet, it builds the bridge on the Mac instead, which takes a few minutes, once. If macOS asks to let **mandarin-dac-bridge** find
 devices on your network, choose **Allow**. To update, paste the same line again.
 
 **Then point the apps at the bridge:**
@@ -84,7 +85,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/mel
 ```
 
 It installs ffmpeg with SoX (winget's `Gyan.FFmpeg`) if no ffmpeg with SoX is there, and the bridge into
-`%LOCALAPPDATA%\Mandarin-DAC-Bridge`, starts it now and at every sign-in (a hidden scheduled
+`%LOCALAPPDATA%\Mandarin-DAC-Bridge` (checked against the release's checksums, as on the Mac), starts it now and at every sign-in (a hidden scheduled
 task), and opens **http://localhost:55500**. If Windows asks to let **mandarin-dac-bridge** use the
 network, allow it on private networks. To update, paste the same line again.
 
@@ -102,8 +103,8 @@ On GitHub, go to **Releases → Draft a new release**, create a tag `v` + the `<
 `src/MandarinDacBridge/MandarinDacBridge.csproj` on `main` (for example `v1.1.6`) and click
 **Publish**. GitHub Actions (`.github/workflows/release.yml`) then tests the code, builds it for
 Apple silicon and Intel Macs, Linux x64 and arm64, and Windows x64 and ARM64, and attaches
-`mandarin-dac-bridge-<platform>.tar.gz` (`.zip` for Windows) to the release. The installers always
-fetch the latest release.
+`mandarin-dac-bridge-<platform>.tar.gz` (`.zip` for Windows) to the release, with `SHA256SUMS`, the
+checksums the installers check each build against. The installers always fetch the latest release.
 
 ---
 

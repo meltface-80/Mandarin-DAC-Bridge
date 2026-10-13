@@ -4,9 +4,12 @@
 #
 # Installs ffmpeg with SoX with winget (if none is there), downloads the bridge (one
 # native program) from the repository's latest GitHub Release into
-# %LOCALAPPDATA%\Mandarin-DAC-Bridge, starts it now and at every sign-in
-# (a hidden scheduled task), and opens its page. If there is no Release yet,
-# it is built here from the source (a private .NET SDK is downloaded for it).
+# %LOCALAPPDATA%\Mandarin-DAC-Bridge, checked against that release's SHA256SUMS
+# (from 1.1.26; an earlier release is installed unchecked: one that differs is
+# refused, and nothing is changed), starts it now and at every sign-in (a hidden
+# scheduled task), and opens its page. If there is no Release yet, or no build
+# in it for this PC, it is built here from the source (a private .NET SDK is
+# downloaded for it).
 #
 # Windows 10 or 11, x64 or ARM64. Run it again to update; settings are kept.
 $ErrorActionPreference = 'Stop'
@@ -21,6 +24,38 @@ $Task = 'Mandarin DAC Bridge'
 $Port = 55500
 
 function Say($m) { Write-Host "`n$m" -ForegroundColor Yellow }
+
+# The latest release's tag, from where github.com/<repo>/releases/latest leads: '' when there is no
+# release; throws when GitHub can't be reached.
+function Get-LatestTag($Repo) {
+    $req = [System.Net.HttpWebRequest]::Create("$Repo/releases/latest")
+    $req.AllowAutoRedirect = $false
+    $req.Method = 'HEAD'
+    $res = $req.GetResponse()
+    try { $to = [string]$res.Headers['Location'] } finally { $res.Close() }
+    if ($to -match '/releases/tag/([^/?#]+)$') { return $Matches[1] }
+    return ''
+}
+
+# A URL into a file: 200 when it came, 404 when there is none; throws on anything else.
+function Get-File($Url, $File) {
+    try { Invoke-WebRequest $Url -OutFile $File -UseBasicParsing; return 200 }
+    catch {
+        $r = $_.Exception.Response
+        if ($r -and [int]$r.StatusCode -eq 404) { return 404 }
+        throw
+    }
+}
+
+# A file's SHA-256 against its line in a SHA256SUMS: 0 it matches, 1 it doesn't (or SHA256SUMS has no line
+# for it: release.yml lists every build). A file that can't be read throws.
+function Test-Sum($File, $Name, $Sums) {
+    $line = Get-Content $Sums | Where-Object { ($_ -split '\s+')[1] -in @($Name, "*$Name") } | Select-Object -First 1
+    if (-not $line) { return 1 }
+    $want = ($line -split '\s+')[0].ToLowerInvariant()
+    $got = (Get-FileHash $File -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($got -eq $want) { return 0 } else { return 1 }
+}
 
 $rid = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
 Say "Installing Mandarin DAC Bridge ($rid). Leave this window open."
@@ -64,22 +99,38 @@ if (-not (Find-Ffmpegs | Where-Object { Test-Sox $_ })) {
     }
 }
 
-# 2. The bridge (stopped first if this is a second run).
-Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
-Get-Process mandarin-dac-bridge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# 2. The bridge: fetched (and checked) or built first; one already running is stopped only to put the
+#    new one in place, so a download refused or failed leaves it as it was.
 New-Item -ItemType Directory -Force -Path $Data | Out-Null
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("mdb-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
+function Stop-Unreachable($e) { Write-Host "Couldn't download from GitHub ($e). Check this PC's connection and run this again (nothing was changed)."; exit 1 }
 try {
     Say 'Downloading Mandarin DAC Bridge…'
-    $url = "https://github.com/$OwnerRepo/releases/latest/download/mandarin-dac-bridge-$rid.zip"
+    $name = "mandarin-dac-bridge-$rid.zip"
     $zip = Join-Path $tmp 'bridge.zip'
-    $got = $false
-    try { Invoke-WebRequest $url -OutFile $zip -UseBasicParsing; Expand-Archive $zip -DestinationPath $tmp -Force; $got = Test-Path (Join-Path $tmp 'mandarin-dac-bridge.exe') } catch { $got = $false }
-    if ($got) {
-        Copy-Item (Join-Path $tmp 'mandarin-dac-bridge.exe') $Bin -Force
+    $sums = Join-Path $tmp 'SHA256SUMS'
+    try { $tag = Get-LatestTag "https://github.com/$OwnerRepo" } catch { Stop-Unreachable $_.Exception.Message }
+    $got = 404
+    if ($tag) {
+        $at = "https://github.com/$OwnerRepo/releases/download/$tag"   # the build and its sums from the same release
+        try { $got = Get-File "$at/$name" $zip } catch { Stop-Unreachable $_.Exception.Message }
+    }
+    if ($got -eq 200) {
+        try { $listed = Get-File "$at/SHA256SUMS" $sums } catch { Stop-Unreachable $_.Exception.Message }
+        if ($listed -eq 404) {
+            Say "This release ($tag) has no checksums (it came before they did): installing it unchecked."
+        } elseif ((Test-Sum $zip $name $sums) -eq 0) {
+            Say "Checked against the release's checksum."
+        } else {
+            Write-Host "The downloaded build doesn't match the release's checksum, so it isn't installed (nothing was changed). Try again later; if it happens again, please report it."
+            exit 1
+        }
+        Expand-Archive $zip -DestinationPath $tmp -Force
+        $new = Join-Path $tmp 'mandarin-dac-bridge.exe'
+        if (-not (Test-Path $new)) { Write-Host "The release's build has no mandarin-dac-bridge.exe in it. Nothing was changed."; exit 1 }
     } else {
-        Say 'No ready-made build yet: building it here (a few minutes, once)…'
+        Say 'No ready-made build for this PC yet: building it here (a few minutes, once)…'
         $dotnet = Join-Path $AppDir '.dotnet'
         if (-not (Test-Path (Join-Path $dotnet 'dotnet.exe'))) {
             $installer = Join-Path $tmp 'dotnet-install.ps1'
@@ -97,8 +148,12 @@ try {
             & (Join-Path $dotnet 'dotnet.exe') publish (Join-Path $root.FullName 'src\MandarinDacBridge') -c Release -r $rid -o (Join-Path $tmp 'out') --nologo -v quiet `
                 -p:PublishAot=false -p:SelfContained=true -p:PublishSingleFile=true
         }
-        Copy-Item (Join-Path $tmp 'out\mandarin-dac-bridge.exe') $Bin -Force
+        $new = Join-Path $tmp 'out\mandarin-dac-bridge.exe'
     }
+    # A second run: the one running is replaced now (a running program can't be written over).
+    Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
+    Get-Process mandarin-dac-bridge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Copy-Item $new $Bin -Force
 } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
 Say 'The USB DACs it can see:'
