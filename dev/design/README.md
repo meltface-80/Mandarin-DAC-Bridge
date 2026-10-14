@@ -13,3 +13,4 @@ here.
 | Design | Status |
 |---|---|
 | [`password.md`](password.md) | Draft: open questions for the owner |
+| [`updater.md`](updater.md) | Draft: open questions for the owner |
