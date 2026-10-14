@@ -63,8 +63,8 @@ the owner publishes a release is the release (`dev/release.md`).
   - Four rounds of review led back to this smallest fix:
     - reading more meaning into a clock at 0 (announcing the last track from the drain, taking 0
       for "all played") made new failures on devices that go away mid-drain;
-    - keeping the highest reading would have made one high reading on ALSA stick. These older issues the reviews found are left for their own
-    fixes:
+    - keeping the highest reading would have made one high reading on ALSA stick.
+  - These older issues the reviews found are left for their own fixes:
     - a last track too short for the 100 ms check is never announced;
     - between tracks at different rates, the track just played shows 0:00 while the DAC is set
       up again;
