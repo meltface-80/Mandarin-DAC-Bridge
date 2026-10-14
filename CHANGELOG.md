@@ -3,6 +3,39 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.29] — 2026-10-14
+
+### Changed
+
+- **Docker no longer runs the bridge privileged.**
+  - Every Docker command (the README's `docker run`, `docker-compose.yml`, the site's builders and
+    the test image's command in `dev/release.md`) used `--privileged`. It was there so a DAC
+    plugged in after the bridge started could be opened: `--device /dev/snd` hands over only the
+    devices there at the start. But it also gave the bridge, and the programs it downloads
+    (Soloist, Caldera, Roon Bridge, QobuzProxy), every device on the host and every capability.
+  - Now the commands mount `/dev/snd` as before and add one rule,
+    `--device-cgroup-rule 'c 116:* rmw'` (`device_cgroup_rules` in Compose): every ALSA device
+    (character major 116) may be opened, and no other device. `--device /dev/snd` and
+    `privileged` are gone. The bridge still runs as root, and keeps `SYS_NICE`.
+  - Tried in a real Docker daemon (29.8, cgroup v1) with stand-in device nodes of major 116,
+    opening one from inside the container:
+
+    | The command has | A device there at the start | One added after the start |
+    |---|---|---|
+    | neither | refused | refused |
+    | `--device` only | opened | refused |
+    | `--privileged` | opened | opened |
+    | the rule and the mount | opened | opened |
+
+    The same through `docker compose`.
+  - Not tried: a real DAC, ALSA playing through the rule, a host on cgroup v2, real-time
+    scheduling (refused in this test environment with or without `--privileged`, so unchanged by
+    this). The owner tries it on the real machine before it is merged.
+  - A container made with the old command or Compose file keeps working as it is. Replacing it
+    is recommended (the README says so).
+  - `ComposeTests` checks every command and Compose file opens the sound devices this way and
+    none runs privileged.
+
 ## [1.1.28] — 2026-10-14
 
 ### Fixed

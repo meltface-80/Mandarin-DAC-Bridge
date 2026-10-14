@@ -92,4 +92,40 @@ public class ComposeTests
         Assert.Equal(["b"], BuiltWithoutPullPolicyBuild(Two));
         Assert.Equal(["dac-bridge"], BuiltWithoutPullPolicyBuild(Without.Replace("\n", "\r\n", StringComparison.Ordinal)));
     }
+
+    // Before 1.1.29 every Docker command ran the bridge privileged, to open a DAC plugged in after it started
+    // (--device hands over only the ones there at the start). A rule allowing every ALSA device (character
+    // major 116), with /dev/snd mounted, does that and nothing more; privileged also gave every other device
+    // on the host and every capability to the bridge and to the programs it downloads.
+    [Fact]
+    public void EveryDockerCommand_OpensSoundDevicesOnly_NotPrivileged()
+    {
+        var root = Root();
+        var site = File.ReadAllText(Path.Combine(root, "docs", "index.html")).ReplaceLineEndings("\n");
+        var compose = new Dictionary<string, string>
+        {
+            ["docker-compose.yml"] = File.ReadAllText(Path.Combine(root, "docker-compose.yml")).ReplaceLineEndings("\n"),
+            ["the site's Compose builder"] = SiteCompose(site),
+        };
+        foreach (var (name, yaml) in compose)
+        {
+            Assert.False(Regex.IsMatch(yaml, @"^\s*privileged:", RegexOptions.Multiline), name + " runs privileged");
+            Assert.True(Regex.IsMatch(yaml, @"device_cgroup_rules:\n\s+- ['""]c 116:\* rmw['""]"), name + " has no rule for the sound devices");
+            Assert.Contains("- /dev/snd:/dev/snd", yaml, StringComparison.Ordinal);
+            Assert.Contains("- SYS_NICE", yaml, StringComparison.Ordinal);
+        }
+        // The command itself: a line of it, or the site's builder writing one (not prose about it).
+        const string Rule = @"--device-cgroup-rule 'c 116:\* rmw'";
+        var run = new Dictionary<string, (string Text, string Rule)>
+        {
+            ["README.md"] = (File.ReadAllText(Path.Combine(root, "README.md")), @"^[ \t]*" + Rule),
+            ["dev/release.md"] = (File.ReadAllText(Path.Combine(root, "dev", "release.md")), @"^[ \t]*" + Rule),
+            ["the site's docker run builder"] = (site, @"K\(""--device-cgroup-rule""\) \+ "" 'c 116:\* rmw'"),
+        };
+        foreach (var (name, (text, rule)) in run)
+        {
+            Assert.False(Regex.IsMatch(text, @"(^[ \t]*|--device[^\n]*)--privileged\b|K\(""--privileged""\)", RegexOptions.Multiline), name + " runs privileged");
+            Assert.True(Regex.IsMatch(text, rule, RegexOptions.Multiline), name + " has no rule for the sound devices");
+        }
+    }
 }

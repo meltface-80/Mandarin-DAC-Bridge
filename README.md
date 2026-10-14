@@ -144,8 +144,7 @@ docker run -d \
   --name mandarin-dac-bridge \
   --network host \
   --restart unless-stopped \
-  --device /dev/snd \
-  --privileged \
+  --device-cgroup-rule 'c 116:* rmw' \
   -v /dev/snd:/dev/snd \
   --cap-add SYS_NICE \
   -e TZ=Europe/London \
@@ -155,10 +154,12 @@ docker run -d \
 
 * **`--network host` is required.** UPnP discovery uses multicast, which doesn't cross Docker's
   bridge network.
-* **`--device /dev/snd`, `--privileged` and `-v /dev/snd:/dev/snd` together** let the container
-  open the DACs: `--device` hands the sound devices over, `--privileged` lets the container open
-  them, and the `/dev/snd` mount keeps the device list current, so a DAC plugged in later is
-  found too.
+* **`-v /dev/snd:/dev/snd` and `--device-cgroup-rule 'c 116:* rmw'` together** let the container
+  open the DACs: the mount keeps the device list current, so a DAC plugged in later is found too,
+  and the rule lets the container open every sound device (ALSA's devices are character major 116),
+  and no other device on the host. Before 1.1.29 the command used `--privileged` for this, which
+  also gave the bridge, and the programs it downloads, every device and every capability. A
+  command or Compose file with `--privileged` still works; replacing it is recommended.
 * If Mandarin runs on the same machine with `--device /dev/snd`, switch off its local output for
   the DACs. Otherwise both containers try to open them.
 

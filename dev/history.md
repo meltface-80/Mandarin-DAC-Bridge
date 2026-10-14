@@ -35,3 +35,4 @@ version's story; this is the index.
 | 1.1.26 | `dev` | A release carries SHA256SUMS; the Mac and Windows installers refuse a build that doesn't match, and leave the running bridge alone until the new one is ready (`audit/security-release-sums`). |
 | 1.1.27 | `dev` | QobuzProxy installed only as pinned: its files checked against the tag's, its dependencies against their hashes (`audit/security-qobuz-pinned`). |
 | 1.1.28 | `dev` | The DAC's clock read so it never goes back while the marks last: no first track announced again at the end, no position back at 0 (`fix/renderer-reached-after-drain`). |
+| 1.1.29 | `dev` | Docker opens the sound devices only, by a cgroup rule for ALSA's devices, instead of running privileged (`audit/security-docker-least-privilege`). |
