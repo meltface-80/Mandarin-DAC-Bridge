@@ -60,6 +60,87 @@ public class DsdMalformedTests
         Assert.Null(ParseWithin(file));
     }
 
+    // A DSF's values held to what the format allows. A block size of 2^30 had the bridge hold everything it
+    // read while waiting for one block group, until it ran out of memory (before 1.1.21).
+    [Theory]
+    [InlineData(72, 0x40000000u)]   // block size
+    [InlineData(72, 2048u)]
+    [InlineData(52, 0u)]            // channels
+    [InlineData(52, 7u)]
+    [InlineData(56, 1234u)]         // rate
+    [InlineData(56, 44100u)]
+    [InlineData(60, 4u)]            // bits per sample
+    public void ADsfWithValuesDsdDoesntHave_IsRefused(int at, uint value)
+    {
+        var file = DsdTests.Dsf();
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(at), value);
+        Assert.Null(ParseWithin(file));
+    }
+
+    [Theory]
+    [InlineData(2822400u)]   // DSD64
+    [InlineData(5644800u)]   // DSD128
+    [InlineData(3072000u)]   // DSD64, 48 kHz family
+    [InlineData(45158400u)]  // DSD1024
+    [InlineData(1411200u)]   // DSD32
+    [InlineData(49152000u)]  // DSD1024, 48 kHz family
+    public void ADsfAtAnyDsdRate_IsTaken(uint rate)
+    {
+        var file = DsdTests.Dsf(channels: 6);
+        BinaryPrimitives.WriteUInt32LittleEndian(file.AsSpan(56), rate);
+        Assert.Equal((int)rate, ParseWithin(file)?.Rate);
+    }
+
+    // A DFF too: its channel count and rate.
+    [Theory]
+    [InlineData(2822400u, 0)]
+    [InlineData(1234u, 2)]
+    public void ADffWithValuesDsdDoesntHave_IsRefused(uint rate, int channels)
+    {
+        var fs = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(fs, rate);
+        var chnl = new byte[2];
+        BinaryPrimitives.WriteUInt16BigEndian(chnl, (ushort)channels);
+        var prop = Chunk("PROP", [.. Encoding.ASCII.GetBytes("SND "), .. Chunk("FS  ", fs), .. Chunk("CHNL", chnl)]);
+        Assert.Null(ParseWithin(Dff(prop, Chunk("DSD ", new byte[16]))));
+    }
+
+    // A DFF with an odd number of bytes per channel, and cover art after its samples bigger than the limit:
+    // the last byte is packed, the packer is done, and nothing after the samples is held (or read).
+    [Fact]
+    public void ADffWithAnOddLastByte_EndsThere_AndWhatFollowsIsntHeld()
+    {
+        const int channels = 2, perCh = 1001;
+        var fs = new byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(fs, 2822400);
+        var chnl = new byte[2];
+        BinaryPrimitives.WriteUInt16BigEndian(chnl, channels);
+        var prop = Chunk("PROP", [.. Encoding.ASCII.GetBytes("SND "), .. Chunk("FS  ", fs), .. Chunk("CHNL", chnl)]);
+        var file = Dff(prop, Chunk("DSD ", new byte[perCh * channels]), Chunk("DIIN", new byte[3 << 20]));
+        var h = ParseWithin(file)!;
+        var packer = new DopPacker(h);
+        int frames = 0;
+        for (long at = h.DataStart; at < file.Length && !packer.Done; at += 1 << 16)
+            frames += packer.Push(file.AsSpan((int)at, (int)Math.Min(1 << 16, file.Length - at))).Length / (4 * channels);
+        Assert.True(packer.Done);
+        Assert.Equal((perCh + 1) / 2, frames);
+    }
+
+    [Theory]
+    [InlineData(2822400, "DSD64")]
+    [InlineData(3072000, "DSD64 (48 kHz)")]
+    [InlineData(49152000, "DSD1024 (48 kHz)")]
+    public void DsdRatesAreNamedByTheirFamily(int rate, string name) => Assert.Equal(name, Dsd.Name(rate));
+
+    // Whatever the header says, no more than a mebibyte waits to be packed: past it, the file is refused.
+    [Fact]
+    public void SamplesThatNeverMakeAWholeBlock_AreRefused_NotHeld()
+    {
+        var packer = new DopPacker(new DsdHeader("dsf", 2822400, 2, 92, long.MaxValue / 2, 1 << 30, false, long.MaxValue / 4, 1e9));
+        var chunk = new byte[1 << 16];
+        Assert.Throws<InvalidDataException>(() => { for (int i = 0; i < 64; i++) packer.Push(chunk); });
+    }
+
     // A server that sends a DSD file's start and then nothing more: stopping (a seek, a new track) must not
     // wait on it. Before 1.1.13 its reads couldn't be cancelled, and every stop waited five seconds.
     [Fact]

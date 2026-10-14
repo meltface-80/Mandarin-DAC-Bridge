@@ -21,9 +21,8 @@ internal sealed partial class Renderer
         lock (gate)
         {
             sink.Flush();
-            written = 0;
             drained = true;
-            marks.Clear();
+            ForgetMarks();
         }
     }
 
@@ -93,7 +92,7 @@ internal sealed partial class Renderer
                 {
                     if (!drained) { sink.Drain(ct); AfterDrain(); }
                     var physical = sink.Configure(info.Rate, info.Channels);
-                    lock (gate) { fmt = (info.Rate, info.Channels, physical); written = 0; marks.Clear(); }
+                    lock (gate) { fmt = (info.Rate, info.Channels, physical); ForgetMarks(); }
                 }
                 Track? now = null;
                 lock (gate)
@@ -145,7 +144,7 @@ internal sealed partial class Renderer
             lock (gate)
             {
                 if (Next is { Taken: false } n) { n.Taken = true; return n; }
-                double left = fmt is { } f ? (written - sink.Played) / (double)f.Rate : 0;
+                double left = fmt is { } f ? (written - Heard()) / (double)f.Rate : 0;
                 if (left < least) return null;
             }
             ct.WaitHandle.WaitOne(least < 0.5 ? 10 : 100);
@@ -183,10 +182,30 @@ internal sealed partial class Renderer
     {
         lock (gate)
         {
-            written = 0;
-            marks.Clear();
+            ForgetMarks();
             drained = true;
         }
+    }
+
+    // The sink's clock starts again at 0 (a configure, a flush, a drain): where each track began, and how
+    // far the clock was seen, go with it. With gate held.
+    private void ForgetMarks()
+    {
+        written = 0;
+        marks.Clear();
+        heard = 0;
+    }
+
+    // The sink's clock, as far as the marks go. A drained sink's clock is back at 0 a moment before its
+    // marks are forgotten (AfterDrain), and a clock that can't be read (a DAC going) says 0: read as it is,
+    // either took the first track's place for the one being heard. So 0 holds where the clock was last
+    // seen; any other reading is taken as it is (one read high, ALSA's while it can't ask the DAC, is put
+    // right by the next). With gate held.
+    private long Heard()
+    {
+        long played = sink.Played;
+        if (played == 0) return heard;
+        return heard = played;
     }
 
     // Every 100 ms: the track the DAC has reached, and the owner kept current while it plays.
@@ -197,7 +216,7 @@ internal sealed partial class Renderer
         lock (gate)
         {
             if (marks.Count == 0) return;
-            long played = sink.Played;
+            long played = Heard();
             Mark? m = null;
             foreach (var x in marks) if (x.Frame <= played) m = x;
             if (m != null && m != mark) { changed = Announce(m); now = NewlyReached(); }
@@ -235,8 +254,7 @@ internal sealed partial class Renderer
             source?.Dispose();
             source = null;
             sink.Flush();
-            written = 0;
-            marks.Clear();
+            ForgetMarks();
             drained = true;
             Transport = "STOPPED";
             Status = "ERROR_OCCURRED";

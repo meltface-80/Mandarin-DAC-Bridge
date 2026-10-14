@@ -20,6 +20,7 @@ namespace MandarinDacBridge.Audio;
 internal sealed class WasapiSink(string endpointId) : ISink
 {
     private static readonly (int Container, int Valid)[] Candidates = [(32, 32), (32, 24), (24, 24), (16, 16)];
+    private const int TailMs = 60;   // after the clock reaches a track's last sample, before the stream stops
 
     private readonly object gate = new();
     private readonly AutoResetEvent bufferReady = new(false);
@@ -35,7 +36,7 @@ internal sealed class WasapiSink(string endpointId) : ISink
     private ulong clockFreq = 1;
     private byte[] ring = [];
     private long ringWrite, ringRead;          // bytes, ever increasing
-    private long deliveredReal, silence;       // frames handed to the DAC: samples, and silence while running
+    private readonly Handed handed = new();    // what the DAC has been handed: samples, and silence
     private bool running, paused, configured, shared, started, disposed, gone;
     private byte[] scratch = new byte[1 << 16];
 
@@ -211,7 +212,7 @@ internal sealed class WasapiSink(string endpointId) : ISink
     private void ResetCounters()
     {
         ringWrite = ringRead = 0;
-        deliveredReal = silence = 0;
+        handed.Reset();
         running = false;
     }
 
@@ -222,7 +223,7 @@ internal sealed class WasapiSink(string endpointId) : ISink
         if (render.GetBuffer(bufferFrames, out _) == 0)
         {
             render.ReleaseBuffer(bufferFrames, Wasapi.BufferSilent);
-            silence += bufferFrames;
+            handed.Buffer(0, bufferFrames);
         }
     }
 
@@ -253,8 +254,7 @@ internal sealed class WasapiSink(string endpointId) : ISink
                 dst[have..].Clear();
                 ringRead += have;
                 render.ReleaseBuffer(bufferFrames, have == 0 ? Wasapi.BufferSilent : 0);
-                deliveredReal += have / frameBytes;
-                silence += (want - have) / frameBytes;
+                handed.Buffer(have / frameBytes, bufferFrames);
                 Monitor.PulseAll(gate);
             }
         }
@@ -294,6 +294,7 @@ internal sealed class WasapiSink(string endpointId) : ISink
             {
                 ct.ThrowIfCancellationRequested();
                 if (!configured || client == null) throw new DeviceException("the DAC isn't set up");
+                if (gone) throw new DeviceException("the DAC is gone");
                 long space = ring.Length - (ringWrite - ringRead);
                 if (space < frameBytes)
                 {
@@ -319,8 +320,20 @@ internal sealed class WasapiSink(string endpointId) : ISink
     {
         if (running || paused || client == null) return;
         if (ringWrite - ringRead < Math.Min(ring.Length, 2L * bufferFrames * frameBytes)) return;
-        if (client.Start() >= 0) running = true;
+        StartClient();
     }
+
+    // With gate held. A DAC gone (unplugged, taken) is reported, as the render loop does.
+    private void StartClient()
+    {
+        int hr = client!.Start();
+        if (hr >= 0) running = true;
+        else if (hr == Wasapi.DeviceInvalidated) Lost();
+    }
+
+    // Something written hasn't played yet: it is in the ring, or the DAC hasn't played the last sample handed
+    // to it (Handed.cs). With gate held.
+    private bool PendingLocked() => ringWrite > ringRead || handed.Pending(PositionLocked());
 
     // 32-bit samples → the DAC's container and channel count, into scratch.
     private void Convert(ReadOnlySpan<byte> src, int frames)
@@ -343,30 +356,46 @@ internal sealed class WasapiSink(string endpointId) : ISink
     public void Drain(CancellationToken ct)
     {
         Wasapi.Init();
-        var until = DateTime.UtcNow.AddSeconds(5);
         lock (gate)
         {
             StartIfReadyForce();
-            while (client != null && running && (ringWrite > ringRead || PlayedLocked() < deliveredReal) && DateTime.UtcNow < until)
+            var wait = new DrainWait(TimeSpan.FromSeconds(5), Environment.TickCount64);
+            bool waited = false;
+            while (client != null && !gone && wait.Goes(PendingLocked(), running, paused, Environment.TickCount64))
             {
                 ct.ThrowIfCancellationRequested();
-                Monitor.Wait(gate, 10);
+                waited = true;
+                Monitor.Wait(gate, paused ? 200 : 10);   // a pause's end wakes it (Pause)
             }
+            // The clock has reached the last sample; what it reports may still be on its way out through the
+            // DAC (as CoreAudioSink allows for): a moment more before the stream is stopped.
+            if (waited && client != null && !gone && running)
+            {
+                var tail = Environment.TickCount64 + TailMs;
+                while (Environment.TickCount64 < tail && !paused) { ct.ThrowIfCancellationRequested(); Monitor.Wait(gate, 10); }
+            }
+            // Played: the counters start again (a pause asked for stays asked for).
             FlushLocked();
         }
     }
 
-    // At the end of a track there may be less than two buffers waiting: play them anyway.
+    // At the end of a track there may be less than two buffers waiting, or only what the DAC's own buffer
+    // holds (a pause stopped it there): play them anyway.
     private void StartIfReadyForce()
     {
-        if (running || paused || client == null || ringWrite == ringRead) return;
-        if (client.Start() >= 0) running = true;
+        if (running || paused || client == null || !PendingLocked()) return;
+        StartClient();
     }
 
+    // Everything thrown away, a pause with it (the control side's stop or seek; it pauses again if it means to).
     public void Flush()
     {
         Wasapi.Init();
-        lock (gate) FlushLocked();
+        lock (gate)
+        {
+            paused = false;
+            FlushLocked();
+        }
     }
 
     private void FlushLocked()
@@ -377,7 +406,6 @@ internal sealed class WasapiSink(string endpointId) : ISink
             client.Reset();
         }
         ResetCounters();
-        paused = false;
         Prefill();
         Monitor.PulseAll(gate);
     }
@@ -390,17 +418,19 @@ internal sealed class WasapiSink(string endpointId) : ISink
             paused = on;
             if (on && running && client != null) { client.Stop(); running = false; }
             if (!on) StartIfReadyForce();
+            Monitor.PulseAll(gate);   // a drain waiting through the pause
         }
     }
 
     public long Played { get { Wasapi.Init(); lock (gate) return PlayedLocked(); } }
 
-    private long PlayedLocked()
+    private long PlayedLocked() => handed.Played(PositionLocked());
+
+    // Frames the DAC has played since the stream was reset, silence included; -1 when it can't say.
+    private long PositionLocked()
     {
-        if (clock == null || !configured) return 0;
-        if (clock.GetPosition(out var pos, out _) < 0) return 0;
-        long frames = (long)(pos * (double)rate / clockFreq);
-        return Math.Clamp(frames - silence, 0, deliveredReal);
+        if (clock == null || !configured || clock.GetPosition(out var pos, out _) < 0) return -1;
+        return (long)(pos * (double)rate / clockFreq);
     }
 
     // ------------------------------------------------------------ sharing

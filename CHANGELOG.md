@@ -3,6 +3,457 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.29] — 2026-10-14
+
+### Changed
+
+- **Docker no longer runs the bridge privileged.**
+  - Every Docker command (the README's `docker run`, `docker-compose.yml`, the site's builders and
+    the test image's command in `dev/release.md`) used `--privileged`. It was there so a DAC
+    plugged in after the bridge started could be opened: `--device /dev/snd` hands over only the
+    devices there at the start. But it also gave the bridge, and the programs it downloads
+    (Soloist, Caldera, Roon Bridge, QobuzProxy), every device on the host and every capability.
+  - Now the commands mount `/dev/snd` as before and add one rule,
+    `--device-cgroup-rule 'c 116:* rmw'` (`device_cgroup_rules` in Compose): every ALSA device
+    (character major 116) may be opened, and no other device. `--device /dev/snd` and
+    `privileged` are gone. The bridge still runs as root, and keeps `SYS_NICE`.
+  - Tried in a real Docker daemon (29.8, cgroup v1) with stand-in device nodes of major 116,
+    opening one from inside the container:
+
+    | The command has | A device there at the start | One added after the start |
+    |---|---|---|
+    | neither | refused | refused |
+    | `--device` only | opened | refused |
+    | `--privileged` | opened | opened |
+    | the rule and the mount | opened | opened |
+
+    The same through `docker compose`.
+  - Not tried: a real DAC, ALSA playing through the rule, a host on cgroup v2, real-time
+    scheduling (refused in this test environment with or without `--privileged`, so unchanged by
+    this). The owner tries it on the real machine before it is merged.
+  - A container made with the old command or Compose file keeps working as it is. Replacing it
+    is recommended (the README says so).
+  - `ComposeTests` checks every command and Compose file opens the sound devices this way and
+    none runs privileged.
+
+## [1.1.28] — 2026-10-14
+
+### Fixed
+
+- **At the end of gapless playback, the first track could be announced again, and the position
+  read 0:00.**
+  - When the DAC has played everything out, its clock goes back to 0, and only then does the
+    renderer forget where each track began. Anything that read the clock in between took the
+    first track's place (0) for the one being heard:
+    - the 100 ms check announced the first track again, so a Squeezebox server was told it had
+      started (`STMs`) just before the end (`STMu`), and the page and UPnP showed it;
+    - the position read 0:00 (UPnP, the page, Squeezebox's elapsed time).
+  - A clock that can't be read (a DAC going, WASAPI's position failing) also says 0, with the
+    same effect.
+  - The renderer now reads the DAC's clock through one place:
+    - a reading of 0 (a reset, or a clock that can't be read) holds where the clock was last
+      seen;
+    - any other reading is taken as it is, as before;
+    - where it was last seen starts again with the marks (a flush, a new rate, a drain).
+    Every reader goes through it: the 100 ms check, the position, and the wait for the next
+    track.
+  - Found when `Squeezebox_PlaysFromTheServer_Gapless_KeepsOthersOut` failed once on a Windows
+    runner (an extra `STMs` before `STMu`). That test now passes 10 times out of 10 under CPU
+    load.
+  - Four rounds of review led back to this smallest fix:
+    - reading more meaning into a clock at 0 (announcing the last track from the drain, taking 0
+      for "all played") made new failures on devices that go away mid-drain;
+    - keeping the highest reading would have made one high reading on ALSA stick.
+  - These older issues the reviews found are left for their own fixes:
+    - a last track too short for the 100 ms check is never announced;
+    - between tracks at different rates, the track just played shows 0:00 while the DAC is set
+      up again;
+    - a feed stuck in a drain past `Halt`'s 5 seconds can touch the next run.
+  - Class of error: a position read from a clock that had already been reset, against marks that
+    hadn't.
+  - Gate: three `RendererTests` cases, driving the renderer with a DAC that returns from its drain
+    late, whose clock can't be read, or that starts a new play after a longer one with its clock
+    still at 0. The first failed 3 times out of 3 before the fix. Two mutants each fail a case 3
+    times out of 3: the clock read as it is, and where it was last seen not starting again with
+    the marks.
+  - Not tried on a real DAC. Every sink resets its clock at the end of a drain (ALSA, WASAPI,
+    Core Audio and the tests' clock), so all three systems had it.
+
+## [1.1.27] — 2026-10-13
+
+### Changed
+
+- **QobuzProxy is installed only as it was pinned, and so is everything it needs.**
+  - QobuzProxy runs as the bridge (as root, in Docker). Its install was a plain
+    `pip install <GitHub archive of v1.7.7>`: whatever that archive held, plus the newest version
+    of each of its dependencies, none of it checked.
+  - Now:
+    - its dependencies, and setuptools to build it, come from `Qobuz/QobuzProxy.lock`, carried in
+      the program. It is QobuzProxy's own `uv.lock` at the v1.7.7 tag, exported with the SHA-256
+      of every file PyPI has for each. pip installs them with `--require-hashes`, and as
+      ready-made wheels only (`--only-binary :all:`), since a build from source would fetch its own
+      tools unchecked. Nothing else goes in;
+    - the archive is fetched by the bridge (at most 16 MiB, its SHA-256 logged), and its files are
+      checked against those of the tag, commit `10dedc9`. The check is on the files, not the
+      archive's bytes, because GitHub doesn't promise to compress an archive the same way for
+      ever. One that differs, or isn't an archive at all, isn't installed;
+    - it is then built and installed from that checked file, with nothing else fetched
+      (`--no-deps --no-build-isolation`).
+  - The wheels cover Python 3.10 to 3.14, and the bridge now looks for those versions first. On
+    another version, or a machine they have no build for, the install says so.
+  - pip's refusals are said plainly: a file that doesn't match its pinned hash, or no build for
+    this Python.
+  - `QOBUZPROXY_SOURCE` (a local copy, a fork) is still installed as given, unchecked, but its
+    dependencies now come from the lock too. The value is no longer shown or logged, since a URL
+    can carry a credential.
+  - An install made before this version keeps working. The page now offers **Install again** to
+    replace it with the pinned one; programs are fetched only when the owner asks.
+  - The pinned versions are the ones QobuzProxy itself locks, for example aiohttp 3.14.1 and
+    protobuf 7.35.0, rather than whatever is newest on the day.
+  - Gate: `QobuzSourceTests`. Twelve mutants each fail a case, among them: the top folder counted,
+    links let through, no unpacked-size limit, a file's content not hashed, the check letting
+    anything through, a non-archive throwing, pip's refusals not named, setuptools missing from
+    the lock, an entry without hashes. The pinned value was worked out twice: by this code from
+    `git archive` of the tag, and independently from git's own objects.
+  - Tried here (Linux, Python 3.13): the lock with `--require-hashes --only-binary :all:`, then
+    QobuzProxy built from the tag's archive with nothing else fetched. `pip check` was clean and
+    it imports. Not tried: the real GitHub archive (it can't be fetched from where this was made),
+    or a Mac or Windows install.
+  - Found by the 2026-10-13 audit (S7, third part).
+
+## [1.1.26] — 2026-10-13
+
+### Added
+
+- **A release now carries checksums, and the installers check the build they download against
+  them.**
+  - The Mac and Windows installers downloaded the bridge from the latest release and ran it with
+    nothing to check it against. A corrupted download, or a build re-uploaded wrongly, would have
+    been installed and started at every login.
+  - `release.yml` now attaches `SHA256SUMS`, the SHA-256 of each of the six builds. The installers
+    find the latest release's tag once, and fetch the build and `SHA256SUMS` from that same
+    release, so a release published mid-install can't mix them. Then:
+    - a build that doesn't match, or that the sums don't list, is refused;
+    - a release from before this one (no `SHA256SUMS`) is installed unchecked, as before;
+    - GitHub out of reach, or an error other than "not there", stops the installer. It is never
+      taken as "no checksums" or "no release".
+  - In every one of those cases, the bridge already installed is left as it was. The installers
+    used to stop the running bridge before downloading; now they stop it only to put the new one
+    in place.
+  - What this guards against: corruption, and a build and sums that don't belong together. It
+    doesn't guard against someone who can replace a release's files: they can replace
+    `SHA256SUMS` too. The installer script itself (`curl … | bash`, `irm … | iex`) can't check
+    itself, and a build from the source isn't checked against anything.
+  - Gate: `InstallerTests` runs each installer's own functions, taken from the script, against a
+    pretend GitHub:
+    - finding the tag, including no release and GitHub out of reach;
+    - telling a file from "not there" from a failure;
+    - the checksum check, including a build that can't be read.
+    Seven mutants each fail a case. The PowerShell cases ran here on PowerShell 7.6 and run on the
+    Windows and Linux runners.
+  - Not tried: Windows PowerShell 5.1 (what the Windows one-liner runs), a real release, or a real
+    install. The first release from `main` after this merges is the first with `SHA256SUMS`.
+  - Found by the 2026-10-13 audit (S7, second part).
+
+## [1.1.25] — 2026-10-13
+
+### Added
+
+- **Soloist, Caldera Headless and Roon Bridge are logged with their size and SHA-256 when downloaded.**
+  - These programs come from their publishers and run as the bridge (as root, in Docker). None of
+    the publishers offers a checksum to compare against, and nothing recorded what had been
+    fetched.
+  - Each is now saved whole to a file first, then unpacked from the file. A download is logged
+    with where it came from, its size and its hash, for example
+    `downloaded soloist-builds.spotifycdn.com/soloist_release_x86_64.tar.gz: 41235923 bytes,
+    SHA-256 <hex>`. What ran, or what was refused, can then be compared with what the publisher,
+    or another install, got. A signed link's query is never logged.
+  - Before, Soloist and Caldera were unpacked as they streamed in. Now:
+    - an archive that turns out to be wrong is still logged;
+    - a part-download is deleted;
+    - a body that goes on past 1 GiB (none of these programs is that big) is refused, rather
+      than holding the page's Download.
+    The log failing doesn't fail the download.
+  - This doesn't stop a bad download: there is nothing to check it against. The release's own
+    checksums, and QobuzProxy (installed by pip) pinned to known versions, are separate changes.
+  - Gate: seven cases in `DownloadTests`. Seven mutants each fail one: never logged, logged
+    twice, only the first read hashed, no size limit, a log failure failing the download, a
+    part-download left behind, the link's query logged.
+  - Found by the 2026-10-13 audit (S7, first part).
+
+## [1.1.24] — 2026-10-13
+
+### Fixed
+
+- **Another website could read the bridge's page through a name of its own.**
+  - A site can point a name of its own at the bridge's address (DNS rebinding). To the browser,
+    its page and the bridge are then one site. Changes were already refused unless the browser
+    had reached the bridge by one of its own names, but reads were not. Such a page could read
+    `/api/dacs` and `/api/services`: the Plex account, the Qobuz email, the hostname, what is
+    playing.
+  - Anything from a browser, a read too, now goes ahead only when the browser reached the bridge
+    by its address, `localhost`, or one of this machine's names (`BRIDGE_HOSTNAMES` adds one).
+    Programs that aren't browsers (UPnP controllers, a Squeezebox server, `curl`) are unaffected.
+  - Who notices: someone who opens the page by a name the bridge doesn't know now gets a refusal
+    naming `BRIDGE_HOSTNAMES`, where before they could look but not change anything.
+  - Not closed: a browser too old to send `Sec-Fetch-Site` says nothing on a read from the
+    page's own site, so it can't be told from a program.
+  - Class of error: a check on who is asking applied to changes but not to reads of private
+    data.
+  - Gate: `AReadFromABrowser_MustBeAddressedToThisMachine`, and reads added to the end-to-end
+    rebinding case. Both failed before the fix (5 cases).
+  - Found by the 2026-10-13 audit (S5).
+
+## [1.1.23] — 2026-10-13
+
+### Fixed
+
+- **A cover could be used to reach other machines through the bridge.**
+  - The bridge fetches each DAC's cover itself, from the server that has it (a Plex server named
+    in Caldera's timeline, or a Roon Core), and passes it on to anyone who asks for it. The fetch
+    followed redirects and took a reply with no type as a JPEG. A server could redirect the bridge
+    to `127.0.0.1` or another machine on the network, and the bridge relayed the answer.
+  - A cover is now only what that same server sends:
+    - a redirect is followed only to another path on the same server, at most three times;
+    - it must be said to be a JPEG (`image/jpg` counts), PNG, WebP or GIF;
+    - it must be no more than 16 MiB, said or sent, and arrive within 15 seconds, from asking to
+      its last byte.
+    Anything else is no cover, and the page gets a 502. Before, a cover that couldn't be fetched
+    gave an empty 200.
+  - The fetch keeps no cookies and renews its connections every 5 minutes, like the bridge's
+    other clients. A cover of a known size is read straight into its own buffer.
+  - The Music app's covers are files on the Mac and are read as before.
+  - Class of error: a fetch on another's behalf that goes wherever the server it asked sends it.
+  - Gate: `CoversTests`. Ten mutants each fail a case: a redirect to another server followed;
+    redirects not capped; no time limit; a reply with no type taken as a JPEG; either size check
+    dropped; the limit off by one; `image/jpg` not taken.
+  - Not tried against a real Plex server or Roon Core. A cover either serves through a redirect
+    to another host is no longer shown.
+  - Found by the 2026-10-13 audit (S4).
+
+## [1.1.22] — 2026-10-13
+
+### Fixed
+
+- **Roon's token could go to any device claiming to be the Core.**
+  - The bridge finds a Roon Core by asking the network, and it took the first answer. Anything on
+    the network can answer first and give the real Core's id, which the Core's registry hands to
+    anyone. The bridge then sent that device the extension's token. Whoever holds the token can
+    register as the bridge and control every zone in Roon.
+  - Each token is now kept with the address (host and port) of the Core that gave it, and sent
+    only there. Of the Cores that answer, the one the bridge was enabled in is chosen first.
+  - Once enabled in a Core, the bridge talks to no other: a Core at another address, or giving
+    another id, is left and the enabled one looked for again (the page's Roon status says so). It
+    isn't registered with either: it could say it had enabled the bridge and have its "token" kept
+    in place of the real one.
+  - A token is kept only under the id the Core gave as its own, and only under an id that is one:
+    an id with `|` in it would have named another id's address.
+  - A Core that has really moved (a new DHCP lease, `ROON_CORE` changed, or switching between
+    `ROON_CORE` and finding it on the network): switch **Roon now playing** off and on. Switching
+    it off forgets the addresses and keeps the tokens, so Roon needn't be asked again.
+  - A token with no address (kept before this version, or since Roon now playing was switched
+    off) is bound to the first Core it is sent to (trust on first use). If that binding can't be
+    written, the token isn't sent.
+  - Not closed: that first use, and, when the bridge is enabled in no Core yet, a device that
+    answers first and fakes being enabled (it gets no token, but it is then the Core the bridge
+    talks to until Roon now playing is switched off and on). With `ROON_CORE`, the address is the
+    name as written, so it is as trusted as that name's lookup.
+  - Class of error: a secret sent to a peer identified only by what it says about itself.
+  - Gate: `RoonTokenTests` and the `Roon_` cases in `RoonTests.cs`. Ten mutants each fail at least
+    one: a token sent whatever the address or port, or by host alone; another Core not left, or
+    still registered with; ids not checked (the core id or the one given in Registered); no binding
+    of a token with no address; switching off not forgetting, or forgetting the tokens too; no
+    preference for the Core that gave the token.
+  - Not tried against a real Roon Core: a pretend Core stands in. Not tested: a binding that can't
+    be written (the tests run as root here).
+  - Found by the 2026-10-13 audit (S3).
+
+## [1.1.21] — 2026-10-13
+
+### Fixed
+
+- **A crafted DSD file could make the bridge run out of memory.**
+  - A DSF file's header was checked only for positive values. With a block size of 2^30, the
+    bridge waited for one whole block group before sending a sample, holding everything it read
+    until it ran out of memory. Any controller can point the bridge at such a file, and DoP is the
+    default for DSD-capable DACs.
+  - Headers are now held to what DSD is:
+    - DSF: blocks of 4096 bytes, 1 to 6 channels, 1- or 8-bit samples;
+    - DFF: at least one channel;
+    - both: DSD32 to DSD1024, in the 44.1 or 48 kHz family.
+  - Whatever a header says, no more than 1 MiB now waits to be packed; past that the file is
+    refused.
+  - A DFF with an odd number of bytes per channel now ends at its last byte. Before, everything
+    after the samples (a comment, cover art) was read and held until the end of the track.
+  - DSD in the 48 kHz family is now named for it ("DSD64 (48 kHz)", not "DSD70").
+  - Class of error: sizes from a file trusted as allocation sizes.
+  - Gate: `DsdMalformedTests`. The old header checks failed 8 of the new cases; the packer
+    without its limit failed 1; the old rounding failed the odd-last-byte case. Files built to the
+    formats' specs at DSD32 to DSD1024, in both families, with 1 to 6 channels, still parse.
+  - Not tried with real DSD files: the files are built by the tests.
+  - Found by the 2026-10-13 audit (S2).
+
+## [1.1.20] — 2026-10-13
+
+### Fixed
+
+- **Any device on the network could have the bridge read files on this machine.**
+  - A UPnP controller's track address went to ffmpeg as given, and any device on the network can act
+    as a controller.
+  - `file:///…`, or ffmpeg's own file readers (`concat:`, `subfile:`, `data:`), had ffmpeg read
+    files on this machine; `live:…` attached a controller to another app's sound.
+  - Every track now meets one rule where it reaches ffmpeg: an `http` or `https` stream, nothing
+    else, whichever way it came in.
+  - UPnP controllers are checked earlier too: anything else is refused (716) and logged before it
+    can take the DAC. A blank address no longer takes the DAC before failing.
+  - ffmpeg may now use only the network's protocols, so a playlist it fetches (HLS) can't send it
+    to a file either.
+  - Class of error: input from the network handed to a program that reads more than the network.
+  - Gate: `UpnpControlTests` (seven kinds of address refused, a blank one too, the DAC left
+    untaken) and `SourcesTests` (the address rule, the refusal where tracks open, and ffmpeg's exact
+    protocol list). Each failed with its fix taken out.
+  - Found by the 2026-10-13 audit (S1).
+
+## [1.1.19] — 2026-10-13
+
+### Fixed
+
+- **A release could be built under the wrong version, or published with builds missing.**
+  - The version came from the tag alone. A tag that wasn't `vX.Y.Z` built "1.0.0", and one naming
+    another version built that version, whatever the code said.
+  - A release now builds the `.csproj`'s version (`tools/release/version.sh`). A tag that names
+    another is refused, with the tag to use, and each build checks that it reports that version.
+  - A build that made no file was skipped silently, and the release went out with what there was.
+    Now a missing file fails its build, and the release checks all six are there before attaching
+    any.
+  - The whole workflow could write to the repository. Now only the job that attaches the builds can.
+  - Values from the event and the matrix reach commands through `env`, never written into them
+    (also in `checks.yml`).
+  - Class of error: a release step trusting its input (the tag, the files made) instead of checking
+    it.
+  - Gate: `WorkflowTests`, on the version script and on every workflow's commands and permissions.
+    They failed on the old workflows and with the old version rule.
+  - Not run as a real release: that is the owner's.
+  - Found by the 1.1.9 audit.
+
+## [1.1.18] — 2026-10-13
+
+### Fixed
+
+- **Windows: every track's end waited five seconds, and pausing in those seconds threw the end away and
+  unpaused the DAC.**
+  - At a track's end the bridge waits for what the DAC still holds to play out. On Windows, the
+    silence the DAC always has queued after the last samples was counted as played as soon as it
+    was handed over. The end looked unplayed until the wait's five-second limit ran out.
+  - So each track's end, and each change of format between tracks, waited five seconds. The
+    position shown also lagged by the silence queued.
+  - Silence now counts only once the DAC's clock has passed it (`Audio/Handed.cs`), so the wait ends
+    when the last sample has played, plus 60 ms for what is still on its way out of the DAC (as on
+    macOS). A clock that can't say for a moment no longer ends the wait.
+  - A pause during that wait ended it: the rest of the track was thrown away and the DAC unpaused,
+    while the page still showed it paused. The wait now goes on through a pause, and the end plays
+    when the pause ends, as on macOS (on Linux, likewise on a DAC that can pause; on one that can't,
+    pausing drops what the DAC holds, as it always has).
+  - Its five-second limit (for a DAC that stops taking samples) counts only time spent playing
+    (`Audio/DrainWait.cs`).
+  - A pause now also survives setting up the next track, as on the other sinks: seeking while paused
+    no longer starts playing.
+  - Resuming restarts a stream that only the DAC's own buffer still held.
+  - A DAC found gone on starting is reported, as it is while playing, and the feed stops writing to
+    it.
+  - Class of error: silence counted when handed rather than when played, and one sink's stop
+    condition differing from the others' (a pause read as "nothing more to play").
+  - Gate: `AudioTests`, on the counting and the wait, which failed with the old rules.
+  - Not tried on a real DAC under Windows (CI has none).
+  - Found by the 1.1.9 audit.
+
+## [1.1.17] — 2026-10-13
+
+### Fixed
+
+- **A download that stalled left the page's Download doing nothing until the bridge restarted.**
+  - Spotify Soloist, Caldera Headless and Roon Bridge were fetched with no time limit. A publisher
+    that answered and then sent nothing (or a connection lost without a reset) was waited on for
+    ever, and the download stayed "in progress", so each later click did nothing.
+  - A download now gives up when nothing has come for a minute, says so ("… sent nothing for 60
+    seconds: try again later", or that the publisher couldn't be reached), and can be started again.
+    One that is slow but still sending is never cut short.
+  - Setting Roon Bridge up (Roon's check, Apple's tools) gives up after ten minutes, and the step
+    that hung is stopped rather than left running.
+  - A download that fails no longer leaves a part-written file behind.
+  - plex.tv is given 15 seconds per question: whose sign-in it is, the code to enter, and each check
+    that it was entered. Before, one unanswered question held the sign-in up for its whole 15
+    minutes.
+  - Class of error: a request through the streaming client (`Sources.Http`, which has no timeout
+    because a track streams for as long as it plays) with nothing to end it.
+  - Gate: `DownloadTests` and `PlexLinkTests`, against a pretend publisher and a pretend plex.tv
+    that never answer, stop sending, or are slow but sending. Each check failed with its limit taken
+    out. A test lists each file that uses `Sources.Http` with what ends its requests, so a new one
+    has to say. The unused `CalderaDownload.Latest`, the one other use with no limit, is removed.
+  - Found by the 1.1.9 audit.
+
+### Changed
+
+- **A UPnP events test no longer depends on the runner's speed.** `EventsGoOneAtATime_InOrder` waited
+  for exactly five events. Changes within 150 ms of each other go as one, by design, so a slow runner
+  (macOS CI) sent four, and the test timed out. It now waits for the last state and checks the order
+  and that one event at a time was in flight. Reproduced by shortening the gap between changes.
+
+## [1.1.16] — 2026-10-13
+
+### Fixed
+
+- **Soloist's folders were open to other accounts, and your API key could reach its log, the bridge's
+  log and the page.**
+  - Its data folder holds its Spotify sign-in and was readable by everyone. It is now its owner's only,
+    as is the folder of its log.
+  - Its run folder held its sound socket and the pipe the DAC is fed from. It was readable by everyone,
+    under a fixed name in `/tmp` that another account could take first. It is now made new for each
+    run, under a name no one can guess, its owner's only, and removed when Soloist stops.
+  - Soloist repeats the key it was given, on its output and over its WebSocket. Everything it says is
+    now cleaned of the key wherever it goes: its log, the bridge's log and the page.
+  - A log kept by an earlier version is cleaned of the key and made its owner's only.
+  - Its log is created owner-only rather than restricted after its first line.
+  - Class of error: a secret's neighbourhood left at the system's default permissions.
+  - Gate: the Spotify test checks each folder and the run folder's name, and has its pretend Soloist
+    say the key both ways, over an old log that holds it. Each check failed with its fix taken out.
+  - Found by the 1.1.9 audit.
+
+### Changed
+
+- **`SoloistPlayer.cs` is under the 500-line limit** (640 → 437): its sound path moved to
+  `Spotify/SoloistSound.cs` and its WebSocket to `Spotify/SoloistSocket.cs`, parts of `SoloistPlayer`,
+  unchanged. The Spotify end-to-end test moved from `EndToEndTests.cs` to `SpotifyTests.cs` (815 → 669).
+
+## [1.1.15] — 2026-10-13
+
+### Fixed
+
+- **Renaming a DAC didn't reach Plex.** Caldera takes the DAC's name only as it starts, and a rename
+  restarted Spotify's player but not Caldera's, so Plexamp kept the old name. Both are now restarted
+  (Caldera on the same port), which stops what they are playing on that DAC; a rename to the name it
+  already has restarts nothing (it restarted Spotify before). Gate: the Caldera test renames the DAC
+  and waits for Caldera to be set up under the new name on its port (it timed out before), then
+  renames it to the same name and checks nothing restarted (it failed with the comparison removed).
+- **A DAC switched off or unplugged while a connection was switched on could keep its players.** The
+  bridge could be closed between a connection checking it was still there and giving it a Squeezebox
+  player, a Soloist or a Caldera: those were never closed, and a Caldera left so played to the DAC
+  outside the one-app-at-a-time rule. Closing a bridge now waits for that step and closes whatever it
+  made. A Caldera's port is handed on only once it has stopped (it was freed while the old one could
+  still hold it), and a Caldera closed while being set up no longer starts its daemon. From reading
+  the code (the 1.1.9 audit and its review); the timing can't be made to happen reliably in a test.
+- **On a Mac, the Music app's cover showed for every DAC, and stayed after it stopped.** It is now that
+  DAC's only, while what the DAC plays is the app's. Not tried on a Mac; no test runs the Mac's apps.
+- **The now-playing screen fixed on one DAC (`/now?dac=…`) froze on the last track** once the DAC was
+  switched off, and showed "Untitled" once it stopped. It shows the idle screen. Checked by running
+  the page's choice of DAC in Node; the page's scripts have no tests yet (`dev/quality.md`).
+- **Switching Roon now playing off while a cover was asked for could fail that request.**
+
+### Changed
+
+- **Each DAC's players' lifecycle moved out of `Manager.cs`** into `ManagerPlayers.cs` (a part of
+  `Manager`), unchanged, before the fix.
+
 ## [1.1.14] — 2026-10-13
 
 ### Fixed

@@ -81,7 +81,8 @@ public sealed partial class UpnpEventsTests : IDisposable
     }
 
     // While the controller takes its time answering one event, the next isn't sent over it: they arrive
-    // one at a time, in order, and the last state is the one it ends with.
+    // one at a time, in order, and the last state is the one it ends with. How many arrive depends on the
+    // runner's timing (changes within 150 ms of each other go as one), so the test waits for the last.
     [Fact]
     public async Task EventsGoOneAtATime_InOrder()
     {
@@ -94,8 +95,9 @@ public sealed partial class UpnpEventsTests : IDisposable
             events.Changed("dac");
             await Task.Delay(200);                // past the 150 ms in which changes are gathered
         }
-        await Until(() => received.Count >= 5);
+        await Until(() => received.Any(g => g.Seq > 0 && g.State == "STOPPED"));
         var got = received.ToArray();
+        Assert.True(got.Length >= 2, $"{got.Length} event(s)");
         Assert.Equal(1, Volatile.Read(ref mostInFlight));
         Assert.Equal(got.Select(g => g.Seq).Order(), got.Select(g => g.Seq));
         Assert.Equal("STOPPED", got[^1].State);

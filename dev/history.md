@@ -21,3 +21,18 @@ version's story; this is the index.
 | 1.1.12 | `dev` | The Plex sign-in goes only to your own servers; covers are pictures only (`fix/plex-token-servers`). |
 | 1.1.13 | `dev` | Broken DSD files and stalled DSD servers can't hang a track; one feed per DAC (`fix/renderer-races`). |
 | 1.1.14 | `dev` | UPnP events in order, one at a time, and resent when undelivered (`fix/gena-order`). |
+| 1.1.15 | `dev` | A rename reaches Plex; closing a DAC closes all its players; the Mac's cover on its own DAC; `/now` idles on a stopped DAC (`fix/manager-lifecycle`). |
+| 1.1.16 | `dev` | Soloist's folders and log its owner's only; its key never repeated (`fix/process-hygiene`). |
+| 1.1.17 | `dev` | A stalled download gives up after a minute instead of blocking the Download button (`fix/download-timeouts`). |
+| 1.1.18 | `dev` | Windows: a track's end no longer waits five seconds, and a pause there holds it instead of dropping it and unpausing (`fix/wasapi-pause-drain`). |
+| 1.1.19 | `dev` | A release builds the `.csproj`'s version, refuses a tag naming another, and never goes out with a build missing (`quality/release-hardening`). |
+| 1.1.20 | `dev` | Controllers can ask only for http and https streams; ffmpeg held to the network's protocols (`audit/security-ffmpeg-input`). |
+| 1.1.21 | `dev` | DSD headers held to what DSD is; a file that never makes a whole block refused, not held (`audit/security-dsd-header-bounds`). |
+| 1.1.22 | `dev` | Roon's token sent only to the Core at the address that gave it (`audit/security-roon-token-binding`). |
+| 1.1.23 | `dev` | A cover is only what its server itself sends, said to be a picture, of a picture's size (`audit/security-cover-proxy`). |
+| 1.1.24 | `dev` | A browser must reach the bridge by one of its own names to read it too, not only to change it (`audit/security-rebinding-reads`). |
+| 1.1.25 | `dev` | Soloist, Caldera and Roon Bridge saved whole before unpacking, and logged with their size and SHA-256 (`audit/security-download-hashes`). |
+| 1.1.26 | `dev` | A release carries SHA256SUMS; the Mac and Windows installers refuse a build that doesn't match, and leave the running bridge alone until the new one is ready (`audit/security-release-sums`). |
+| 1.1.27 | `dev` | QobuzProxy installed only as pinned: its files checked against the tag's, its dependencies against their hashes (`audit/security-qobuz-pinned`). |
+| 1.1.28 | `dev` | The DAC's clock read so it never goes back while the marks last: no first track announced again at the end, no position back at 0 (`fix/renderer-reached-after-drain`). |
+| 1.1.29 | `dev` | Docker opens the sound devices only, by a cgroup rule for ALSA's devices, instead of running privileged (`audit/security-docker-least-privilege`). |

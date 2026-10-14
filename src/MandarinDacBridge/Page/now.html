@@ -108,9 +108,11 @@ let fixed = params.get("dac") || "";
 let shown = null, at = 0, lastArt = null;
 
 function choose(dacs) {
-  if (fixed) return dacs.find((d) => d.id === fixed) || null;
   const live = (d) => d.player && ["PLAYING", "TRANSITIONING"].includes(d.player.transport);
   const paused = (d) => d.player && d.player.transport === "PAUSED_PLAYBACK";
+  // One DAC asked for: shown while it plays or is paused, the idle screen otherwise (switched off, it has
+  // no player at all; stopped, nothing to show).
+  if (fixed) { const d = dacs.find((x) => x.id === fixed); return d && (live(d) || paused(d)) ? d : null; }
   return dacs.find((d) => shown && d.id === shown.id && (live(d) || paused(d)))   // stay on the one shown while it's in use
       || dacs.find(live) || dacs.find(paused) || null;
 }

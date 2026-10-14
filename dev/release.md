@@ -49,6 +49,13 @@ build: no version bump, no CHANGELOG entry, no test command, and no test image (
 ignores a push that touches only `docs/**` and `*.md`). `tools/check.sh gates` still runs, and the
 pull request's `Checks` run still has to pass. The change still gets a normal review.
 
+**Tests-and-gates exception** (the owner's decision, 2026-10-13): a change that touches only the
+tests and the gates (`tests/`, `tools/check.sh`, `tools/quality/`, `.github/workflows/checks.yml`)
+is not a build either: no version bump and no CHANGELOG entry, since nothing that ships changes. Its
+commit message says what it proves. The whole of `tools/check.sh` is green before the push, as for
+any change. Anything else that ships or decides what ships (`src/`, the `Dockerfile`, the
+installers, `release.yml`, `test-image.yml`) is a build.
+
 1. Make the code change, with its tests.
 2. Bump `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj`.
 3. Add a `CHANGELOG.md` entry (format below).
@@ -99,7 +106,7 @@ docker pull ghcr.io/meltface-80/mandarin-dac-bridge:NEW-test && {
   docker stop mandarin-dac-bridge
   docker rm mandarin-dac-bridge
   docker run -d --name mandarin-dac-bridge --network host --restart unless-stopped \
-    --device /dev/snd --privileged -v /dev/snd:/dev/snd --cap-add SYS_NICE \
+    --device-cgroup-rule 'c 116:* rmw' -v /dev/snd:/dev/snd --cap-add SYS_NICE \
     -e TZ=Europe/London -v dac-bridge-data:/data \
     ghcr.io/meltface-80/mandarin-dac-bridge:NEW-test
 }
@@ -148,3 +155,10 @@ tested from a clone: `git checkout <branch>`, then
   comment: Actions evaluates them anywhere in the file, and an invalid one fails the run at startup
   with no jobs.
 - A workflow that installs or builds runs the checks first (`uses: ./.github/workflows/checks.yml`).
+- A value from the event or the matrix reaches a command through `env:`, never written into the
+  command itself: a tag or a title is text anyone who can create one chooses, and in a command it
+  runs. `WorkflowTests` checks every workflow's `run:` lines.
+- Permissions are the least each job needs: `contents: read` for the workflow, and write only on the
+  job that writes (the release job attaches the builds).
+- A release builds the `.csproj`'s version (`tools/release/version.sh`); a tag that names another is
+  refused, and a build missing stops the release before anything is attached.

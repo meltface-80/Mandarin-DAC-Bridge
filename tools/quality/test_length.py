@@ -1,7 +1,7 @@
 """Tests for the file-length tripwire: python3 -m unittest discover -s tools/quality"""
 import unittest
 
-from length import judge, lines, measured, ratchet
+from length import judge, lines, measured, raised, ratchet
 from edit_hook import decide
 
 LIMITS = {"fail": 10, "warn": 8, "report": 5}
@@ -41,6 +41,19 @@ class Ratchet(unittest.TestCase):
         counts = {"shrank.cs": 15, "grew.cs": 30, "now-short.cs": 9, "new-big.cs": 50}
         baseline = {"shrank.cs": 20, "grew.cs": 25, "now-short.cs": 20, "gone.cs": 20}
         self.assertEqual(ratchet(counts, baseline, LIMITS), {"shrank.cs": 15, "grew.cs": 25})
+
+
+class Raised(unittest.TestCase):
+    def test_an_entry_raised_by_hand_fails(self):
+        failures = raised({"big.cs": 21}, {"big.cs": 20})
+        self.assertEqual(len(failures), 1)
+        self.assertIn("raised in the baseline from 20 to 21", failures[0])
+
+    def test_an_entry_added_by_hand_fails(self):
+        self.assertIn("added to the baseline", raised({"big.cs": 20, "new.cs": 600}, {"big.cs": 20})[0])
+
+    def test_entries_that_shrank_or_went_pass(self):
+        self.assertEqual(raised({"big.cs": 19}, {"big.cs": 20, "gone.cs": 30}), [])
 
 
 class EditHook(unittest.TestCase):

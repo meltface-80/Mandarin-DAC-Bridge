@@ -118,6 +118,14 @@ internal static class Control
         if (Changes.Contains(action))
         {
             var uri = action == "SetAVTransportURI" ? Arg("CurrentURI") : action == "SetNextAVTransportURI" ? Arg("NextURI") : null;
+            // A stream on the network (StreamUri.cs), refused before it can take the DAC; only a next track
+            // may be empty (no next track).
+            if (uri != null && (uri.Trim() != "" || action == "SetAVTransportURI") && StreamUri.Stream(uri) == null)
+            {
+                var shown = uri.Trim()[..Math.Min(120, uri.Trim().Length)];
+                b.Log($"refused {action} from {ip}: not an http or https stream: \"{shown}\"");
+                throw uri.Trim() == "" ? new UpnpException(714, "Illegal MIME-type") : new UpnpException(716, "Only http and https streams can be played");
+            }
             var caller = b.Arbiter.Identify(ip, userAgent, uri);
             var refusal = Adjustments.Contains(action) ? b.Arbiter.Check(caller, action, r.IsActive) : b.Arbiter.Claim(caller, action, r.IsActive);
             if (refusal != null)
@@ -133,8 +141,8 @@ internal static class Control
         switch (action)
         {
             // ---- AVTransport
-            case "SetAVTransportURI": await r.SetUri(Arg("CurrentURI").Trim(), Arg("CurrentURIMetaData")); return none;
-            case "SetNextAVTransportURI": await r.SetNext(Arg("NextURI").Trim(), Arg("NextURIMetaData")); return none;
+            case "SetAVTransportURI": await r.SetUri(StreamUri.Stream(Arg("CurrentURI"))!, Arg("CurrentURIMetaData")); return none;
+            case "SetNextAVTransportURI": await r.SetNext(StreamUri.Stream(Arg("NextURI")) ?? "", Arg("NextURIMetaData")); return none;
             case "Play": await r.Play(); return none;
             case "Pause": await r.Pause(); return none;
             case "Stop": await r.Stop(); return none;

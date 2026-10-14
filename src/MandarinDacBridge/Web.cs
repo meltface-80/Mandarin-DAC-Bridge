@@ -181,14 +181,19 @@ internal static partial class Web
             }
             try
             {
-                using var cover = await Sources.Http.GetAsync(art, HttpCompletionOption.ResponseHeadersRead, ctx.RequestAborted);
-                if (!cover.IsSuccessStatusCode || CoverType(cover.Content.Headers.ContentType?.MediaType) is not { } type) { await Send(ctx, 502, "text/plain", "no cover"); return; }
-                ctx.Response.ContentType = type;
+                if (await Covers.Fetch(art, ctx.RequestAborted) is not { } cover) { await Send(ctx, 502, "text/plain", "no cover"); return; }
+                ctx.Response.ContentType = cover.Type;
                 Inert(ctx);
                 ctx.Response.Headers.CacheControl = "max-age=3600";
-                await cover.Content.CopyToAsync(ctx.Response.Body, ctx.RequestAborted);
+                ctx.Response.ContentLength = cover.Bytes.Length;
+                await ctx.Response.Body.WriteAsync(cover.Bytes, ctx.RequestAborted);
             }
-            catch (Exception) { /* the page asks again */ }
+            catch (Exception)
+            {
+                // Unreachable, too slow, or cut short: no cover (the page asks again); one already on its way
+                // is simply cut short.
+                if (!ctx.Response.HasStarted) await Send(ctx, 502, "text/plain", "no cover");
+            }
             return;
         }
         if ((m = ApiPath().Match(p)).Success && method == "POST")
@@ -217,11 +222,8 @@ internal static partial class Web
         if (method == "GET") await res.CopyToAsync(ctx.Response.Body);
     }
 
-    // A cover comes from a server the bridge doesn't control: only a picture is passed on (never SVG, which
-    // can carry script), and the browser is told to take it as nothing else.
-    internal static string? CoverType(string? mediaType) =>
-        mediaType?.ToLowerInvariant() is "image/jpeg" or "image/png" or "image/webp" or "image/gif" ? mediaType.ToLowerInvariant() : mediaType == null ? "image/jpeg" : null;
-
+    // A cover comes from a server the bridge doesn't control (Covers.cs): the browser is told to take it as
+    // nothing but a picture.
     private static void Inert(HttpContext ctx)
     {
         ctx.Response.Headers.XContentTypeOptions = "nosniff";

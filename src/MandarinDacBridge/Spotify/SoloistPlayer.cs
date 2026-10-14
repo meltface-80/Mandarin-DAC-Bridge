@@ -26,14 +26,13 @@
 // from Spotify on request (SoloistDownload), as RoPieee does Roon Bridge.
 using System.Diagnostics;
 using System.Net.WebSockets;
-using System.Text;
 using System.Text.Json;
 
 namespace MandarinDacBridge.Spotify;
 
 internal sealed record SoloistSetup(string Soloist, string PulseAudio, string ApiKey);
 
-internal sealed class SoloistPlayer : IDisposable
+internal sealed partial class SoloistPlayer : IDisposable
 {
     public const int Rate = 44100;
     private const int FrameBytes = 8;      // 2 channels of S32
@@ -43,7 +42,11 @@ internal sealed class SoloistPlayer : IDisposable
 
     private readonly Bridge bridge;
     private readonly Func<SoloistSetup> setup;
-    private readonly string dataDir, cacheDir, runDir, fifo, socket, liveName;
+    private readonly string dataDir, cacheDir, liveName;
+    private string runDir = "", fifo = "", socket = "";   // made afresh for each run of Soloist
+    private volatile string key = "";                     // the key it was given, never repeated
+    private bool scrubbed;
+    private readonly int port;
     private readonly Caller caller;
     private readonly CancellationTokenSource stop = new();
     private readonly object gate = new();
@@ -72,10 +75,7 @@ internal sealed class SoloistPlayer : IDisposable
         this.setup = setup;
         dataDir = Path.Combine(dataRoot, "soloist", bridge.Id, "data");
         cacheDir = Path.Combine(dataRoot, "soloist", bridge.Id, "cache");
-        // Short: a unix socket's path has to fit in 108 bytes.
-        runDir = Path.Combine(Path.GetTempPath(), $"mdb-{port}-{bridge.Id}");
-        fifo = Path.Combine(runDir, "sound");
-        socket = Path.Combine(runDir, "pulse", "native");
+        this.port = port;
         liveName = "spotify/" + bridge.Id;
         caller = new Caller("spotify|" + bridge.Id, "Spotify", "127.0.0.1");
         Sources.RegisterLive(liveName, Open);
@@ -84,10 +84,11 @@ internal sealed class SoloistPlayer : IDisposable
         runner.Start();
     }
 
-    private void Log(string m) => bridge.Log("spotify: " + m);
+    private void Log(string m) => bridge.Log("spotify: " + Clean(m, key));
 
     private void SetStatus(string s)
     {
+        s = Clean(s, key);
         if (s == Status) return;
         Status = s;
         bridge.Notify();
@@ -131,11 +132,25 @@ internal sealed class SoloistPlayer : IDisposable
         if (s.ApiKey == "") throw new NotReady("needs your Soloist API key");
         if (s.PulseAudio == "") throw new NotReady("needs PulseAudio for Soloist's sound: sudo apt install pulseaudio");
 
-        Directory.CreateDirectory(dataDir);
-        Directory.CreateDirectory(cacheDir);
-        Directory.CreateDirectory(Path.GetDirectoryName(socket)!);
-        File.Delete(fifo);
-        File.Delete(socket);
+        key = s.ApiKey;
+        Scrub();
+
+        // Its folders hold its Spotify sign-in and its log: its owner's only. They are in the bridge's own data
+        // folder, which its owner chose; one on a filesystem without Unix modes (a FAT stick, a share) is used
+        // as it is.
+        foreach (var dir in new[] { Path.GetDirectoryName(dataDir)!, dataDir, cacheDir })
+        {
+            Directory.CreateDirectory(dir, OwnerOnly);
+            try { File.SetUnixFileMode(dir, OwnerOnly); }
+            catch (Exception e) when (e is UnauthorizedAccessException or IOException) { /* no Unix modes there: see above */ }
+        }
+        // Its sound (a socket any local program could play into, a pipe the DAC is fed from) in a folder made
+        // new for this run, with a name no one can guess (mkdtemp, its owner's only): one another account made
+        // first, or a link it left, is never used. Short: a unix socket's path has to fit in 108 bytes.
+        runDir = Directory.CreateTempSubdirectory($"mdb-{port}-{bridge.Id}-").FullName;
+        fifo = Path.Combine(runDir, "sound");
+        socket = Path.Combine(runDir, "pulse", "native");
+        Directory.CreateDirectory(Path.GetDirectoryName(socket)!, OwnerOnly);
         if (!Native.Libc.MakeFifo(fifo)) throw new IOException("couldn't make the pipe " + fifo);
 
         StartPulse(s.PulseAudio);
@@ -159,49 +174,6 @@ internal sealed class SoloistPlayer : IDisposable
         throw new InvalidOperationException("Soloist's WebSocket closed");
     }
 
-    private Dictionary<string, string> PrivateEnvironment() => new()
-    {
-        // Only the private server: no PipeWire to be found, PulseAudio at our socket.
-        ["XDG_RUNTIME_DIR"] = runDir,
-        ["PIPEWIRE_RUNTIME_DIR"] = runDir,
-        ["PULSE_RUNTIME_PATH"] = Path.GetDirectoryName(socket)!,
-        ["PULSE_STATE_PATH"] = Path.Combine(runDir, "state"),
-        ["PULSE_SERVER"] = "unix:" + socket
-    };
-
-    private void StartPulse(string exe)
-    {
-        var psi = new ProcessStartInfo(exe) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
-        foreach (var a in new[]
-                 {
-                     "-n", "--daemonize=no", "--exit-idle-time=-1", "--use-pid-file=no", "--disable-shm=yes", "--log-target=stderr",
-                     $"--load=module-native-protocol-unix socket={socket} auth-anonymous=1",
-                     $"--load=module-pipe-sink file={fifo} sink_name=bridge format=s32le rate={Rate} channels=2"
-                 })
-            psi.ArgumentList.Add(a);
-        foreach (var (k, v) in PrivateEnvironment()) psi.Environment[k] = v;
-        var errors = new StringBuilder();
-        Process p;
-        try { p = Process.Start(psi) ?? throw new InvalidOperationException("PulseAudio didn't start"); }
-        catch (System.ComponentModel.Win32Exception e) { throw new NotReady($"can't run {exe}: {e.Message}"); }
-        p.ErrorDataReceived += (_, e) => { if (e.Data is { } l && l.StartsWith("E:")) lock (errors) errors.AppendLine(l); };
-        p.OutputDataReceived += (_, _) => { };
-        p.BeginErrorReadLine();
-        p.BeginOutputReadLine();
-        lock (gate) pulse = p;
-        for (int i = 0; i < 100 && !File.Exists(socket); i++)
-        {
-            if (p.HasExited) break;
-            Wait(50);
-        }
-        if (!File.Exists(socket))
-        {
-            string e;
-            lock (errors) e = errors.ToString().Trim().Split('\n').LastOrDefault() ?? "";
-            throw new InvalidOperationException("Soloist's sound server didn't start" + (e != "" ? ": " + e : ""));
-        }
-    }
-
     private void StartSoloist(SoloistSetup s)
     {
         foreach (var f in new[] { "ws.port", "ws.addr" }) File.Delete(Path.Combine(dataDir, f));
@@ -222,6 +194,7 @@ internal sealed class SoloistPlayer : IDisposable
         void Line(string? l)
         {
             if (l == null) return;
+            l = Clean(l, key);
             Keep(l);
             if (l.Contains("GLIBC_") || l.Contains("error while loading shared libraries")) soloistError = SoloistDownload.Explain(l);
             else if (l.Contains("rror") || l.Contains("WARN") || l.Contains("arning")) soloistError = l.Length > 200 ? l[..200] : l;
@@ -240,8 +213,12 @@ internal sealed class SoloistPlayer : IDisposable
     // the old one is kept as soloist.log.1). It can name the account: don't post it publicly.
     private string LogFile => Path.Combine(Path.GetDirectoryName(dataDir)!, "soloist.log");
 
+    private const UnixFileMode OwnerOnly = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+
     private void Keep(string line)
     {
+        if (OperatingSystem.IsWindows()) return;   // the log's owner-only mode is Unix's (and Soloist never runs there)
+        line = Clean(line, key);
         lock (logGate)
         {
             try
@@ -249,12 +226,41 @@ internal sealed class SoloistPlayer : IDisposable
                 var f = LogFile;
                 var info = new FileInfo(f);
                 if (info.Exists && info.Length > 2_000_000) File.Move(f, f + ".1", overwrite: true);
-                bool fresh = !File.Exists(f);
-                File.AppendAllText(f, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}\n");
-                if (fresh && !OperatingSystem.IsWindows()) File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                // Made owner-only, never written and then restricted.
+                using var log = new FileStream(f, new FileStreamOptions
+                {
+                    Mode = FileMode.Append, Access = FileAccess.Write, Share = FileShare.ReadWrite,
+                    UnixCreateMode = UnixFileMode.UserRead | UnixFileMode.UserWrite
+                });
+                log.Write(System.Text.Encoding.UTF8.GetBytes($"{DateTime.Now:yyyy-MM-dd HH:mm:ss}  {line}\n"));
             }
-            catch (Exception) { /* a log, at best */ }
+            catch (Exception) { /* a log, at best: Soloist runs on whether or not its lines are kept */ }
         }
+    }
+
+    // Anything Soloist says: the key it was given is never repeated, wherever it goes (its log, the bridge's
+    // log, the page).
+    internal static string Clean(string line, string key) => key.Length >= 4 ? line.Replace(key, "[key]", StringComparison.Ordinal) : line;
+
+    // Logs kept before 1.1.16 could hold the key, which Soloist repeats: cleaned once it is known, and made
+    // its owner's only.
+    private void Scrub()
+    {
+        if (scrubbed || OperatingSystem.IsWindows()) return;
+        scrubbed = true;
+        lock (logGate)
+            foreach (var f in new[] { LogFile, LogFile + ".1" })
+            {
+                try
+                {
+                    if (!File.Exists(f)) continue;
+                    File.SetUnixFileMode(f, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    var text = File.ReadAllText(f);
+                    var clean = Clean(text, key);
+                    if (clean != text) File.WriteAllText(f, clean);
+                }
+                catch (Exception) { /* a filesystem without Unix modes, or the log unreadable: Soloist runs on without it */ }
+            }
     }
 
     private void Teardown()
@@ -278,77 +284,12 @@ internal sealed class SoloistPlayer : IDisposable
         reader = null;
         Detach(null);
         if (Ours() && bridge.Renderer.IsActive) Try(bridge.Renderer.Stop);
-        try { File.Delete(fifo); } catch (Exception) { /* gone */ }
+        if (runDir != "")
+            try { Directory.Delete(runDir, recursive: true); } catch (Exception) { /* gone; the next run makes a new one */ }
+        runDir = "";
     }
 
     // ------------------------------------------------------------ the sound
-
-    // What the sound server writes: to the renderer while it plays it, else let go at the speed of a DAC.
-    private void ReadSound()
-    {
-        FileStream pipe;
-        try { pipe = new FileStream(fifo, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 0); }
-        catch (Exception e) { Log("sound pipe: " + e.Message); return; }
-        using (pipe)
-        {
-            var buf = new byte[1 << 14];
-            int have = 0;
-            var pace = Stopwatch.StartNew();
-            long paced = 0;
-            while (!readerStop && !stop.IsCancellationRequested)
-            {
-                int n;
-                try { n = pipe.Read(buf, have, buf.Length - have); }
-                catch (Exception) { return; }
-                if (n <= 0 || readerStop) return;
-                have += n;
-                int usable = have - have % FrameBytes;
-                if (usable == 0) continue;
-                var chunk = buf[..usable];
-                Array.Copy(buf, usable, buf, 0, have - usable);
-                have -= usable;
-
-                LiveSource? s;
-                lock (gate) s = attached;
-                if (s != null)
-                {
-                    if (s.Push(chunk, stop.Token)) { pace.Restart(); paced = 0; continue; }
-                    Detach(s);
-                }
-                lock (gate)
-                {
-                    preroll.Enqueue(chunk);
-                    while (preroll.Count > 8) preroll.Dequeue();
-                }
-                paced += chunk.Length / FrameBytes;
-                var ahead = paced * 1000 / Rate - pace.ElapsedMilliseconds;
-                if (ahead > 0) stop.Token.WaitHandle.WaitOne((int)ahead);
-                if (pace.ElapsedMilliseconds > 2000) { pace.Restart(); paced = 0; }
-            }
-        }
-    }
-
-    private static bool HasSound(byte[] chunk)
-    {
-        foreach (var b in chunk) if (b != 0) return true;
-        return false;
-    }
-
-    // The renderer opens the stream: the one being filled.
-    private IPcmSource Open(CancellationToken ct)
-    {
-        lock (gate) return attached is { Closed: false } s ? s : throw new InvalidOperationException("Spotify isn't playing");
-    }
-
-    private void Detach(LiveSource? which)
-    {
-        lock (gate)
-        {
-            if (which != null && attached != which) return;
-            attached?.Dispose();
-            attached = null;
-        }
-    }
 
     private bool Ours() { lock (gate) return track != null && bridge.Renderer.Current == track; }
 
@@ -414,150 +355,6 @@ internal sealed class SoloistPlayer : IDisposable
         + "<item id=\"spotify\" parentID=\"0\" restricted=\"1\"><dc:title>Spotify</dc:title><upnp:class>object.item.audioItem.musicTrack</upnp:class></item></DIDL-Lite>";
 
     // ------------------------------------------------------------ Soloist's WebSocket
-
-    private void Listen()
-    {
-        var portFile = Path.Combine(dataDir, "ws.port");
-        var until = Environment.TickCount64 + 20_000;
-        while (!File.Exists(portFile))
-        {
-            if (soloist is not { HasExited: false } || stop.IsCancellationRequested) return;
-            if (Environment.TickCount64 > until) throw new InvalidOperationException("Soloist didn't open its WebSocket" + (soloistError != "" ? ": " + soloistError : ""));
-            Wait(100);
-        }
-        Wait(100);
-        var port = File.ReadAllText(portFile).Trim();
-        var addrFile = Path.Combine(dataDir, "ws.addr");
-        var addr = File.Exists(addrFile) ? File.ReadAllText(addrFile).Trim() : "127.0.0.1";
-        if (addr is "" or "0.0.0.0") addr = "127.0.0.1";
-        if (addr.Contains(':') && !addr.StartsWith('[')) addr = $"[{addr}]";
-        var w = new ClientWebSocket();
-        lock (gate) ws = w;
-        w.ConnectAsync(new Uri($"ws://{addr}:{port}"), stop.Token).Wait(TimeSpan.FromSeconds(10));
-        if (w.State != WebSocketState.Open) throw new InvalidOperationException("couldn't reach Soloist's WebSocket");
-        SetStatus("ready · choose it in Spotify");
-        lastError = "";
-
-        var buf = new byte[1 << 16];
-        using var msg = new MemoryStream();
-        while (!stop.IsCancellationRequested && w.State == WebSocketState.Open)
-        {
-            WebSocketReceiveResult got;
-            try { got = w.ReceiveAsync(buf, stop.Token).GetAwaiter().GetResult(); }
-            catch (Exception) { return; }
-            if (got.MessageType == WebSocketMessageType.Close) return;
-            msg.Write(buf, 0, got.Count);
-            if (!got.EndOfMessage) continue;
-            try
-            {
-                using var doc = JsonDocument.Parse(msg.ToArray());
-                OnMessage(doc.RootElement);
-            }
-            catch (JsonException) { /* not JSON: skip it */ }
-            catch (Exception e) { if (!stop.IsCancellationRequested) Log("event: " + e.Message); }
-            msg.SetLength(0);
-        }
-    }
-
-    private async Task Command(string json)
-    {
-        ClientWebSocket? w;
-        lock (gate) w = ws;
-        if (w is not { State: WebSocketState.Open }) return;
-        await sendGate.WaitAsync();
-        try { await w.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, stop.Token); }
-        catch (Exception) { /* closing */ }
-        finally { sendGate.Release(); }
-    }
-
-    private void OnMessage(JsonElement m)
-    {
-        switch (Str(m, "type"))
-        {
-            case "auth_state":
-                Keep("[bridge] " + m.GetRawText());
-                if (Bool(m, "logged_in") != signedIn || Bool(m, "is_active") != active)
-                {
-                    signedIn = Bool(m, "logged_in");
-                    active = Bool(m, "is_active");
-                    Log(signedIn == true ? $"Soloist is signed in{(active == true ? ", and the Spotify app has chosen it" : "")}" : "Soloist is waiting for the Spotify app to choose it");
-                }
-                if (!Bool(m, "logged_in")) SetStatus("ready · choose it in Spotify");
-                else if (!Bool(m, "is_active") && !Ours()) SetStatus("connected · choose it in Spotify to play here");
-                break;
-            case "playback_state":
-                Keep("[bridge] " + Clip(m.GetRawText()));
-                if (m.TryGetProperty("item", out var item)) SetItem(item);
-                if (m.TryGetProperty("position", out var pos)) SetPosition(pos);
-                if (!bridge.VolumeOn) KeepVolume(m);
-                Apply(Str(m, "status"));
-                break;
-            case "track_changed":
-                Keep("[bridge] " + Clip(m.GetRawText()));
-                if (m.TryGetProperty("item", out var it)) SetItem(it);
-                break;
-            case "playback_changed":
-                Keep("[bridge] playback " + Str(m, "status"));
-                Apply(Str(m, "status"));
-                break;
-            case "position_sync":
-                if (m.TryGetProperty("position", out var p)) SetPosition(p);
-                break;
-            case "volume_changed":
-                if (bridge.VolumeOn) TakeVolume(m); else KeepVolume(m);
-                break;
-            case "error":
-                Keep("[bridge] " + m.GetRawText());
-                Log("Soloist: " + Str(m, "message"));
-                break;
-        }
-    }
-
-    private void Apply(string status)
-    {
-        var r = bridge.Renderer;
-        switch (status)
-        {
-            case "playing":
-                Play();
-                break;
-            case "paused":
-                if (Ours() && r.IsActive) Try(r.Pause);
-                if (Ours()) SetStatus("paused");
-                break;
-            case "idle":
-                if (Ours() && (r.IsActive || r.Transport == "PAUSED_PLAYBACK")) Try(r.Stop);
-                if (Ours() || Status is "playing" or "paused") SetStatus("ready · choose it in Spotify");
-                break;
-        }
-    }
-
-    // A DAC without a volume of its own: Spotify's stays at 100% (use the amplifier's), bit-perfect.
-    private void KeepVolume(JsonElement m)
-    {
-        if (m.TryGetProperty("volume", out var v) && v.ValueKind == JsonValueKind.Number && v.GetInt32() != 100)
-            _ = Command("{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":100}");
-    }
-
-    private int told = -1;     // the level last passed to Spotify (its echo is not a change)
-
-    // Spotify's slider moved: the DAC follows (unless another app has the DAC).
-    private void TakeVolume(JsonElement m)
-    {
-        if (!m.TryGetProperty("volume", out var v) || v.ValueKind != JsonValueKind.Number) return;
-        int level = Math.Clamp(v.GetInt32(), 0, 100);
-        if (level == told || level == bridge.Level) return;
-        if (!Ours() && bridge.Arbiter.Holding(bridge.Renderer.IsActive)) { TellVolume(bridge.Level ?? 100); return; }
-        bridge.SetLevel(level);
-    }
-
-    // The DAC's volume moved (the page, another app, the machine): Spotify's slider follows.
-    private void TellVolume(int level)
-    {
-        if (!bridge.VolumeOn || level == told) return;
-        told = level;
-        _ = Command($"{{\"type\":\"command\",\"command\":\"set_volume\",\"volume\":{level}}}");
-    }
 
     private static string Clip(string s) => s.Length > 4000 ? s[..4000] + "…" : s;
 
