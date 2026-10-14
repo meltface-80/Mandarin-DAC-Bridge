@@ -106,7 +106,7 @@ docker pull ghcr.io/meltface-80/mandarin-dac-bridge:NEW-test && {
   docker stop mandarin-dac-bridge
   docker rm mandarin-dac-bridge
   docker run -d --name mandarin-dac-bridge --network host --restart unless-stopped \
-    --device /dev/snd --privileged -v /dev/snd:/dev/snd --cap-add SYS_NICE \
+    --device-cgroup-rule 'c 116:* rmw' -v /dev/snd:/dev/snd --cap-add SYS_NICE \
     -e TZ=Europe/London -v dac-bridge-data:/data \
     ghcr.io/meltface-80/mandarin-dac-bridge:NEW-test
 }

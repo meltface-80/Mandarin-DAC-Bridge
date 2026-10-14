@@ -368,10 +368,10 @@ xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser
       <div class="note"><b><code>--network host</code> is required.</b> Audirvana and Mandarin find the bridge by multicast,
         which doesn't cross Docker's bridge network. Docker Desktop for Mac and Windows has no real host networking:
         on a Mac, use the <a href="#mac">one-line install</a>.</div>
-      <div class="note"><b>The sound devices.</b> <code>--device /dev/snd</code>, <code>--privileged</code> and
-        <code>-v /dev/snd:/dev/snd</code> work together: the first hands the sound devices to the container,
-        the second lets it open them, and the mount keeps the list current, so a DAC plugged in later is
-        found too. Leave out any of them and the DACs may not appear.</div>
+      <div class="note"><b>The sound devices.</b> <code>-v /dev/snd:/dev/snd</code> and
+        <code>--device-cgroup-rule 'c 116:* rmw'</code> work together: the mount keeps the list of sound devices
+        current, so a DAC plugged in later is found too, and the rule lets the container open every sound device,
+        and no other device on the host. Leave out either and the DACs may not appear.</div>
       <div class="note"><b>Mandarin on the same machine?</b> If its container has <code>--device /dev/snd</code>,
         switch off its local output for the DACs (Settings → Audio Devices), so the bridge can hold them.</div>
     </div>
@@ -679,8 +679,7 @@ docker compose down --rmi local --volumes</pre>
         <div class="sym">No DACs in Docker</div>
         <h3>The container can't see /dev/snd</h3>
         <p>Check <code>cat /proc/asound/cards</code> on the host lists the DAC, and that the command still has
-          all three of <code>--device /dev/snd</code>, <code>--privileged</code> and
-          <code>-v /dev/snd:/dev/snd</code>. <code>docker exec mandarin-dac-bridge /app/mandarin-dac-bridge --diagnose</code>
+          both <code>-v /dev/snd:/dev/snd</code> and <code>--device-cgroup-rule 'c 116:* rmw'</code>. <code>docker exec mandarin-dac-bridge /app/mandarin-dac-bridge --diagnose</code>
           shows what the container sees.</p>
       </div>
       <div class="info-card">
@@ -726,8 +725,7 @@ docker compose down --rmi local --volumes</pre>
         "  " + K("--name") + " mandarin-dac-bridge \\\n" +
         "  " + K("--network") + " host \\\n" +
         "  " + K("--restart") + " unless-stopped \\\n" +
-        "  " + K("--device") + " /dev/snd \\\n" +
-        "  " + K("--privileged") + " \\\n" +
+        "  " + K("--device-cgroup-rule") + " 'c 116:* rmw' \\\n" +
         "  " + K("-v") + " /dev/snd:/dev/snd \\\n" +
         "  " + K("--cap-add") + " SYS_NICE \\\n" +
         "  " + K("-e") + " TZ=" + esc(tz) + " \\\n" +
@@ -746,8 +744,7 @@ docker compose down --rmi local --volumes</pre>
         "    container_name: mandarin-dac-bridge\n" +
         "    restart: unless-stopped\n" +
         "    network_mode: host\n" +
-        "    devices:\n      - /dev/snd:/dev/snd\n" +
-        "    privileged: true\n" +
+        "    device_cgroup_rules:\n      - 'c 116:* rmw'\n" +
         "    volumes:\n      - /dev/snd:/dev/snd\n" +
         "      - dac-bridge-data:/data\n" +
         "    cap_add:\n      - SYS_NICE\n" +

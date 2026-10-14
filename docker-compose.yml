@@ -10,11 +10,10 @@ services:
     restart: unless-stopped
     # UPnP, Squeezebox and Spotify discovery are multicast/broadcast: the container must be on the host's network.
     network_mode: host
-    # The host's sound devices: handed over, openable (privileged), and
-    # mounted so a DAC plugged in later is found too.
-    devices:
-      - /dev/snd:/dev/snd
-    privileged: true
+    # The host's sound devices: mounted, so a DAC plugged in later is found too, and openable: every ALSA
+    # device (character major 116), and nothing else on the host.
+    device_cgroup_rules:
+      - 'c 116:* rmw'
     volumes:
       - /dev/snd:/dev/snd
       - dac-bridge-data:/data
