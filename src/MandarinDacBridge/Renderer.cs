@@ -39,6 +39,7 @@ internal sealed partial class Renderer : IDisposable
     private IPcmSource? source;
     private (int Rate, int Channels, string Physical)? fmt;
     private long written;                // frames sent since the sink's clock last started at 0
+    private long heard;                  // where the sink's clock was last seen since then (Heard)
     private bool drained = true;
     private readonly List<Mark> marks = [];
     private Mark? mark;                  // the one being heard
@@ -262,7 +263,7 @@ internal sealed partial class Renderer : IDisposable
         var m = mark;
         if (m == null) return pendingOffset;
         double t = m.Offset;
-        if (fmt is { } f && marks.Contains(m)) t += Math.Max(0, sink.Played - m.Frame) / (double)f.Rate;
+        if (fmt is { } f && marks.Contains(m)) t += Math.Max(0, Heard() - m.Frame) / (double)f.Rate;
         var d = Current?.Duration ?? 0;
         return d > 0 && t > d ? d : t;
     }
