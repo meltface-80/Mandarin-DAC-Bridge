@@ -3,6 +3,49 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.28] — 2026-10-14
+
+### Fixed
+
+- **At the end of gapless playback, the first track could be announced again, and the position
+  read 0:00.**
+  - When the DAC has played everything out, its clock goes back to 0, and only then does the
+    renderer forget where each track began. Anything that read the clock in between took the
+    first track's place (0) for the one being heard:
+    - the 100 ms check announced the first track again, so a Squeezebox server was told it had
+      started (`STMs`) just before the end (`STMu`), and the page and UPnP showed it;
+    - the position read 0:00 (UPnP, the page, Squeezebox's elapsed time).
+  - A clock that can't be read (a DAC going, WASAPI's position failing) also says 0, with the
+    same effect.
+  - The renderer now reads the DAC's clock through one place:
+    - a reading of 0 (a reset, or a clock that can't be read) holds where the clock was last
+      seen;
+    - any other reading is taken as it is, as before;
+    - where it was last seen starts again with the marks (a flush, a new rate, a drain).
+    Every reader goes through it: the 100 ms check, the position, and the wait for the next
+    track.
+  - Found when `Squeezebox_PlaysFromTheServer_Gapless_KeepsOthersOut` failed once on a Windows
+    runner (an extra `STMs` before `STMu`). That test now passes 10 times out of 10 under CPU
+    load.
+  - Four rounds of review led back to this smallest fix:
+    - reading more meaning into a clock at 0 (announcing the last track from the drain, taking 0
+      for "all played") made new failures on devices that go away mid-drain;
+    - keeping the highest reading would have made one high reading on ALSA stick. These older issues the reviews found are left for their own
+    fixes:
+    - a last track too short for the 100 ms check is never announced;
+    - between tracks at different rates, the track just played shows 0:00 while the DAC is set
+      up again;
+    - a feed stuck in a drain past `Halt`'s 5 seconds can touch the next run.
+  - Class of error: a position read from a clock that had already been reset, against marks that
+    hadn't.
+  - Gate: three `RendererTests` cases, driving the renderer with a DAC that returns from its drain
+    late, whose clock can't be read, or that starts a new play after a longer one with its clock
+    still at 0. The first failed 3 times out of 3 before the fix. Two mutants each fail a case 3
+    times out of 3: the clock read as it is, and where it was last seen not starting again with
+    the marks.
+  - Not tried on a real DAC. Every sink resets its clock at the end of a drain (ALSA, WASAPI,
+    Core Audio and the tests' clock), so all three systems had it.
+
 ## [1.1.27] — 2026-10-13
 
 ### Changed
