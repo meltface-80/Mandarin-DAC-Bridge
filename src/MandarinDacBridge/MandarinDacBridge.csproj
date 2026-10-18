@@ -13,7 +13,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>mandarin-dac-bridge</AssemblyName>
     <RootNamespace>MandarinDacBridge</RootNamespace>
-    <Version>1.1.14</Version>
+    <Version>1.1.29</Version>
     <PublishAot>true</PublishAot>
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseSystemResourceKeys>true</UseSystemResourceKeys>
@@ -30,6 +30,7 @@
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="Page/**" LogicalName="Page/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="Qobuz/QobuzProxy.lock" LogicalName="Qobuz/QobuzProxy.lock" />
     <InternalsVisibleTo Include="MandarinDacBridge.Tests" />
   </ItemGroup>
   <!-- macOS: an Info.plist inside the program, so macOS can ask (and name it) for the microphone (reading back the

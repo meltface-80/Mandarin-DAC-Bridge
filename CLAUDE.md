@@ -43,7 +43,7 @@ the code stands, with a true `Justification`; if one seems necessary, ask first.
 - A rename or a move to settings is finished in one commit: zero stale references.
 - **Bit-perfect.** The samples reach the DAC unchanged: no software volume, no dither, no resampling
   unless the DAC can't take the track's rate (then SoX, to the nearest rate it takes in the same
-  family). Volume is the DAC's own, or none.
+  family, or its highest rate when it takes none of that family). Volume is the DAC's own, or none.
 - **Exclusive, one app at a time.** The bridge holds each DAC and lets go only when the owner says
   (Share when idle) or when Caldera or Roon Bridge is on. Every way in goes through the arbiter.
 - **Volume safety.** The bridge never raises a DAC's volume by itself: no level is applied at start
@@ -91,7 +91,8 @@ never pushes to a branch whose PR is merged, and never rewrites pushed history.
 
 A build bumps `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj` and adds a CHANGELOG
 entry, in one commit with the code. A change touching only `docs/`, `dev/` or `*.md` is not a build:
-no bump. After a push, the docker command for the branch's test image is given only once that
+no bump. Nor is one touching only the tests and the gates (`tests/`, `tools/check.sh`,
+`tools/quality/`, `.github/workflows/checks.yml`): nothing that ships changes. After a push, the docker command for the branch's test image is given only once that
 commit's Test image run (`test-image.yml`, which runs the checks first) is green.
 
 ## Markdown

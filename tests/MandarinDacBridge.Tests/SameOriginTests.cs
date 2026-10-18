@@ -1,4 +1,5 @@
-// SameOriginTests.cs — from a browser, only the bridge's own page may change anything (SameOrigin.cs).
+// SameOriginTests.cs — from a browser, only the bridge's own page may change anything, and only a page
+// addressed to this machine may read it (SameOrigin.cs).
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -25,7 +26,7 @@ public class SameOriginTests
     // Not a browser (a UPnP controller, a server, curl): nothing to go on, and not what this closes.
     [InlineData("POST", "", "", "192.168.1.5:55500", true)]
     [InlineData("SUBSCRIBE", "cross-site", "", "192.168.1.5:55500", false)]
-    // Reading changes nothing.
+    // Reading changes nothing (another site can't read the answer: the browser keeps it from it).
     [InlineData("GET", "cross-site", "http://evil.example", "192.168.1.5:55500", true)]
     [InlineData("HEAD", "cross-site", "http://evil.example", "192.168.1.5:55500", true)]
     public void OnlyTheBridgesOwnPageMayChangeThings(string method, string fetchSite, string origin, string host, bool allowed) =>
@@ -49,6 +50,21 @@ public class SameOriginTests
     [InlineData("", "", "evil.example:55500", true)]
     public void AChangeFromABrowser_MustBeAddressedToThisMachine(string fetchSite, string origin, string host, bool allowed) =>
         Assert.Equal(allowed, SameOrigin.Refusal("POST", fetchSite, origin, host, Names) == null);
+
+    // Before 1.1.24 only a change was held to this machine's names: a site's own name pointed at the bridge
+    // (DNS rebinding) let its page read /api/dacs and /api/services (the Plex account, the Qobuz email,
+    // what's playing) as same-origin.
+    [Theory]
+    [InlineData("GET", "same-origin", "", "evil.example:55500", false)]
+    [InlineData("GET", "none", "", "evil.example:55500", false)]
+    [InlineData("HEAD", "same-origin", "", "evil.example:55500", false)]
+    [InlineData("OPTIONS", "", "http://evil.example:55500", "evil.example:55500", false)]
+    [InlineData("GET", "same-origin", "", "dac-bridge.local:55500", true)]
+    [InlineData("GET", "none", "", "192.168.1.5:55500", true)]
+    // Not a browser (a UPnP controller fetching the description): read by whatever name it was given.
+    [InlineData("GET", "", "", "evil.example:55500", true)]
+    public void AReadFromABrowser_MustBeAddressedToThisMachine(string method, string fetchSite, string origin, string host, bool allowed) =>
+        Assert.Equal(allowed, SameOrigin.Refusal(method, fetchSite, origin, host, Names) == null);
 
     [Theory]
     [InlineData("box:55500", "box")]
@@ -100,5 +116,21 @@ public sealed partial class EndToEndTests
         Assert.Equal("35", await Volume(id));
         Assert.Equal(HttpStatusCode.OK, await PostAs($"/api/dacs/{id}/settings", "{\"level\":36}", "same-origin", $"http://localhost:{port}", $"localhost:{port}"));
         Assert.Equal("36", await Volume(id));
+
+        // Nor can such a page read anything; the bridge's own page can.
+        foreach (var path in new[] { "/api/dacs", "/api/services", "/" })
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, await GetAs(path, "same-origin", $"evil.example:{port}"));
+            Assert.Equal(HttpStatusCode.OK, await GetAs(path, "same-origin", $"localhost:{port}"));
+        }
+    }
+
+    private async Task<HttpStatusCode> GetAs(string path, string fetchSite, string host)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"http://127.0.0.1:{port}{path}");
+        req.Headers.Host = host;
+        req.Headers.Add("Sec-Fetch-Site", fetchSite);
+        using var res = await Http.SendAsync(req);
+        return res.StatusCode;
     }
 }

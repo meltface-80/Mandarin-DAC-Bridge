@@ -35,11 +35,11 @@ internal static class SoloistDownload
         Directory.CreateDirectory(dir);
         var target = Path.Combine(dir, "soloist");
         var tmp = target + ".new";
-        using (var res = await Sources.Http.GetAsync(Url(arch), HttpCompletionOption.ResponseHeadersRead, ct))
+        var archive = target + ".tar.gz";
+        try
         {
-            res.EnsureSuccessStatusCode();
-            await using var body = await res.Content.ReadAsStreamAsync(ct);
-            await using var gz = new GZipStream(body, CompressionMode.Decompress);
+            await Download.ToFile(Url(arch), archive, ct);
+            await using var gz = new GZipStream(File.OpenRead(archive), CompressionMode.Decompress);
             using var tar = new TarReader(gz);
             bool found = false;
             while (await tar.GetNextEntryAsync(cancellationToken: ct) is { } e)
@@ -50,6 +50,15 @@ internal static class SoloistDownload
                 else if (name is "CHANGELOG.md" or "THIRD_PARTY_LICENSES.txt") await e.ExtractToFileAsync(Path.Combine(dir, name), overwrite: true, ct);
             }
             if (!found) throw new InvalidDataException("Spotify's archive has no soloist program in it");
+        }
+        catch (Exception)
+        {
+            try { File.Delete(tmp); } catch (Exception) { /* none made, or held: the next download overwrites it */ }
+            throw;
+        }
+        finally
+        {
+            try { File.Delete(archive); } catch (Exception) { /* held: the next download overwrites it */ }
         }
         File.SetUnixFileMode(tmp, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                                   | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);

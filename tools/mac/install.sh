@@ -10,9 +10,12 @@
 # native program, built with .NET 10 — into ~/Mandarin-DAC-Bridge, starts it
 # now and at every login, and opens its page. Nothing to set up.
 #
-# The program comes from the repository's latest GitHub Release. If there is
-# none yet, it is built here from the source instead (a private copy of the
-# .NET SDK is downloaded for that, into ~/Mandarin-DAC-Bridge/.dotnet).
+# The program comes from the repository's latest GitHub Release, checked
+# against that release's SHA256SUMS (from 1.1.26; an earlier release is
+# installed unchecked): one that differs is refused, and nothing is changed.
+# If there is no release, or no build in it for this Mac, it is built here from
+# the source instead (a private copy of the .NET SDK is downloaded for that,
+# into ~/Mandarin-DAC-Bridge/.dotnet).
 #
 # Run it again to update; it keeps the settings.
 set -euo pipefail
@@ -26,6 +29,31 @@ PORT=55500
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
 xml() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+
+# The latest release's tag, from where github.com/<repo>/releases/latest leads: "" when there is no
+# release; fails when GitHub can't be reached.
+latest_tag() {   # https://github.com/<owner>/<repo>
+  local to
+  to="$(curl -sSIL -o /dev/null -w '%{url_effective}' "$1/releases/latest")" || return 1
+  case "$to" in */releases/tag/*) printf '%s' "${to##*/releases/tag/}" ;; esac
+}
+
+# A URL into a file: prints 200 when it came, 404 when there is none; fails on anything else.
+fetch() {   # url, file
+  local code
+  code="$(curl -sSL -o "$2" -w '%{http_code}' "$1")" || return 1
+  case "$code" in 200|404) printf '%s' "$code" ;; *) return 1 ;; esac
+}
+
+# A file's SHA-256 against its line in a SHA256SUMS: 0 it matches, 1 it doesn't (or SHA256SUMS has no
+# line for it: release.yml lists every build), 3 its SHA-256 couldn't be worked out.
+sum_check() {   # file, its name in the release, SHA256SUMS
+  local want got
+  want="$(awk -v n="$2" '$2 == n || $2 == "*" n { print tolower($1); exit }' "$3" 2>/dev/null || true)"
+  got="$( (shasum -a 256 "$1" 2>/dev/null || openssl dgst -sha256 -r "$1" 2>/dev/null) | awk '{ print tolower($1) }')"
+  [ -n "$got" ] || return 3
+  [ -n "$want" ] && [ "$got" = "$want" ]
+}
 
 if [ "$(uname)" != "Darwin" ]; then echo "This installer is for macOS. On Linux, use Docker (see the README)."; exit 1; fi
 case "$(uname -m)" in
@@ -51,18 +79,39 @@ say "Checking ffmpeg (with SoX)… The first time, this downloads a few hundred 
 brew list --versions ffmpeg-full >/dev/null 2>&1 || brew install ffmpeg-full
 FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"   # named in the launch file: Homebrew can live elsewhere
 
-# 3. The bridge (stopped first if this is a second run).
-launchctl unload "$PLIST" 2>/dev/null || true
+# 3. The bridge: fetched (and checked) or built first; one already running is stopped only to put the
+#    new one in place, so a download refused or failed leaves it as it was.
 mkdir -p "$APP_DIR/data"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
+unreachable() { echo "Couldn't download from GitHub. Check this Mac's connection and run this line again (nothing was changed)."; exit 1; }
 
 say "Downloading Mandarin DAC Bridge…"
-URL="https://github.com/$OWNER_REPO/releases/latest/download/mandarin-dac-bridge-$RID.tar.gz"
-if curl -fsSL -o "$TMP/bridge.tar.gz" "$URL" && tar -xzf "$TMP/bridge.tar.gz" -C "$TMP" && [ -f "$TMP/mandarin-dac-bridge" ]; then
-  mv -f "$TMP/mandarin-dac-bridge" "$BIN"
+NAME="mandarin-dac-bridge-$RID.tar.gz"
+TAG="$(latest_tag "https://github.com/$OWNER_REPO")" || unreachable
+NEW=""
+if [ -n "$TAG" ]; then
+  AT="https://github.com/$OWNER_REPO/releases/download/$TAG"   # the build and its sums from the same release
+  got="$(fetch "$AT/$NAME" "$TMP/bridge.tar.gz")" || unreachable
+fi
+if [ -n "$TAG" ] && [ "$got" = 200 ]; then
+  sums="$(fetch "$AT/SHA256SUMS" "$TMP/SHA256SUMS")" || unreachable
+  if [ "$sums" = 404 ]; then
+    say "This release ($TAG) has no checksums (it came before they did): installing it unchecked."
+  elif sum_check "$TMP/bridge.tar.gz" "$NAME" "$TMP/SHA256SUMS"; then
+    say "Checked against the release's checksum."
+  else
+    case $? in
+      3) echo "Couldn't work out the download's checksum (shasum). Nothing was changed." ;;
+      *) echo "The downloaded build doesn't match the release's checksum, so it isn't installed (nothing was changed). Try again later; if it happens again, please report it." ;;
+    esac
+    exit 1
+  fi
+  tar -xzf "$TMP/bridge.tar.gz" -C "$TMP" && [ -f "$TMP/mandarin-dac-bridge" ] \
+    || { echo "The release's build couldn't be unpacked. Nothing was changed; run this line again."; exit 1; }
+  NEW="$TMP/mandarin-dac-bridge"
 else
-  say "No ready-made build yet: building it on this Mac (a few minutes, once)…"
+  say "No ready-made build for this Mac yet: building it here (a few minutes, once)…"
   if ! xcrun --find clang >/dev/null 2>&1; then
     say "The Mac needs Apple's command line tools. A window opens: click Install, wait for it to finish, then paste the install line again."
     xcode-select --install 2>/dev/null || true
@@ -77,8 +126,10 @@ else
   SRC="$(find "$TMP" -maxdepth 1 -type d -name 'Mandarin-DAC-Bridge-*' | head -1)"
   DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 "$DOTNET_DIR/dotnet" publish "$SRC/src/MandarinDacBridge" \
     -c Release -r "$RID" -o "$TMP/out" --nologo -v quiet
-  mv -f "$TMP/out/mandarin-dac-bridge" "$BIN"
+  NEW="$TMP/out/mandarin-dac-bridge"
 fi
+launchctl unload "$PLIST" 2>/dev/null || true   # a second run: the one running is replaced now
+mv -f "$NEW" "$BIN"
 chmod +x "$BIN"
 xattr -d com.apple.quarantine "$BIN" 2>/dev/null || true
 codesign --force --sign - "$BIN" >/dev/null 2>&1 || true

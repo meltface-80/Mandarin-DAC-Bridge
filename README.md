@@ -57,8 +57,9 @@ macOS 14 or newer (macOS 27 included), Apple silicon or Intel. No Docker needed.
 The installer uses the same Homebrew as Mandarin, and adds Homebrew's **ffmpeg-full**: ffmpeg
 built with SoX, the resampler the bridge needs (a few hundred MB, once). It sits beside the plain
 ffmpeg Mandarin uses and doesn't replace it. It downloads the bridge from this repository's latest
-**Release** into `~/Mandarin-DAC-Bridge`. If there is no Release yet, it builds the bridge on the
-Mac instead, which takes a few minutes, once. If macOS asks to let **mandarin-dac-bridge** find
+**Release** into `~/Mandarin-DAC-Bridge`, and checks it against that release's checksums: a download
+that doesn't match is refused, and the bridge already there is left as it was. If there is no
+Release yet, it builds the bridge on the Mac instead, which takes a few minutes, once. If macOS asks to let **mandarin-dac-bridge** find
 devices on your network, choose **Allow**. To update, paste the same line again.
 
 **Then point the apps at the bridge:**
@@ -84,7 +85,7 @@ powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/mel
 ```
 
 It installs ffmpeg with SoX (winget's `Gyan.FFmpeg`) if no ffmpeg with SoX is there, and the bridge into
-`%LOCALAPPDATA%\Mandarin-DAC-Bridge`, starts it now and at every sign-in (a hidden scheduled
+`%LOCALAPPDATA%\Mandarin-DAC-Bridge` (checked against the release's checksums, as on the Mac), starts it now and at every sign-in (a hidden scheduled
 task), and opens **http://localhost:55500**. If Windows asks to let **mandarin-dac-bridge** use the
 network, allow it on private networks. To update, paste the same line again.
 
@@ -102,8 +103,8 @@ On GitHub, go to **Releases → Draft a new release**, create a tag `v` + the `<
 `src/MandarinDacBridge/MandarinDacBridge.csproj` on `main` (for example `v1.1.6`) and click
 **Publish**. GitHub Actions (`.github/workflows/release.yml`) then tests the code, builds it for
 Apple silicon and Intel Macs, Linux x64 and arm64, and Windows x64 and ARM64, and attaches
-`mandarin-dac-bridge-<platform>.tar.gz` (`.zip` for Windows) to the release. The installers always
-fetch the latest release.
+`mandarin-dac-bridge-<platform>.tar.gz` (`.zip` for Windows) to the release, with `SHA256SUMS`, the
+checksums the installers check each build against. The installers always fetch the latest release.
 
 ---
 
@@ -143,8 +144,7 @@ docker run -d \
   --name mandarin-dac-bridge \
   --network host \
   --restart unless-stopped \
-  --device /dev/snd \
-  --privileged \
+  --device-cgroup-rule 'c 116:* rmw' \
   -v /dev/snd:/dev/snd \
   --cap-add SYS_NICE \
   -e TZ=Europe/London \
@@ -154,10 +154,12 @@ docker run -d \
 
 * **`--network host` is required.** UPnP discovery uses multicast, which doesn't cross Docker's
   bridge network.
-* **`--device /dev/snd`, `--privileged` and `-v /dev/snd:/dev/snd` together** let the container
-  open the DACs: `--device` hands the sound devices over, `--privileged` lets the container open
-  them, and the `/dev/snd` mount keeps the device list current, so a DAC plugged in later is
-  found too.
+* **`-v /dev/snd:/dev/snd` and `--device-cgroup-rule 'c 116:* rmw'` together** let the container
+  open the DACs: the mount keeps the device list current, so a DAC plugged in later is found too,
+  and the rule lets the container open every sound device (ALSA's devices are character major 116),
+  and no other device on the host. Before 1.1.29 the command used `--privileged` for this, which
+  also gave the bridge, and the programs it downloads, every device and every capability. A
+  command or Compose file with `--privileged` still works; replacing it is recommended.
 * If Mandarin runs on the same machine with `--device /dev/snd`, switch off its local output for
   the DACs. Otherwise both containers try to open them.
 
@@ -230,7 +232,9 @@ through the bridge instead ([below](#this-mac-the-music-app-and-the-spotify-app)
 Switch on **Qobuz Connect** on the page (or set `QOBUZ=1`) and press **Install QobuzProxy**: it
 fetches [QobuzProxy](https://github.com/leolobato/qobuz-proxy) (MIT) from GitHub into a private
 Python environment in `DATA_DIR/qobuz` (Python 3.10 or later must be installed; the Docker image has
-it). Then **Sign in to Qobuz** opens QobuzProxy's own page (port 8689). Each DAC then appears in the
+it). Only the release the bridge was made with is installed, checked against its files, and only
+the versions of what it needs that were pinned with it, each checked against its hashes (Python 3.10
+to 3.14). An install from before 1.1.27 is offered **Install again**. Then **Sign in to Qobuz** opens QobuzProxy's own page (port 8689). Each DAC then appears in the
 Qobuz app's device list as `"<DAC> (Bridge)"`.
 
 QobuzProxy speaks Qobuz Connect and hands each track to the DAC's UPnP device, so Qobuz plays
@@ -336,7 +340,9 @@ the bridge isn't in the way at all, so the pages and the now-playing screen lear
 from Roon itself, through its extension API (as RoPieee's display does). Switch on **Roon now
 playing** under *Connections* (or set `ROON_API=1`), then in Roon go to *Settings → Extensions* and
 enable **Mandarin DAC Bridge** (once: it stays enabled). The bridge finds the Roon Core on the
-network by itself (set `ROON_CORE=host:port` if it can't, e.g. across subnets). Each DAC shows its
+network by itself (set `ROON_CORE=host:port` if it can't, e.g. across subnets). Once enabled in a Core,
+the bridge talks only to that Core, at the address where it was enabled. If the Core's address
+changes, switch **Roon now playing** off and on. Each DAC shows its
 Roon zone's title, artist, album, cover and position: the zone named like the DAC (its Squeezebox
 name, or Roon Bridge's name for it), or the one chosen under **Roon zone** on the DAC's page.
 
@@ -374,7 +380,8 @@ never touches that path.
 * **Decoding.** ffmpeg turns whatever the app sends (FLAC, WAV, AIFF, ALAC, raw L16/L24, MP3,
   AAC…) into 32-bit integer PCM at the track's own rate, which carries 16- and 24-bit audio
   exactly. Only when the DAC can't take that rate is the track resampled (SoX, 28-bit
-  precision), to the nearest rate in the same family (44.1 or 48 kHz). SoX or nothing: with an
+  precision), to the nearest rate in the same family (44.1 or 48 kHz), or, on a DAC that takes
+  no rate of that family, to its highest rate. SoX or nothing: with an
   ffmpeg built without SoX, such a track is refused, and the page says why (for a next track sent
   ahead for gapless play, the log does, and playback stops after the track before it). The
   installers and the Docker image bring an ffmpeg with SoX; Homebrew's plain `ffmpeg` and Chocolatey's `ffmpeg` have none
@@ -433,9 +440,9 @@ browser, only the bridge's own page can change anything: a request that another 
 to the bridge (to switch a connection on, start a download or turn a DAC up) is refused. Programs
 that aren't browsers (Audirvana, Mandarin, a Squeezebox server, `curl`) aren't affected. A browser
 must also have reached the bridge by its address, `localhost`, or the machine's own name (with or
-without `.local`): another site can't point a name of its own at the bridge to get round this. If
-you open the page by a name of your own (from your router's or Pi-hole's DNS), add it to
-`BRIDGE_HOSTNAMES`, or changes made on the page are refused. An optional password is planned.
+without `.local`), to change anything or to read it: another site can't point a name of its own at
+the bridge to get round this. If you open the page by a name of your own (from your router's or
+Pi-hole's DNS), add it to `BRIDGE_HOSTNAMES`, or the page is refused. An optional password is planned.
 
 ### Settings (all optional)
 
@@ -457,7 +464,7 @@ you open the page by a name of your own (from your router's or Pi-hole's DNS), a
 | `SOLOIST_API_KEY` | — | your Soloist API key (or type it on the page) |
 | `SOLOIST` | downloaded by the page, or on the PATH | the soloist program |
 | `QOBUZ` | — | `1` starts with Qobuz Connect on (QobuzProxy) |
-| `QOBUZPROXY_SOURCE` | the QobuzProxy release on GitHub | another place to install QobuzProxy from (a local copy, a fork) |
+| `QOBUZPROXY_SOURCE` | the QobuzProxy release on GitHub | another place to install QobuzProxy from (a local copy, a fork), unchecked |
 | `CALDERA` | — | `1` starts with Plex through Caldera Headless on (Linux) |
 | `MAC_APPS` | — | `1` starts with the Music and Spotify apps on (macOS) |
 | `ROON_BRIDGE` | — | `1` starts with Roon Bridge on (downloaded from Roon Labs, run beside the bridge) |
