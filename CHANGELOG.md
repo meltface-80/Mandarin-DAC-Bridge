@@ -3,7 +3,10 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
-## [1.1.31] — 2026-10-19
+## [Unreleased]
+
+On `dev`, not yet given a version: the owner names it when the dev tests are checked out
+(`dev/release.md`).
 
 ### Changed
 

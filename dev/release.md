@@ -21,8 +21,9 @@ dev    ←── integration. Every finished piece lands here, by a pull request
 - **Every piece of work is its own branch, cut from the current `dev`**, named `<area>/<what>`
   (`feature/…`, `fix/…`, `quality/…`). One concern per branch. Never commit to `dev` or `main`
   directly.
-- **A build branch carries its own version bump and CHANGELOG entry.** Versions keep counting up on
-  `dev`; the version on `main` when the owner publishes a release is the release.
+- **No version bumps on a branch** (the owner's decision, 2026-10-19). A branch adds its CHANGELOG
+  entry under `## [Unreleased]`; the `.csproj`'s `<Version>` stays as it is on `dev`. The version on
+  `main` when the owner publishes a release is the release.
 - Push the branch. CI (`test-image.yml`) runs every gate and the whole suite on macOS, Windows and
   Linux (`checks.yml`), then builds `ghcr.io/meltface-80/mandarin-dac-bridge:<version>-test`. Once
   that run is green on the branch's latest commit, give the owner the docker command for it
@@ -57,13 +58,14 @@ any change. Anything else that ships or decides what ships (`src/`, the `Dockerf
 installers, `release.yml`, `test-image.yml`) is a build.
 
 1. Make the code change, with its tests.
-2. Bump `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj`.
-3. Add a `CHANGELOG.md` entry (format below).
+2. Add its `CHANGELOG.md` entry under `## [Unreleased]` (format below). No version bump.
+3. A change the README or the site will have to describe: add what they must say to
+   `dev/at-bump.md` (they change only at the bump, below).
 4. `tools/check.sh` — the gates and the whole suite (`dev/quality.md`).
-5. Commit in one commit: code + version + CHANGELOG. One exception (the owner's decision,
-   2026-10-12): a pure move out of an oversized file, with behaviour unchanged and the baseline
-   ratcheted, may come first as a commit of its own on the same branch, so the fix that follows is
-   reviewed apart from the move. The branch's last commit carries the version and the CHANGELOG.
+5. Commit in one commit: code + CHANGELOG. One exception (the owner's decision, 2026-10-12): a pure
+   move out of an oversized file, with behaviour unchanged and the baseline ratcheted, may come
+   first as a commit of its own on the same branch, so the fix that follows is reviewed apart from
+   the move.
 6. Push the branch (cut from `dev`).
 7. Wait for that commit's **Test image** run (`test-image.yml`) to finish green — check it through
    the GitHub API (workflow runs for the branch, matching the pushed SHA). Its `checks` jobs (every
@@ -96,7 +98,9 @@ and `linux/arm64`, by `test-image.yml`:
 ## Testing a branch or `dev` (the command to give)
 
 Once the branch's Test image run is green, give this with the version filled in (the `.csproj`'s
-`<Version>` on that commit). It pulls FIRST, and everything after the pull sits inside `&& { … }`,
+`<Version>` on that commit). With no bumps between versions (above), every branch's image has the
+same `<version>-test` tag, and the last one pushed has it: say which branch and commit it is, and
+give it only while that branch's push is the last. It pulls FIRST, and everything after the pull sits inside `&& { … }`,
 so a failed pull (an image not built yet) leaves the running bridge untouched. Lines pasted one
 after another do not do that: a shell runs each whatever the last one did. The settings volume is
 kept.
@@ -130,17 +134,30 @@ tested from a clone: `git checkout <branch>`, then
   check means no build.
 - After the owner publishes, confirm the release's assets appeared (six builds: macOS arm64/x64,
   Linux x64/arm64, Windows x64/arm64). A workflow failing quietly is how a release ends up empty.
-- Each archive holds the bridge's own ffmpeg (`ffmpeg/`, from 1.1.31: `dev/design/install.md`),
+- Each archive holds the bridge's own ffmpeg (`ffmpeg/`, `dev/design/install.md`),
   built by `tools/ffmpeg/build.sh` from the sources pinned in `tools/ffmpeg/sources.lock`. A new
   ffmpeg or libsoxr is a change to that file, with where its SHA-256 came from in the commit, and is
   a build. `release.yml` run by hand (Actions → Release → Run workflow, on a branch) builds all six
   archives without publishing anything: the way to try a change to the ffmpeg build on every target.
 - Add the version's row to `dev/history.md`.
 
+## Bumping the version (only when the owner says so)
+
+The owner tests `dev`, then says "bump version X.Y.Z". On a branch from `dev`, in one commit:
+
+1. `<Version>X.Y.Z</Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj`.
+2. `## [Unreleased]` in `CHANGELOG.md` becomes `## [X.Y.Z] — <date>`, and a new empty
+   `## [Unreleased]` goes above it.
+3. The README and the site (`docs/`, served by GitHub Pages) say what is in X.Y.Z: every item in
+   `dev/at-bump.md` is applied, and the file is emptied again.
+4. Its row in `dev/history.md`.
+5. `tools/check.sh`, push, the Test image run green, then the pull request into `dev`.
+
 ## README and the site
 
-- The README's install commands and the site (`docs/`) describe `main`. A user-visible change
-  updates them in its own branch, so they arrive with the code when the owner merges into `main`.
+- The README's install commands and the site (`docs/`) describe `main`. They change only at a
+  version bump (above), from `dev/at-bump.md`, so they arrive with the code when the owner merges
+  into `main`.
 - The site's install-command builder writes `#main`; it stays that way.
 
 ## CHANGELOG.md format

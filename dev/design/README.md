@@ -12,6 +12,6 @@ here.
 
 | Design | Status |
 |---|---|
-| [`install.md`](install.md) | Decided (2026-10-19): the bridge's own ffmpeg (1.1.31); the Mac's unreadable formats refused and probed (1.1.30) |
+| [`install.md`](install.md) | Decided (2026-10-19): the bridge's own ffmpeg (unreleased, on its branch); the Mac's unreadable formats refused and probed (1.1.30) |
 | [`password.md`](password.md) | Draft: open questions for the owner |
 | [`updater.md`](updater.md) | Draft: open questions for the owner |

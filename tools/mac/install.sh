@@ -6,8 +6,8 @@
 #
 # Downloads the bridge (one native program, built with .NET 10) and its own small ffmpeg with SoX, the
 # only resampler the bridge uses, into ~/Mandarin-DAC-Bridge, starts it now and at every login, and
-# opens its page. Nothing to set up, and nothing else installed: no Homebrew (from 1.1.31,
-# dev/design/install.md).
+# opens its page. Nothing to set up, and nothing else installed: no Homebrew
+# (dev/design/install.md).
 #
 # Both come from the repository's latest GitHub Release, checked against that release's SHA256SUMS
 # (from 1.1.26; an earlier release is installed unchecked): one that differs is refused, and nothing is
@@ -16,7 +16,7 @@
 # ~/Mandarin-DAC-Bridge/.dotnet), and its ffmpeg too (tools/ffmpeg/build.sh, from ffmpeg's and
 # libsoxr's pinned source), with Apple's command line tools.
 #
-# Homebrew's ffmpeg-full, which installers before 1.1.31 added, is left alone: something else may use
+# Homebrew's ffmpeg-full, which earlier installers added, is left alone: something else may use
 # it. Run it again to update; it keeps the settings.
 set -euo pipefail
 
@@ -113,7 +113,7 @@ if [ -n "$TAG" ] && [ "$got" = 200 ]; then
   tar -xzf "$TMP/bridge.tar.gz" -C "$TMP" && [ -f "$TMP/mandarin-dac-bridge" ] \
     || { echo "The release's build couldn't be unpacked. Nothing was changed; run this line again."; exit 1; }
   NEW="$TMP/mandarin-dac-bridge"
-  [ -x "$TMP/ffmpeg/bin/ffmpeg" ] && NEWFF="$TMP/ffmpeg"   # from 1.1.31, its own ffmpeg comes with it
+  [ -x "$TMP/ffmpeg/bin/ffmpeg" ] && NEWFF="$TMP/ffmpeg"   # a release that carries its own ffmpeg
 else
   say "No ready-made build for this Mac yet: building it here (a few minutes, once)…"
   need_tools

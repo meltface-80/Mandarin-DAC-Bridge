@@ -4,8 +4,8 @@ Status: **decided by the owner on 2026-10-19** (the decisions are at the end). P
 2026-10-19 by a report from a user on macOS 27 with a FiiO K5 Pro: the Mac installer put about a
 hundred Homebrew packages on the machine, and the page then said "the DAC doesn't take 44.1 kHz"
 for a DAC whose own panel listed 44.1 kHz. The second part is a bug, not an install question. It is
-investigated here because it came in the same report, and it ships as its own version (1.1.30)
-before the bundled ffmpeg (1.1.31).
+investigated here because it came in the same report, and it shipped first, as 1.1.30; the bundled
+ffmpeg follows, its version named by the owner.
 
 ## Part 1: why the Mac install is so big
 
@@ -121,7 +121,7 @@ decided that is what is needed (2026-10-19). `CLAUDE.md` says so under *Owner's 
   own doesn't run on that Mac, the bridge takes another with SoX. No Homebrew and no Apple tools. With no release, it builds the bridge (as today) and then this ffmpeg
   with `tools/ffmpeg/build.sh`, using the Apple tools that building already needs, and no Homebrew.
 - **The Windows installer:** from a release, the same, and winget is not used. With no release, or a
-  release from before 1.1.31 without `ffmpeg\`, it falls back to winget's `Gyan.FFmpeg` as today:
+  release from before it, without `ffmpeg\`, it falls back to winget's `Gyan.FFmpeg` as today:
   building ffmpeg needs MSYS2, which a user's PC doesn't have.
 - **CI** (`checks.yml`) builds it on macOS, Windows (MSYS2) and Linux, cached by the hash of
   `tools/ffmpeg/`, puts it first on the PATH, and runs the whole suite with it. Homebrew's

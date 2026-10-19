@@ -3,13 +3,13 @@
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/install.ps1 | iex"
 #
 # Downloads the bridge (one native program) and its own small ffmpeg with SoX
-# (from 1.1.31, dev/design/install.md) from the repository's latest GitHub Release
+# (dev/design/install.md) from the repository's latest GitHub Release
 # into %LOCALAPPDATA%\Mandarin-DAC-Bridge, checked against that release's
 # SHA256SUMS (from 1.1.26; an earlier release is installed unchecked: one that
 # differs is refused, and nothing is changed), starts it now and at every sign-in
 # (a hidden scheduled task), and opens its page. If there is no Release yet, or no
 # build in it for this PC, it is built here from the source (a private .NET SDK is
-# downloaded for it); then, as for a release from before 1.1.31, ffmpeg with SoX
+# downloaded for it); then, as for an earlier release without it, ffmpeg with SoX
 # comes from winget (Gyan.FFmpeg), if none is there: building ffmpeg needs MSYS2.
 # A Gyan.FFmpeg installed before is left alone: something else may use it.
 #
@@ -63,7 +63,7 @@ $rid = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win-arm64' } else { 'win-
 Say "Installing Mandarin DAC Bridge ($rid). Leave this window open."
 
 # ffmpeg, the decoder, built with SoX: a track at a rate the DAC can't take is resampled with SoX or
-# refused (Audio/Soxr.cs). The bridge's own comes with each release from 1.1.31. Without it: winget's
+# refused (Audio/Soxr.cs). The bridge's own comes with each release that carries it. Without it: winget's
 # Gyan.FFmpeg and Chocolatey's ffmpeg-full (Gyan's full build) have SoX; the essentials build
 # (Gyan.FFmpeg.Essentials, Chocolatey's ffmpeg) doesn't. The bridge picks its own, else the one with SoX.
 function Find-Ffmpegs {
@@ -132,7 +132,7 @@ try {
         Expand-Archive $zip -DestinationPath $tmp -Force
         $new = Join-Path $tmp 'mandarin-dac-bridge.exe'
         if (-not (Test-Path $new)) { Write-Host "The release's build has no mandarin-dac-bridge.exe in it. Nothing was changed."; exit 1 }
-        $ownFfmpeg = Join-Path $tmp 'ffmpeg'   # from 1.1.31, its own ffmpeg comes with it
+        $ownFfmpeg = Join-Path $tmp 'ffmpeg'   # a release that carries its own ffmpeg
         if (-not (Test-Path (Join-Path $ownFfmpeg 'bin\ffmpeg.exe'))) { $ownFfmpeg = $null }
     } else {
         Say 'No ready-made build for this PC yet: building it here (a few minutes, once)…'

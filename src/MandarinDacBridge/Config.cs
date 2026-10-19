@@ -139,7 +139,7 @@ internal sealed class Config
     }
 
     // The ffmpeg with SoX (Audio/Soxr.cs): the bridge's own, beside it (ffmpeg/bin, in every release archive
-    // from 1.1.31: dev/design/install.md), then Homebrew's ffmpeg-full (kept off the PATH, beside the plain
+    // that carries one: dev/design/install.md), then Homebrew's ffmpeg-full (kept off the PATH, beside the plain
     // ffmpeg Mandarin uses), then the PATH, then where Homebrew (launchd's PATH is short) or winget put one.
     // With none that has SoX, the first found.
     private static string FindFfmpeg() =>

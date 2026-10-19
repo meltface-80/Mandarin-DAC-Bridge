@@ -283,16 +283,16 @@
         <button class="copy-btn" data-copy>Copy</button>
 <pre>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/install.sh)"</pre>
       </div>
-      <div class="firstrun"><ol start="3"><li><b>Answer what it asks.</b> <b>Allow</b> if macOS asks to let
-        <b>mandarin-dac-bridge</b> find devices on your network. Only if there is no ready-made build for your
-        Mac does it ask to install Apple's command line tools, to build it there.</li></ol></div>
+      <div class="firstrun"><ol start="3"><li><b>Answer what it asks.</b> Your <b>Mac's password</b>, if Homebrew
+        needs installing (nothing shows as you type; that's normal). <b>Allow</b> if macOS asks to let
+        <b>mandarin-dac-bridge</b> find devices on your network.</li></ol></div>
       <div class="firstrun"><ol start="4"><li><b>Done.</b> The page opens in your browser at
         <b>http://localhost:55500</b> with a tile for each USB DAC. The bridge starts by itself whenever you log in.
         On a phone, open the address Terminal shows at the end.</li></ol></div>
-      <div class="note"><b>What it installs:</b> the bridge, one program, and its own small ffmpeg built with SoX,
-        the resampler the bridge needs (a few MB), both in <code>~/Mandarin-DAC-Bridge</code>. No Homebrew. A
-        <code>ffmpeg-full</code> that an earlier installer added is left alone; if nothing else uses it,
-        <code>brew uninstall ffmpeg-full</code> removes it. <b>To update</b>, paste the same line again; what you set on the page is
+      <div class="note"><b>What it installs:</b> Homebrew (if missing; the same one Mandarin uses) and Homebrew's
+        <code>ffmpeg-full</code>, ffmpeg built with SoX, the resampler the bridge needs (a few hundred MB, once; it sits
+        beside Mandarin's ffmpeg). Then the bridge itself, one program in
+        <code>~/Mandarin-DAC-Bridge</code>. <b>To update</b>, paste the same line again; what you set on the page is
         kept (environment variables added to the launch file by hand are not: add them again).</div>
       <details class="firstrun">
         <summary><b>Prefer to install by hand?</b></summary>
@@ -302,7 +302,8 @@
             <a href="https://github.com/meltface-80/Mandarin-DAC-Bridge/releases/latest">latest release</a>, then:</p>
           <div class="codebox">
             <button class="copy-btn" data-copy>Copy</button>
-<pre>mkdir -p ~/Mandarin-DAC-Bridge
+<pre>brew install ffmpeg-full
+mkdir -p ~/Mandarin-DAC-Bridge
 tar -xzf ~/Downloads/mandarin-dac-bridge-osx-*.tar.gz -C ~/Mandarin-DAC-Bridge
 xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser: let macOS run it
 ~/Mandarin-DAC-Bridge/mandarin-dac-bridge --list    # the DACs it can see
@@ -331,9 +332,8 @@ xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser
         network (private networks).</li></ol></div>
       <div class="firstrun"><ol start="4"><li><b>Done.</b> The page opens at <b>http://localhost:55500</b>. The bridge
         starts by itself at every sign-in.</li></ol></div>
-      <div class="note"><b>What it installs:</b> the bridge, one program, and its own ffmpeg with SoX, in
-        <code>%LOCALAPPDATA%\Mandarin-DAC-Bridge</code>, started by a hidden scheduled task. (With no ready-made build
-        for the PC, it builds the bridge there, and gets ffmpeg with SoX from winget's <code>Gyan.FFmpeg</code>.) <b>To update</b>, paste the
+      <div class="note"><b>What it installs:</b> ffmpeg with SoX (winget's <code>Gyan.FFmpeg</code>, if none is there) and the bridge, one program in
+        <code>%LOCALAPPDATA%\Mandarin-DAC-Bridge</code>, started by a hidden scheduled task. <b>To update</b>, paste the
         same line again; your settings are kept. In <b>Sound settings</b>, the DACs the bridge holds show as in use: that's
         the exclusive hold. Windows' own sound goes to another output.</div>
     </div>
@@ -543,8 +543,8 @@ xattr -dr com.apple.quarantine ~/Mandarin-DAC-Bridge   # downloaded by a browser
 <pre>/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/uninstall.sh)"</pre>
       </div>
       <div class="note">It stops the bridge, removes it from login, and deletes <code>~/Mandarin-DAC-Bridge</code>
-        (the program, its own ffmpeg, its settings and its log). Homebrew and its ffmpegs stay, because Mandarin
-        uses them too. If nothing else needs the ffmpeg-full an earlier installer added: <code>brew uninstall ffmpeg-full</code>. The DAC Bridge output, if you installed it, stays
+        (the program, its settings and its log). Homebrew and ffmpeg stay, because Mandarin uses them too. If
+        nothing else needs ffmpeg-full: <code>brew uninstall ffmpeg-full</code>. The DAC Bridge output, if you installed it, stays
         until <code>driver.sh</code> removes it (<a href="#mac-apps">above</a>), and a Roon Bridge the bridge downloaded
         stays in <code>~/Applications</code>.</div>
       <details class="firstrun">
@@ -564,8 +564,7 @@ rm -rf ~/Mandarin-DAC-Bridge</pre>
 <pre>powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/uninstall.ps1 | iex"</pre>
       </div>
       <div class="note">It stops the bridge, removes its scheduled task and firewall rule, and deletes
-        <code>%LOCALAPPDATA%\Mandarin-DAC-Bridge</code>, its own ffmpeg with it. An ffmpeg from winget stays;
-        <code>winget uninstall Gyan.FFmpeg</code> removes it.</div>
+        <code>%LOCALAPPDATA%\Mandarin-DAC-Bridge</code>. ffmpeg stays; <code>winget uninstall Gyan.FFmpeg</code> removes it.</div>
     </div>
 
     <div class="out" data-pane="run" hidden>
@@ -613,7 +612,7 @@ docker compose down --rmi local --volumes</pre>
           <tr><td>BRIDGE_ALL_OUTPUTS</td><td>&mdash;</td><td><code>1</code> also offers non-USB outputs.</td></tr>
           <tr><td>BRIDGE_NAME_SUFFIX</td><td>" (Bridge)"</td><td>Added to each DAC's name on the network.</td></tr>
           <tr><td>DATA_DIR</td><td>data/</td><td>Where <code>settings.json</code> lives (<code>/data</code> in Docker).</td></tr>
-          <tr><td>FFMPEG</td><td>its own, beside it; else one with SoX</td><td>The decoder.</td></tr>
+          <tr><td>FFMPEG</td><td>on the PATH, or Homebrew's</td><td>The decoder.</td></tr>
           <tr><td>SQUEEZELITE</td><td>&mdash;</td><td><code>1</code> starts with Squeezebox on (the page's switch, once used, wins).</td></tr>
           <tr><td>LMS_SERVER</td><td>&mdash;</td><td>The Squeezebox server's address, if it isn't found by itself.</td></tr>
           <tr><td>SPOTIFY</td><td>&mdash;</td><td><code>1</code> starts with Spotify Connect on (Spotify Soloist, Linux).</td></tr>
