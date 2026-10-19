@@ -21,7 +21,10 @@ installed() { "$brew" list --versions "$1" >/dev/null 2>&1; }
 before="$("$brew" list --formula -1)"
 "$brew" install ffmpeg-full >/dev/null
 "$brew" install lame >/dev/null
-brought="$(comm -13 <(printf '%s\n' "$before" | sort) <("$brew" list --formula -1 | sort) | grep -vx -e ffmpeg-full -e lame || true)"
+# What lame needs (lame 4.0 needs mpg123, which arrives with ffmpeg-full) stays with it.
+needed="$("$brew" deps --installed lame)"
+brought="$(comm -13 <(printf '%s\n' "$before" | sort) <("$brew" list --formula -1 | sort) \
+  | grep -vx -e ffmpeg-full -e lame ${needed:+$(printf -- ' -e %s' $needed)} || true)"
 [ -n "$brought" ] || fail "ffmpeg-full brought no package that wasn't here: nothing to check"
 echo "ffmpeg-full brought $(printf '%s\n' "$brought" | wc -l | tr -d ' ') packages"
 
@@ -43,6 +46,7 @@ out="$(tidy)"; echo "$out"
 ! installed ffmpeg-full || fail "ffmpeg-full is still installed"
 for n in $brought; do ! installed "$n" || fail "$n, which only ffmpeg-full brought, is still installed"; done
 installed lame || fail "lame, asked for, was removed"
+for n in $needed; do installed "$n" || fail "$n, which lame (asked for) needs, was removed"; done
 for n in $before; do installed "$n" || fail "$n, installed before, was removed"; done
 
 # Again: nothing to do, nothing said.
