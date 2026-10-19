@@ -41,6 +41,7 @@ These return early, and pass, elsewhere. CI runs each on at least one system whe
 | `Caldera_IsSetUpBitPerfect_SharesTheDac_ShowsWhatPlexPlays` | Linux | Caldera Headless runs only there |
 | `RoonBridge_RunsBesideTheBridge_SharesTheDacs_AndStopsWithAllItStarted` | Linux | the bridge runs Roon Bridge itself only on Linux; on a Mac and Windows Roon's own app or installer does |
 | `Qobuz_GetsASpeakerPerDac_AimedAtTheBridge_AndIsNamedQobuz` | macOS, Linux | its stand-in for QobuzProxy is a shell script |
+| `MacInstallerTests` (what the installer's tidy-up of an earlier `ffmpeg-full` removes) | macOS | it runs the installer's script with `osascript`. The run against real Homebrew is `tests/mac/tidy-on-homebrew.sh`, a CI step on the macOS runner only: it installs and removes packages |
 | The owner-only checks in `SettingsTests` | macOS, Linux | on Windows a file's access comes from its folder's permissions, not a file mode |
 
 ## Layout

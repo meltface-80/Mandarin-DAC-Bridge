@@ -97,7 +97,10 @@ public partial class WorkflowTests
         var checks = Workflow("checks.yml");
         Assert.Contains("uses: ./.github/actions/ffmpeg", checks);
         Assert.Contains("the ffmpeg on the PATH isn't the bridge's own", checks);
-        Assert.DoesNotContain("ffmpeg-full", checks);
+        Assert.DoesNotContain("brew install ffmpeg-full", checks);   // the suite runs with the bridge's own
+        Assert.DoesNotContain("choco install ffmpeg-full", checks);
+        // The Mac installer's tidy-up of an earlier ffmpeg-full, run against real Homebrew on the macOS runner only.
+        Assert.Matches(new Regex(@"if: runner\.os == 'macOS'\s*\n(\s+.*\n)*?\s+run: bash tests/mac/tidy-on-homebrew\.sh"), checks);
 
         var action = Workflow("actions/ffmpeg/action.yml");
         Assert.Contains("tools/ffmpeg/build.sh \"$RID\" \".ffmpeg/$RID\"", action);

@@ -72,7 +72,7 @@ jobs:
         run: |
           found="$(command -v ffmpeg)"; echo "ffmpeg: $found"
           case "$found" in *".ffmpeg/$RID/bin/ffmpeg"*) ;; *) echo "::error::the ffmpeg on the PATH isn't the bridge's own"; exit 1 ;; esac
-          ffmpeg -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || { echo "::error::this ffmpeg has no SoX (libsoxr)"; exit 1; }
+          ffmpeg -hide_banner -buildconf 2>&1 | grep -c -- '--enable-libsoxr' >/dev/null || { echo "::error::this ffmpeg has no SoX (libsoxr)"; exit 1; }
       - run: dotnet test -c Release
       # The native program each platform gets, and its own sound-device code run for real
       # (Core Audio on macOS, WASAPI on Windows, ALSA on Linux): it must list and diagnose without failing.
@@ -97,6 +97,14 @@ jobs:
         run: |
           bash tools/mac/driver.sh
           out/mandarin-dac-bridge --loopback-test
+      # The Mac installer's tidy-up of an earlier install's ffmpeg-full, for real against the runner's
+      # Homebrew (dev/design/install.md, decision 3): installs and removes packages, so only on the runner.
+      - name: Mac installer tidies up an earlier install's ffmpeg-full
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+        run: bash tests/mac/tidy-on-homebrew.sh ".ffmpeg/$RID/bin/ffmpeg"
       - name: PowerShell scripts parse
         if: runner.os == 'Windows'
         shell: pwsh

@@ -51,4 +51,4 @@ runs:
         head -12 .ffmpeg/"$RID"/NOTICE.md
         [ "$RID" = osx-x64 ] && exit 0
         f=.ffmpeg/"$RID"/bin/ffmpeg; [ "$RUNNER_OS" = Windows ] && f="$f.exe"
-        "$f" -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || { echo "::error::the bridge's ffmpeg has no SoX"; exit 1; }
+        "$f" -hide_banner -buildconf 2>&1 | grep -c -- '--enable-libsoxr' >/dev/null || { echo "::error::the bridge's ffmpeg has no SoX"; exit 1; }

@@ -9,16 +9,16 @@ here instead of editing them; the bump applies every item and empties this file.
 The README's Mac and Windows install sections, its *Decoding* paragraph, its `FFMPEG` row and its
 *Development* paragraph, and the site's Mac and Windows install notes, its by-hand Mac install, its
 uninstall notes and its `FFMPEG` row: the installers bring the bridge's own ffmpeg with SoX, the
-Mac's needs no Homebrew, an earlier `ffmpeg-full` or `Gyan.FFmpeg` is left alone and how to remove
-it. The exact edits, as written and checked against `dev` on 2026-10-19 (`git apply` from the
-repository's root; if `dev` has moved, apply by hand):
+Mac's needs no Homebrew and offers to tidy up an earlier `ffmpeg-full` and the packages only it
+needed (`-- --tidy-only` later), and Windows leaves an earlier `Gyan.FFmpeg` alone. The exact edits, as written and checked against `dev` on
+2026-10-19 (`git apply` from the repository's root; if `dev` has moved, apply by hand):
 
 ```diff
 diff --git a/README.md b/README.md
-index a20adc2..7d8d3bf 100644
+index a20adc2..c3b8775 100644
 --- a/README.md
 +++ b/README.md
-@@ -54,12 +54,14 @@ macOS 14 or newer (macOS 27 included), Apple silicon or Intel. No Docker needed.
+@@ -54,12 +54,16 @@ macOS 14 or newer (macOS 27 included), Apple silicon or Intel. No Docker needed.
  3. **Done.** The page opens in your browser at **http://localhost:55500**. On a phone, open the
     address Terminal shows at the end. The bridge starts by itself whenever you log in.
  
@@ -34,12 +34,14 @@ index a20adc2..7d8d3bf 100644
 +against that release's checksums: a download that doesn't match is refused, and the bridge already
 +there is left as it was. If there is no Release yet, it builds the bridge and its ffmpeg on the Mac
 +instead, which takes a few minutes, once, and asks for Apple's command line tools if they aren't
-+there. Homebrew's **ffmpeg-full**, which earlier versions of the installer added, is left alone; if
-+nothing else uses it, `brew uninstall ffmpeg-full` removes it. If macOS asks to let **mandarin-dac-bridge** find
++there. On a Mac an earlier version set up, it then offers to tidy up: Homebrew's **ffmpeg-full**,
++which earlier versions added, and the packages only it needed (it lists them and the space they
++take; press Return to remove them). Homebrew itself, Mandarin's ffmpeg and anything you installed
++yourself stay. If macOS asks to let **mandarin-dac-bridge** find
  devices on your network, choose **Allow**. To update, paste the same line again.
  
  **Then point the apps at the bridge:**
-@@ -84,9 +86,10 @@ Windows 10 or 11, x64 or ARM64. Open **Terminal** (right-click Start) and paste:
+@@ -84,9 +88,10 @@ Windows 10 or 11, x64 or ARM64. Open **Terminal** (right-click Start) and paste:
  powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/install.ps1 | iex"
  ```
  
@@ -53,7 +55,7 @@ index a20adc2..7d8d3bf 100644
  network, allow it on private networks. To update, paste the same line again.
  
  The bridge holds each USB DAC in **WASAPI exclusive mode**, so Windows' mixer never touches the
-@@ -383,10 +386,13 @@ never touches that path.
+@@ -383,10 +388,13 @@ never touches that path.
    precision), to the nearest rate in the same family (44.1 or 48 kHz), or, on a DAC that takes
    no rate of that family, to its highest rate. SoX or nothing: with an
    ffmpeg built without SoX, such a track is refused, and the page says why (for a next track sent
@@ -71,7 +73,7 @@ index a20adc2..7d8d3bf 100644
  * **Bit depth.** A track deeper than the DAC's widest format (24-bit on a DAC that takes 24 at most,
    or anything over 24-bit on a Mac) loses its lowest bits on the way, with no dither.
  * **DSD.** DSF and DFF files go to the DAC as DoP, untouched, where DoP is on for that DAC: on Linux
-@@ -456,7 +462,7 @@ Pi-hole's DNS), add it to `BRIDGE_HOSTNAMES`, or the page is refused. An optiona
+@@ -456,7 +464,7 @@ Pi-hole's DNS), add it to `BRIDGE_HOSTNAMES`, or the page is refused. An optiona
  | `BRIDGE_ALL_OUTPUTS` | — | `1` also offers non-USB outputs |
  | `BRIDGE_NAME_SUFFIX` | ` (Bridge)` | added to each DAC's name on the network |
  | `DATA_DIR` | `data/` beside the program | where `settings.json` lives |
@@ -80,7 +82,7 @@ index a20adc2..7d8d3bf 100644
  | `SQUEEZELITE` | — | `1` starts with the Squeezebox player on (the page's switch, once used, wins) |
  | `LMS_SERVER` | found by itself | the Squeezebox server, `host` or `host:port` |
  | `LMS_JSON_PORT` | 9000 | that server's web port, if `LMS_SERVER` is set and Lyrion's isn't 9000 |
-@@ -517,8 +523,10 @@ switching between the two starts with empty settings. `docker volume ls` shows w
+@@ -517,8 +525,10 @@ switching between the two starts with empty settings. `docker volume ls` shows w
  
  ## Development
  
@@ -94,7 +96,7 @@ index a20adc2..7d8d3bf 100644
  `tools/check.sh` runs every gate and the whole suite (`tools/check.sh gates` the fast half).
  Changes go on their own branch from `dev`, into `dev` by a pull request the owner merges once CI is
 diff --git a/docs/index.html b/docs/index.html
-index 5553148..b51229c 100644
+index 5553148..64fe316 100644
 --- a/docs/index.html
 +++ b/docs/index.html
 @@ -283,16 +283,16 @@
@@ -116,8 +118,8 @@ index 5553148..b51229c 100644
 -        <code>~/Mandarin-DAC-Bridge</code>. <b>To update</b>, paste the same line again; what you set on the page is
 +      <div class="note"><b>What it installs:</b> the bridge, one program, and its own small ffmpeg built with SoX,
 +        the resampler the bridge needs (a few MB), both in <code>~/Mandarin-DAC-Bridge</code>. No Homebrew. A
-+        <code>ffmpeg-full</code> that an earlier installer added is left alone; if nothing else uses it,
-+        <code>brew uninstall ffmpeg-full</code> removes it. <b>To update</b>, paste the same line again; what you set on the page is
++        <code>ffmpeg-full</code> that an earlier installer added is offered for removal, with the packages only it
++        needed (press Return to tidy up); Homebrew, Mandarin's ffmpeg and anything you installed yourself stay. <b>To update</b>, paste the same line again; what you set on the page is
          kept (environment variables added to the launch file by hand are not: add them again).</div>
        <details class="firstrun">
          <summary><b>Prefer to install by hand?</b></summary>
@@ -150,7 +152,7 @@ index 5553148..b51229c 100644
 -        (the program, its settings and its log). Homebrew and ffmpeg stay, because Mandarin uses them too. If
 -        nothing else needs ffmpeg-full: <code>brew uninstall ffmpeg-full</code>. The DAC Bridge output, if you installed it, stays
 +        (the program, its own ffmpeg, its settings and its log). Homebrew and its ffmpegs stay, because Mandarin
-+        uses them too. If nothing else needs the ffmpeg-full an earlier installer added: <code>brew uninstall ffmpeg-full</code>. The DAC Bridge output, if you installed it, stays
++        uses them too. If you kept the ffmpeg-full an earlier installer added, the install line with <code>-- --tidy-only</code> removes it. The DAC Bridge output, if you installed it, stays
          until <code>driver.sh</code> removes it (<a href="#mac-apps">above</a>), and a Roon Bridge the bridge downloaded
          stays in <code>~/Applications</code>.</div>
        <details class="firstrun">

@@ -216,7 +216,7 @@ EOF
 
 bin="$out/bin/ffmpeg$exe"
 if [ -z "$cross" ]; then
-  "$bin" -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || fail "the build has no SoX"
+  "$bin" -hide_banner -buildconf 2>&1 | grep -c -- '--enable-libsoxr' >/dev/null || fail "the build has no SoX"   # -c: reads it all (pipefail)
   "$bin" -hide_banner -loglevel error -f lavfi -i sine=frequency=1000:sample_rate=44100:duration=1 \
     -af aresample=48000:resampler=soxr:precision=28 -f null - || fail "it doesn't resample with SoX"
   say "built and checked: $bin"

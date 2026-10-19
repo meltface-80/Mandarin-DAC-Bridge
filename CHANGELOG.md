@@ -31,8 +31,15 @@ On `dev`, not yet given a version: the owner names it when the dev tests are che
     it builds both on the Mac with Apple's command line tools, which building the bridge already needs.
     The Windows installer: from a release, the same, with no winget; with no release, winget's
     `Gyan.FFmpeg` as before.
-  - An `ffmpeg-full` or `Gyan.FFmpeg` installed before is never removed (decision 3): the installers
-    say once that the bridge doesn't need it, and how to remove it.
+  - **Running the same install line on a Mac an earlier version set up tidies up** (decision 3, as
+    the owner changed it): once the bridge's own ffmpeg works, Homebrew's `ffmpeg-full` and the
+    packages only it brought go, after the installer lists them and the space they free and asks
+    (Return: yes; unattended, without asking). Nothing asked for or needed by anything else installed
+    goes, nor Homebrew, nor Mandarin's ffmpeg; what Homebrew still counts needed is kept and named.
+    `-- --tidy-only` runs just that (also after uninstalling). Homebrew's own auto-remove is held off
+    (`HOMEBREW_NO_AUTOREMOVE`), so nothing outside that list goes. `MacInstallerTests` checks the
+    choice with the installer's own script on made-up Homebrew records; `tests/mac/tidy-on-homebrew.sh`
+    runs the tidy-up for real against Homebrew on CI's macOS runner. Windows leaves an earlier `Gyan.FFmpeg` alone and says how to remove it.
   - CI (`checks.yml`) builds the same ffmpeg on macOS, Windows (MSYS2) and Linux, cached by the hash
     of `tools/ffmpeg/`, and runs the whole suite with it first on the PATH, so the suite tests the
     ffmpeg users get. Homebrew's and Chocolatey's are no longer installed there. Docker keeps Debian's
