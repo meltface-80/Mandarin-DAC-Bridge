@@ -36,6 +36,7 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
     private int rate;
     private int myPid;
     private Timer? watch;
+    private readonly Dictionary<(int Rate, int Channels), string> logged = [];   // under gate
 
     public bool Exclusive => haveHog;
     public string Message { get; private set; } = "starting";
@@ -102,20 +103,10 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
             configured = false;
             if (!haveHog) throw new DeviceException(Message == "" ? "the DAC isn't the bridge's yet" : Message);
             var stream = CoreAudio.FirstOutputStream(dev);
-            if (stream == CoreAudio.Unknown) throw new DeviceException("the DAC has no output stream");
-            var formats = CoreAudio.GetArray<AudioStreamRangedDescription>(stream, CoreAudio.StreamAvailablePhysicalFormats, CoreAudio.ScopeGlobal);
-            int best = -1, bestScore = int.MinValue;
-            for (int k = 0; k < formats.Length; k++)
-            {
-                var f = formats[k].Format;
-                if (f.FormatId != CoreAudio.FormatLinearPcm) continue;
-                if (r + 0.5 < formats[k].SampleRateRange.Minimum || r - 0.5 > formats[k].SampleRateRange.Maximum) continue;
-                if (f.ChannelsPerFrame < ch) continue;
-                int score = ((f.FormatFlags & CoreAudio.FlagIsFloat) != 0 ? 0 : 1000) + (int)f.BitsPerChannel - (int)f.ChannelsPerFrame;
-                if (score > bestScore) { bestScore = score; best = k; }
-            }
-            if (best < 0) throw new DeviceException($"the DAC doesn't take {Devices.KHz(r)}");
-            var phys = formats[best].Format;
+            var (raw, formats) = stream == CoreAudio.Unknown ? (Array.Empty<AudioStreamRangedDescription>(), Array.Empty<MacRawFormat>()) : CoreAudio.PhysicalFormats(stream);
+            int best = MacFormats.Pick(formats, r, ch);
+            if (best < 0) throw Refuse(formats, r, ch);
+            var phys = raw[best].Format;
             phys.SampleRate = r;
             if (CoreAudio.Set(stream, CoreAudio.StreamPhysicalFormat, CoreAudio.ScopeGlobal, phys) != 0)
                 CoreAudio.Set(dev, CoreAudio.DeviceNominalSampleRate, CoreAudio.ScopeGlobal, (double)r);   // some drivers only take it here
@@ -145,6 +136,22 @@ internal sealed unsafe class CoreAudioSink(string uid) : ISink
             configured = true;
             return $"{phys.BitsPerChannel}-bit {((phys.FormatFlags & CoreAudio.FlagIsFloat) != 0 ? "float" : "integer")}, {phys.ChannelsPerFrame} ch";
         }
+    }
+
+    // No format to set the rate with: never played in one it didn't list (dev/design/install.md, decision 4).
+    // Core Audio is asked again; the error says which refusal it was, from that answer, and the answer goes to
+    // the log once per rate and channels until it changes (a controller retrying doesn't fill the log).
+    private DeviceException Refuse(MacRawFormat[] formats, int r, int ch)
+    {
+        var probe = CoreAudio.Probe(dev, r);
+        var why = MacFormats.Refusal(formats, probe, ch);
+        var said = $"{why}\n{MacFormats.Report(probe)}";
+        if (!logged.TryGetValue((r, ch), out var before) || before != said)
+        {
+            logged[(r, ch)] = said;
+            Log.Write(said);
+        }
+        return new DeviceException(why);
     }
 
     private long Buffered => Volatile.Read(ref sh->WritePos) - Volatile.Read(ref sh->ReadPos);

@@ -184,17 +184,31 @@ Hypotheses, none checked against a real Mac, so none is a root cause yet (`dev/l
   said: for each of the device's output streams, `pft?`, `pft `, `sfma` and `sfmt` (whether the
   property exists, the result code and size of the size call and of the read, and what was read),
   and the device's `nsr#` and `nsrt`, with the macOS version.
-- **The error says what is true.** Which one depends on what was read:
+- **The error says what is true.** Which one it is comes from the formats the sink read and from the
+  probe's own reading of the list (`pft?`), never from an empty answer alone:
   - no stream at all: "Core Audio shows no output stream for this DAC";
-  - a stream, but no formats listed: "Core Audio lists no formats for this DAC (macOS …), so it
-    can't be set to 44.1 kHz";
-  - formats listed, none covering the rate: "the DAC doesn't take 44.1 kHz (it lists: 48 kHz, …)",
-    the message from before, now true.
-  Each ends with where the details are: "what Core Audio said is in the log; `mandarin-dac-bridge
-  --diagnose` prints it all".
-- **The log** gets the whole probe, once per DAC and rate until the answer changes (so a controller
-  retrying doesn't fill it).
-- **`--diagnose`** prints the same probe for every output device.
+  - PCM formats listed, none at the rate: "the DAC doesn't take 44.1 kHz (it lists 48 kHz, …)",
+    the message from before, now true;
+  - the rate listed, but only with fewer channels than the track: "the DAC takes 44.1 kHz only with
+    fewer than 2 channels";
+  - and, when the sink found no PCM format, which step of the list failed, each followed by
+    "(macOS …), so it can't be set to 44.1 kHz":
+    - "Core Audio has no list of formats for this DAC" (the property isn't there);
+    - "Core Audio couldn't read this DAC's formats (asking their size: <code>)" or "(reading them:
+      <code>)", with the result code and its four letters;
+    - "Core Audio's list of this DAC's formats is <n> bytes, not whole entries of 56";
+    - "Core Audio lists no PCM formats for this DAC, only <kinds>";
+    - "Core Audio's list of this DAC's formats changed between two reads; try again";
+    - "Core Audio lists no formats for this DAC".
+  Each ends with where the details are: "what Core Audio said is in the log, and
+  mandarin-dac-bridge --diagnose prints it all".
+- **The log** gets the whole probe, once per rate and channel count until the answer changes (so a
+  controller retrying, or a playlist moving between two rates, doesn't fill it).
+- **`--diagnose`** prints the same probe for every device.
+- **The panel** of such a DAC still shows the device's nominal rates (what UPnP advertises comes
+  from them), but its formats line says "none listed by Core Audio: the rates are the device's
+  nominal ones, and the bridge can't set any (the log says why)", so the panel no longer seems to
+  promise rates the sink refuses.
 - **Tested** on any system: the choice of a format, the wording of each refusal and the probe's
   report are pure code (`Audio/MacFormats.cs`) given what Core Audio said. Reading Core Audio itself
   (`Native/CoreAudioProbe.cs`) runs only on a Mac: CI's macOS runner runs `--diagnose`, which

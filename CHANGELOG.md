@@ -3,6 +3,42 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.30] — 2026-10-19
+
+### Fixed
+
+- **On a Mac, a DAC whose formats Core Audio doesn't list was said not to take 44.1 kHz.**
+  - Reported on macOS 27 with a FiiO K5 Pro. Its panel listed 44.1 to 768 kHz, with bit depths
+    "not reported" and formats "–", and the bridge said "the DAC doesn't take 44.1 kHz".
+  - The panel's rates came from the device's nominal rates, its fallback when the stream lists no
+    physical formats. The sink looks only at that list, so with it empty every rate was "not taken".
+    Reading the list says nothing when it fails, so neither the log nor `--diagnose` could tell why.
+  - The class of error: a failure reported as a different one (Core Audio's empty answer was read
+    as the DAC refusing the rate).
+  - Why the list is empty on that Mac is **not known yet**. Nothing in the Mac's audio code had
+    changed since 1.1.0. As the owner decided (`dev/design/install.md`, decision 4), the DAC is still
+    refused, never played in a format it didn't list, and now:
+    - Core Audio is asked again, and every step of every read goes to the log: whether the property
+      exists, the size call and the read with their result codes, and what was read. That covers the
+      device's rates and streams, and each output stream's physical and virtual formats. It is logged
+      once per rate and channel count until the answer changes;
+    - the error says which refusal it was, from that answer rather than from an empty list: no
+      output stream; a rate the DAC doesn't list (with the ones it does) or lists only with fewer
+      channels; or, with no PCM format found, whether the list isn't there, couldn't be sized or read
+      (with Core Audio's code), is cut short, holds only other kinds of format, changed between two
+      reads, or is empty. Each has the macOS version, and the full list is in
+      `dev/design/install.md`;
+    - `mandarin-dac-bridge --diagnose` prints the same for every device;
+    - the panel's formats line of such a DAC says Core Audio lists none, and that the rates shown
+      are only the device's nominal ones.
+  - The gate: the choice of a format, every refusal and the report are pure code
+    (`Audio/MacFormats.cs`), tested on any system (`MacFormatsTests`). A refusal that blames the rate
+    when Core Audio listed nothing, or that hides which step failed, fails them. Against the old
+    message five of them failed. Each of the panel's note, the selector's spelling and a failed
+    read's refusal was also broken on purpose, and a test failed each time.
+  - Not tried on a real Mac, on macOS 27 or with a K5 Pro. CI's macOS runner runs `--diagnose`, which
+    probes its own devices.
+
 ## [1.1.29] — 2026-10-14
 
 ### Changed
