@@ -12,5 +12,6 @@ here.
 
 | Design | Status |
 |---|---|
+| [`install.md`](install.md) | Draft: open questions for the owner |
 | [`password.md`](password.md) | Draft: open questions for the owner |
 | [`updater.md`](updater.md) | Draft: open questions for the owner |
