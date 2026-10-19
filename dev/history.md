@@ -36,4 +36,4 @@ version's story; this is the index.
 | 1.1.27 | `dev` | QobuzProxy installed only as pinned: its files checked against the tag's, its dependencies against their hashes (`audit/security-qobuz-pinned`). |
 | 1.1.28 | `dev` | The DAC's clock read so it never goes back while the marks last: no first track announced again at the end, no position back at 0 (`fix/renderer-reached-after-drain`). |
 | 1.1.29 | `dev` | Docker opens the sound devices only, by a cgroup rule for ALSA's devices, instead of running privileged (`audit/security-docker-least-privilege`). |
-| 1.1.30 | branch `ccr-06d806c6-71pzk2` | A Mac DAC whose formats Core Audio doesn't list is refused saying so, with what Core Audio said in the log and `--diagnose` (`dev/design/install.md`, part 2). |
+| 1.1.30 | `dev` (#57) | A Mac DAC whose formats Core Audio doesn't list is refused saying so, with what Core Audio said in the log and `--diagnose` (`dev/design/install.md`, part 2). |

@@ -4,8 +4,8 @@ Status: **decided by the owner on 2026-10-19** (the decisions are at the end). P
 2026-10-19 by a report from a user on macOS 27 with a FiiO K5 Pro: the Mac installer put about a
 hundred Homebrew packages on the machine, and the page then said "the DAC doesn't take 44.1 kHz"
 for a DAC whose own panel listed 44.1 kHz. The second part is a bug, not an install question. It is
-investigated here because it came in the same report, and it ships as its own version (1.1.30)
-before the bundled ffmpeg (1.1.31).
+investigated here because it came in the same report, and it shipped first, as 1.1.30; the bundled
+ffmpeg follows, its version named by the owner.
 
 ## Part 1: why the Mac install is so big
 
@@ -117,11 +117,11 @@ decided that is what is needed (2026-10-19). `CLAUDE.md` says so under *Owner's 
   looks today (Homebrew's `ffmpeg-full`, the PATH, winget's and the package managers' folders).
   `FFMPEG` still overrides. Of those, the first with SoX is taken, as today (`Soxr.Pick`).
 - **The Mac installer:** from a release, unpacks the program and `ffmpeg/` together, checked against
-  `SHA256SUMS` as one archive, and names the bundled ffmpeg in the launch file (`FFMPEG`). No
-  Homebrew and no Apple tools. With no release, it builds the bridge (as today) and then this ffmpeg
+  `SHA256SUMS` as one archive. The launch file doesn't name the ffmpeg (`FFMPEG`), so if the bridge's
+  own doesn't run on that Mac, the bridge takes another with SoX. No Homebrew and no Apple tools. With no release, it builds the bridge (as today) and then this ffmpeg
   with `tools/ffmpeg/build.sh`, using the Apple tools that building already needs, and no Homebrew.
 - **The Windows installer:** from a release, the same, and winget is not used. With no release, or a
-  release from before 1.1.31 without `ffmpeg\`, it falls back to winget's `Gyan.FFmpeg` as today:
+  release from before it, without `ffmpeg\`, it falls back to winget's `Gyan.FFmpeg` as today:
   building ffmpeg needs MSYS2, which a user's PC doesn't have.
 - **CI** (`checks.yml`) builds it on macOS, Windows (MSYS2) and Linux, cached by the hash of
   `tools/ffmpeg/`, puts it first on the PATH, and runs the whole suite with it. Homebrew's
@@ -131,12 +131,35 @@ decided that is what is needed (2026-10-19). `CLAUDE.md` says so under *Owner's 
   archive holds it, and `SHA256SUMS` covers the archive.
 - **Docker** keeps Debian's ffmpeg, which has SoX and gets Debian's security updates.
 
-### Decision 3: an earlier `ffmpeg-full` is left alone
+### Decision 3: an earlier `ffmpeg-full` is tidied up on the Mac (changed by the owner, 2026-10-19)
 
-The installers never remove an `ffmpeg-full` (or Homebrew, or `Gyan.FFmpeg`) they installed before:
-something else may use it, and removing packages is the user's call. The Mac installer says once
-that the bridge no longer needs it, and how to remove it (`brew uninstall ffmpeg-full`). The
-uninstallers say the same.
+First decided as "left alone". The owner changed it the same day: a Mac that an earlier installer set
+up runs the same install line, and that run tidies up. In `tools/mac/install.sh`, once the new bridge
+is running:
+
+- Only when the bridge's own ffmpeg answers with SoX here. Otherwise `ffmpeg-full` may be the one in
+  use, and it stays (said so).
+- `ffmpeg-full` goes only if nothing installed depends on it, formula or app (cask). If something
+  does, it stays, and the installer says what needs it.
+- With it go the packages of its dependency tree that nobody asked for (Homebrew's "installed on
+  request") and that nothing else installed still needs, worked out before anything is removed from
+  one `brew info --json=v2 --installed`, with JavaScript for Automation (no python3: asking for it can
+  open Apple's tools installer). Each is removed only if Homebrew's own `autoremove --dry-run`, after
+  `ffmpeg-full` goes, counts it unneeded too; any it doesn't is kept and named.
+- Then `brew cleanup` for those packages (their downloads).
+- Never Homebrew itself, Mandarin's plain `ffmpeg`, or the private .NET SDK (the owner's choice).
+- The person at the Mac sees what will go and about how much space it frees, and is asked
+  "Remove them? [Y/n]" (Return: yes). With no one at the keyboard it is done without asking. A "no"
+  is told how to do it later: the install line with `-- --tidy-only`, which runs only the tidy-up.
+- Windows is unchanged: an earlier `Gyan.FFmpeg` is left alone, and the installer and uninstaller say
+  how to remove it. The Mac uninstaller still says how to remove a `ffmpeg-full` kept.
+- Only `HOMEBREW_NO_AUTOREMOVE`: Homebrew's own uninstall would otherwise remove every unneeded package
+  on the Mac, not only these. The question goes to the terminal (stdin, else `/dev/tty`, so
+  `curl … | bash` asks too). With no bridge on the Mac at all (uninstalled), nothing of the bridge's
+  needs `ffmpeg-full`, so `-- --tidy-only` removes it then too.
+- Tested: what goes, by the installer's own script on made-up Homebrew records (`MacInstallerTests`,
+  macOS, nothing fetched); and the whole tidy-up for real against the runner's Homebrew
+  (`tests/mac/tidy-on-homebrew.sh`, a CI step on macOS only: it installs and removes packages).
 
 ## Part 2: "the DAC doesn't take 44.1 kHz"
 
@@ -175,6 +198,12 @@ Hypotheses, none checked against a real Mac, so none is a root cause yet (`dev/l
 2. The DAC has more than one output stream, and the first (`FirstOutputStream`) isn't the one with
    the formats.
 3. A size or layout mismatch makes `GetArray` give up (`size < sizeof(T)`).
+
+The first real answers (CI's macOS runner, macOS 26.6.2, 1.1.30's `--diagnose`): for both of Apple's
+own virtual output devices, `'pft?'` exists with a **size of 0**, while `'pft '` (the current
+format, 32-bit float) and `'sfma'` (the virtual formats) read normally. That is the same empty list
+on the macOS before 27, a lead for hypothesis 1. They are virtual devices, not a USB DAC, so it is
+not the K5 Pro's cause until a probe from that Mac shows it.
 
 ### Decision 4: refuse, probe, and say why (1.1.30)
 
@@ -219,7 +248,9 @@ Hypotheses, none checked against a real Mac, so none is a root cause yet (`dev/l
 
 1. **Option C**: the release builds its own small ffmpeg with SoX, for every system.
 2. **Shipping it in the release archives is allowed**, under the conditions above.
-3. **An earlier `ffmpeg-full` (or `Gyan.FFmpeg`) is never removed** by the installers.
+3. **An earlier `ffmpeg-full` is tidied up on the Mac**, with the packages only it needed and their
+   downloads, after asking (Return: yes); Homebrew, Mandarin's ffmpeg and the .NET SDK stay. (First
+   "never removed"; changed the same day.) Windows' `Gyan.FFmpeg` is left alone.
 4. **A DAC whose formats can't be read is refused, probed, and the error and the log say why**;
    no fallback.
 
