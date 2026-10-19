@@ -172,9 +172,7 @@ internal static partial class Devices
                 var rates = CoreAudio.GetArray<AudioValueRange>(d, CoreAudio.DeviceAvailableNominalSampleRates, CoreAudio.ScopeGlobal)
                     .Select(r => (r.Minimum, r.Maximum)).ToArray();
                 var stream = CoreAudio.FirstOutputStream(d);
-                var formats = stream == CoreAudio.Unknown ? [] : CoreAudio.GetArray<AudioStreamRangedDescription>(stream, CoreAudio.StreamAvailablePhysicalFormats, CoreAudio.ScopeGlobal)
-                    .Select(f => new MacRawFormat(CoreAudio.FourCc(f.Format.FormatId), f.SampleRateRange.Minimum, f.SampleRateRange.Maximum,
-                        (int)f.Format.BitsPerChannel, (f.Format.FormatFlags & CoreAudio.FlagIsFloat) != 0, (int)f.Format.ChannelsPerFrame)).ToArray();
+                var formats = stream == CoreAudio.Unknown ? [] : CoreAudio.PhysicalFormats(stream).Formats;
                 list.Add(new MacRawDevice(CoreAudio.GetString(d, CoreAudio.DeviceUid), name,
                     CoreAudio.GetString(d, CoreAudio.ObjectManufacturer), transport, ch, CoreAudio.NominalRate(d), CoreAudio.HogOwner(d),
                     vol, rates, formats));
@@ -203,7 +201,7 @@ internal static partial class Devices
             if (d.Transport is "virt" or "grup" or "aggr") { skipped.Add($"{d.Name} — {(d.Transport == "virt" ? "virtual" : "aggregate")} device"); continue; }
             if (!usb && !all) { skipped.Add($"{d.Name} — {TransportName(d.Transport)}, not USB"); continue; }
             var ranges = d.Formats.Where(f => f.Id == "lpcm").ToArray();
-            var fromFormats = StandardRates.Where(r => ranges.Any(f => r >= f.Min - 0.5 && r <= f.Max + 0.5)).ToArray();
+            var fromFormats = StandardRates.Where(r => ranges.Any(f => Audio.MacFormats.Covers(f, r))).ToArray();
             var fromNominal = StandardRates.Where(r => d.Rates.Any(x => r >= x.Min - 0.5 && r <= x.Max + 0.5)).ToArray();
             var ints = ranges.Where(f => !f.Float).ToArray();
             list.Add(new DacDevice
@@ -217,7 +215,9 @@ internal static partial class Devices
                 Rates = fromFormats.Length > 0 ? fromFormats : fromNominal,
                 Bits = (ints.Length > 0 ? ints : ranges).Select(f => f.Bits).Distinct().Order().ToArray(),
                 Channels = d.Channels,
-                Formats = GroupFormats(ranges),
+                // With none listed the rates are only the device's nominal ones, and the DAC can't be set to any
+                // (Audio/MacFormats.cs): said here, so the panel doesn't seem to promise them.
+                Formats = ranges.Length > 0 ? GroupFormats(ranges) : [NoneListed],
                 CurrentRate = (int)Math.Round(d.Rate),
                 Volume = d.Volume,
                 HolderPid = d.Hog > 0 ? d.Hog : 0
@@ -233,6 +233,8 @@ internal static partial class Devices
         "cont" => "Continuity", "" => "no transport reported", _ => t
     };
 
+    public const string NoneListed = "none listed by Core Audio: the rates are the device's nominal ones, and the bridge can't set any (the log says why)";
+
     // "24-bit integer · 2 ch · 44.1 kHz, 48 kHz…", one line per depth and kind.
     public static string[] GroupFormats(IEnumerable<MacRawFormat> ranges)
     {
@@ -241,7 +243,7 @@ internal static partial class Devices
         {
             var key = $"{f.Bits}-bit {(f.Float ? "float" : "integer")} · {f.Channels} ch";
             if (!by.TryGetValue(key, out var set)) by[key] = set = [];
-            foreach (var r in StandardRates) if (r >= f.Min - 0.5 && r <= f.Max + 0.5) set.Add(r);
+            foreach (var r in StandardRates) if (Audio.MacFormats.Covers(f, r)) set.Add(r);
         }
         return by.Select(kv => $"{kv.Key} · {string.Join(", ", kv.Value.Select(KHz))}").ToArray();
     }
@@ -307,10 +309,8 @@ internal static partial class Devices
                     o.AppendLine($"\n[{d}] {CoreAudio.GetString(d, CoreAudio.ObjectName)}  ·  maker: {CoreAudio.GetString(d, CoreAudio.ObjectManufacturer)}");
                     o.AppendLine($"  uid: {CoreAudio.GetString(d, CoreAudio.DeviceUid)}");
                     o.AppendLine($"  transport: '{CoreAudio.FourCc(CoreAudio.Get<uint>(d, CoreAudio.DeviceTransportType, CoreAudio.ScopeGlobal) ?? 0)}'  output channels: {CoreAudio.OutputChannels(d)}  rate: {CoreAudio.NominalRate(d)}  hog: {CoreAudio.HogOwner(d)}");
-                    var stream = CoreAudio.FirstOutputStream(d);
-                    if (stream != CoreAudio.Unknown)
-                        foreach (var f in CoreAudio.GetArray<AudioStreamRangedDescription>(stream, CoreAudio.StreamAvailablePhysicalFormats, CoreAudio.ScopeGlobal))
-                            o.AppendLine($"  format: {CoreAudio.FourCc(f.Format.FormatId)} {f.Format.BitsPerChannel}-bit {((f.Format.FormatFlags & CoreAudio.FlagIsFloat) != 0 ? "float" : "int")} {f.Format.ChannelsPerFrame} ch {f.SampleRateRange.Minimum}-{f.SampleRateRange.Maximum}");
+                    // Every step of every read, for each output stream: why a list is empty shows here.
+                    o.AppendLine("  " + Audio.MacFormats.Report(CoreAudio.Probe(d, 0)).Replace("\n", "\n  ", StringComparison.Ordinal));
                 }
                 catch (Exception e) { o.AppendLine($"  ! {e.GetType().Name}: {e.Message}"); }
             }
