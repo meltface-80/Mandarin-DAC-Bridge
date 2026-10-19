@@ -43,6 +43,9 @@ the owner publishes a release is the release (`dev/release.md`).
     with it first on the PATH. An HTTPS stream played through it, resampled with SoX. The 9.0.2 build
     and the other five targets are first built by CI. The installers were not run: not on a Mac, and
     not on Windows.
+  - CI's first run built 9.0.2 on macOS and Linux and passed the suite with it there; on Windows,
+    MSYS2's tar couldn't unpack libsoxr's one symlink (an install check, not built), so it is now
+    left out when unpacking.
 
 ### Fixed
 

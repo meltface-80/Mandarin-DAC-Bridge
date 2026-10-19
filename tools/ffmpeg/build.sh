@@ -89,9 +89,12 @@ fetch() {
   printf '%s' "$file"
 }
 
-unpack() {   # tarball, folder
-  rm -rf "$2" && mkdir -p "$2"
-  tar -xf "$1" -C "$2" --strip-components=1 || fail "couldn't unpack $1"
+unpack() {   # tarball, folder, then any paths in it to leave out
+  local tarball="$1" dir="$2" skip=()
+  shift 2
+  for p in "$@"; do skip+=("--exclude=$p"); done
+  rm -rf "$dir" && mkdir -p "$dir"
+  tar -xf "$tarball" -C "$dir" --strip-components=1 ${skip[@]+"${skip[@]}"} || fail "couldn't unpack $tarball"
 }
 
 ffmpeg_tar="$(fetch ffmpeg)"
@@ -102,7 +105,9 @@ say "sources checked: ffmpeg $(pin ffmpeg 2), libsoxr $(pin soxr 2)"
 
 say "libsoxr"
 s="$work/soxr-$rid"
-unpack "$soxr_tar" "$s"
+# Its one symlink (an install check, not built) can't be made by MSYS2's tar, which copies a link's target
+# and fails when the link comes first.
+unpack "$soxr_tar" "$s" '*/inst-check-soxr-lsr'
 cat > "$s/src/soxr-config.h" <<'EOF'
 /* Written by tools/ffmpeg/build.sh in place of soxr's cmake: the scalar engines only. */
 #if !defined soxr_config_included
