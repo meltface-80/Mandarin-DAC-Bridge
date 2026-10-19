@@ -117,8 +117,8 @@ decided that is what is needed (2026-10-19). `CLAUDE.md` says so under *Owner's 
   looks today (Homebrew's `ffmpeg-full`, the PATH, winget's and the package managers' folders).
   `FFMPEG` still overrides. Of those, the first with SoX is taken, as today (`Soxr.Pick`).
 - **The Mac installer:** from a release, unpacks the program and `ffmpeg/` together, checked against
-  `SHA256SUMS` as one archive, and names the bundled ffmpeg in the launch file (`FFMPEG`). No
-  Homebrew and no Apple tools. With no release, it builds the bridge (as today) and then this ffmpeg
+  `SHA256SUMS` as one archive. The launch file doesn't name the ffmpeg (`FFMPEG`), so if the bridge's
+  own doesn't run on that Mac, the bridge takes another with SoX. No Homebrew and no Apple tools. With no release, it builds the bridge (as today) and then this ffmpeg
   with `tools/ffmpeg/build.sh`, using the Apple tools that building already needs, and no Homebrew.
 - **The Windows installer:** from a release, the same, and winget is not used. With no release, or a
   release from before 1.1.31 without `ffmpeg\`, it falls back to winget's `Gyan.FFmpeg` as today:
@@ -175,6 +175,12 @@ Hypotheses, none checked against a real Mac, so none is a root cause yet (`dev/l
 2. The DAC has more than one output stream, and the first (`FirstOutputStream`) isn't the one with
    the formats.
 3. A size or layout mismatch makes `GetArray` give up (`size < sizeof(T)`).
+
+The first real answers (CI's macOS runner, macOS 26.6.2, 1.1.30's `--diagnose`): for both of Apple's
+own virtual output devices, `'pft?'` exists with a **size of 0**, while `'pft '` (the current
+format, 32-bit float) and `'sfma'` (the virtual formats) read normally. That is the same empty list
+on the macOS before 27, a lead for hypothesis 1. They are virtual devices, not a USB DAC, so it is
+not the K5 Pro's cause until a probe from that Mac shows it.
 
 ### Decision 4: refuse, probe, and say why (1.1.30)
 

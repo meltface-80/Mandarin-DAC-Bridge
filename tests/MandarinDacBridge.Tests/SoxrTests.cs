@@ -114,6 +114,19 @@ public sealed class SoxrTests : IDisposable
         Assert.False(Soxr.Lacks(broken));                               // unknown is not "no"
     }
 
+    // The bridge's own ffmpeg, beside it (dev/design/install.md), comes before every other: Homebrew's, the PATH's.
+    [Fact]
+    public void TheBridgesOwnFfmpeg_BesideIt_IsLookedForFirst()
+    {
+        var program = Path.Combine(dir, "program");
+        Assert.Equal(Path.Combine(program, "ffmpeg", "bin"), Config.FfmpegFolders(program)[0]);
+        // Found and picked over one on the PATH that has SoX too (the pretend ffmpegs are .cmd files on Windows,
+        // where FindAll looks for ffmpeg.exe: there the order above is what is checked).
+        if (OperatingSystem.IsWindows()) return;
+        var own = Ffmpeg(Path.Combine("program", "ffmpeg", "bin"), WithSox);
+        Assert.Equal(own, Soxr.Pick(Config.FindAll("ffmpeg", Config.FfmpegFolders(program))));
+    }
+
     [Fact]
     public void AnFfmpegThatDoesntAnswer_IsUnknown_GivenUpOnInTime_AndAskedAgainLater()
     {
@@ -143,7 +156,7 @@ public sealed class SoxrTests : IDisposable
         var e = Assert.Throws<InvalidOperationException>(() => Sources.Open(track, "audio/flac", 0, dac, plain, log.Add, CancellationToken.None));
         Assert.Contains("this track is 96 kHz", e.Message, StringComparison.Ordinal);
         Assert.Contains("no SoX resampler to convert it to 48 kHz", e.Message, StringComparison.Ordinal);
-        Assert.Contains("ffmpeg-full", e.Message, StringComparison.Ordinal);
+        Assert.Contains("Use the bridge's own ffmpeg, with SoX: every release from 1.1.31 has it in ffmpeg/ beside the program", e.Message, StringComparison.Ordinal);
         Assert.Single(log, l => l.Contains("aresample=48000", StringComparison.Ordinal));
 
         // Known now (as it is from the start for the bridge's own ffmpeg): refused before a resampler is started.

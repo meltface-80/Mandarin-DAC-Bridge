@@ -3,6 +3,56 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [1.1.31] — 2026-10-19
+
+### Changed
+
+- **The bridge brings its own small ffmpeg with SoX: the Mac installer needs no Homebrew, and installs
+  nothing else.**
+  - Reported on macOS 27: the installer put about a hundred Homebrew packages on the Mac. It installed
+    Homebrew's `ffmpeg-full` for the one library the bridge needs from it, libsoxr (SoX's resampler,
+    `CLAUDE.md`, bit-perfect). Since Homebrew split its ffmpeg in 2025, the plain `ffmpeg` has no SoX,
+    and `ffmpeg-full` has 46 direct dependencies, among them OCR, speech recognition and video codecs.
+  - As the owner decided (`dev/design/install.md`, option C), the release builds the bridge's own
+    ffmpeg (`tools/ffmpeg/build.sh`):
+    - FFmpeg 9.0.2 and libsoxr 0.1.3, each refused unless its SHA-256 is the one pinned in
+      `tools/ffmpeg/sources.lock`;
+    - only what the bridge and its tests use: its formats' demuxers, decoders and parsers, WAV out,
+      the `pan` and `aresample` filters, SoX, and HTTP(S) with the system's TLS;
+    - LGPL and static, a few MB. It needs a C compiler and `make`, and no cmake, nasm or Homebrew;
+    - in every release archive as `ffmpeg/`, with `NOTICE.md` (versions, sources, sums, configure
+      line) and the licences, covered by `SHA256SUMS` with the archive.
+  - The bridge looks for `ffmpeg/bin/ffmpeg` beside itself first, on every system
+    (`Config.FfmpegFolders`), then where it looked before. `FFMPEG` still overrides.
+  - The Mac installer: from a release, the program and its ffmpeg, and nothing else. With no release,
+    it builds both on the Mac with Apple's command line tools, which building the bridge already needs.
+    The Windows installer: from a release, the same, with no winget; with no release, winget's
+    `Gyan.FFmpeg` as before.
+  - An `ffmpeg-full` or `Gyan.FFmpeg` installed before is never removed (decision 3): the installers
+    say once that the bridge doesn't need it, and how to remove it.
+  - CI (`checks.yml`) builds the same ffmpeg on macOS, Windows (MSYS2) and Linux, cached by the hash
+    of `tools/ffmpeg/`, and runs the whole suite with it first on the PATH, so the suite tests the
+    ffmpeg users get. Homebrew's and Chocolatey's are no longer installed there. Docker keeps Debian's
+    ffmpeg, which has SoX.
+  - Tests: `test_ffmpeg_build.py` (a tarball that isn't the pinned one is refused and nothing built;
+    broken on purpose, it failed), `WorkflowTests` (every archive holds it and is checked for SoX, the
+    suite runs with it, the action writes no expression into a command), and
+    `SoxrTests.TheBridgesOwnFfmpeg_BesideIt_IsLookedForFirst` (broken on purpose, it failed).
+  - Tried here (Linux x64) with ffmpeg 6.1.1's source, as ffmpeg.org can't be reached from this
+    environment: it built with gcc and with clang, 2.6 MB, and the whole suite (313 tests) passed
+    with it first on the PATH. An HTTPS stream played through it, resampled with SoX. The 9.0.2 build
+    and the other five targets are first built by CI. The installers were not run: not on a Mac, and
+    not on Windows.
+
+### Fixed
+
+- **The Mac's format probe (1.1.30) reads an empty list as empty.** CI's macOS runner (macOS 26.6.2)
+  gave the first real answers: for Apple's own virtual devices, `'pft?'` (the physical formats) has
+  a size of 0, while the current format and the virtual formats read. The probe then read 0 bytes,
+  failed with `'!dat'`, and would have said the list couldn't be read. Now a size of 0 is an empty
+  list, and the refusal says Core Audio lists no formats. The same empty `'pft?'` on macOS 26 is a
+  lead for the K5 Pro on macOS 27 (`dev/design/install.md`, hypothesis 1), not its proven cause.
+
 ## [1.1.30] — 2026-10-19
 
 ### Fixed

@@ -130,6 +130,11 @@ tested from a clone: `git checkout <branch>`, then
   check means no build.
 - After the owner publishes, confirm the release's assets appeared (six builds: macOS arm64/x64,
   Linux x64/arm64, Windows x64/arm64). A workflow failing quietly is how a release ends up empty.
+- Each archive holds the bridge's own ffmpeg (`ffmpeg/`, from 1.1.31: `dev/design/install.md`),
+  built by `tools/ffmpeg/build.sh` from the sources pinned in `tools/ffmpeg/sources.lock`. A new
+  ffmpeg or libsoxr is a change to that file, with where its SHA-256 came from in the commit, and is
+  a build. `release.yml` run by hand (Actions → Release → Run workflow, on a branch) builds all six
+  archives without publishing anything: the way to try a change to the ffmpeg build on every target.
 - Add the version's row to `dev/history.md`.
 
 ## README and the site

@@ -17,7 +17,11 @@ and the release both need it green.
 
 ## What the suite needs
 
-- **ffmpeg** on the PATH, for the end-to-end tests (they decode real FLAC, DSD and WAV).
+- **ffmpeg** with SoX on the PATH, for the end-to-end tests (they decode real FLAC, DSD and WAV).
+  CI uses the bridge's own, as the releases carry it (`tools/ffmpeg/build.sh <rid> <folder>`, its
+  `bin` first on the PATH): the suite tests the ffmpeg users get, and it holds only what the bridge
+  and these tests use (the tones are `-f lavfi -i sine=…`, written as FLAC or raw PCM). A test that
+  needs another part of ffmpeg adds it to `build.sh` too.
 - On Linux, **ALSA's library** (`libasound2`), and **PulseAudio** for the Spotify Soloist test.
 - **Python 3**, for the stand-in servers some tests run.
 

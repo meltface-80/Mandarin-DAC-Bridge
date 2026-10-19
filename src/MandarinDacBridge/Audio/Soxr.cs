@@ -1,7 +1,8 @@
 // Soxr.cs — SoX, the one resampler the bridge uses (CLAUDE.md, bit-perfect: a track is resampled only when
 // the DAC can't take its rate, then with SoX). ffmpeg resamples with SoX only when it was built with libsoxr,
-// and many aren't: Homebrew's plain ffmpeg and Chocolatey's ffmpeg have none, while Homebrew's ffmpeg-full, winget's
-// Gyan.FFmpeg, Chocolatey's ffmpeg-full, Debian's and Ubuntu's (the Docker image's) have it. So: whether an ffmpeg has it, asked of the
+// and many aren't: Homebrew's plain ffmpeg and Chocolatey's ffmpeg have none, while the bridge's own (beside it in
+// every release archive from 1.1.31, tools/ffmpeg/build.sh), Homebrew's ffmpeg-full, winget's Gyan.FFmpeg,
+// Chocolatey's ffmpeg-full, Debian's and Ubuntu's (the Docker image's) have it. So: whether an ffmpeg has it, asked of the
 // ffmpeg itself (-buildconf) once per program; and, where several are installed, the one that has it. A track
 // that needs resampling with an ffmpeg that has none is refused, and says why (Sources.Open), never
 // resampled another way. (Chocolatey's ffmpeg package is Gyan's essentials build, without SoX; its
@@ -60,8 +61,9 @@ internal static class Soxr
         $"to convert it to {Devices.KHz(want)}, the only one the bridge uses. {Remedy}";
 
     private const string Remedy =
-        "Install an ffmpeg built with SoX (libsoxr): on a Mac, run the installer again (it adds Homebrew's ffmpeg-full); " +
-        "on Windows, winget install Gyan.FFmpeg or choco install ffmpeg-full; or set FFMPEG to one.";
+        "Use the bridge's own ffmpeg, with SoX: every release from 1.1.31 has it in ffmpeg/ beside the program, and the " +
+        "Mac and Windows installers put it there (run the installer again). Or set FFMPEG to an ffmpeg built with SoX " +
+        "(libsoxr), such as Homebrew's ffmpeg-full or winget's Gyan.FFmpeg.";
 
     // ffmpeg -buildconf's output, or null when it can't be run, fails, or hasn't answered within Patience
     // (then it is ended, with whatever it started).

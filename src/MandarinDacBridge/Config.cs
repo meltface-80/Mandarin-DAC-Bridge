@@ -3,7 +3,7 @@
 //
 //   PORT                 the page and the UPnP devices (55500)
 //   DATA_DIR             settings.json lives here (data/ beside the program)
-//   FFMPEG               the decoder (ffmpeg on the PATH, or Homebrew's)
+//   FFMPEG               the decoder (the bridge's own beside it, Homebrew's ffmpeg-full, or the PATH's)
 //   BRIDGE_IP            the address to advertise, when the machine has several
 //   BRIDGE_HOSTNAMES     other names the page is reached by (your own DNS names), comma-separated
 //   LOCK_GRACE_S         how long a controller keeps a DAC after it stops (10)
@@ -133,16 +133,21 @@ internal sealed class Config
             var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             return [Path.Combine(local, "Microsoft", "WinGet", "Links"), Path.Combine(home, "scoop", "shims"), @"C:\ProgramData\chocolatey\bin",
-                    @"C:\ffmpeg\bin", Path.Combine(AppContext.BaseDirectory, "ffmpeg", "bin"), AppContext.BaseDirectory];
+                    @"C:\ffmpeg\bin", AppContext.BaseDirectory];   // its own ffmpeg/bin comes first, in FfmpegFolders
         }
         return ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
     }
 
-    // The ffmpeg with SoX (Audio/Soxr.cs): Homebrew's ffmpeg-full (kept off the PATH, beside the plain ffmpeg
-    // Mandarin uses), then the PATH, then where Homebrew (launchd's PATH is short) or winget put one. With none
-    // that has SoX, the first found.
+    // The ffmpeg with SoX (Audio/Soxr.cs): the bridge's own, beside it (ffmpeg/bin, in every release archive
+    // from 1.1.31: dev/design/install.md), then Homebrew's ffmpeg-full (kept off the PATH, beside the plain
+    // ffmpeg Mandarin uses), then the PATH, then where Homebrew (launchd's PATH is short) or winget put one.
+    // With none that has SoX, the first found.
     private static string FindFfmpeg() =>
-        Audio.Soxr.Pick(FindAll("ffmpeg", ["/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"])) is { Length: > 0 } f ? f : "ffmpeg";
+        Audio.Soxr.Pick(FindAll("ffmpeg", FfmpegFolders(AppContext.BaseDirectory))) is { Length: > 0 } f ? f : "ffmpeg";
+
+    // Where ffmpeg is looked for before the PATH, the bridge's own first; program: the bridge's folder.
+    internal static string[] FfmpegFolders(string program) =>
+        [Path.Combine(program, "ffmpeg", "bin"), "/opt/homebrew/opt/ffmpeg-full/bin", "/usr/local/opt/ffmpeg-full/bin"];
 }
 
 internal static class Log

@@ -1,0 +1,54 @@
+# The bridge's own ffmpeg (dev/design/install.md) for one build, into .ffmpeg/<rid>, built by
+# tools/ffmpeg/build.sh from its pinned sources and cached by the hash of tools/ffmpeg: a change to the
+# script or a pin builds it again. checks.yml runs the suite with it; release.yml puts it in each archive.
+# Windows builds it in MSYS2: UCRT64 for x64, CLANGARM64 for ARM64. Values reach commands through env.
+name: The bridge's own ffmpeg
+description: Builds ffmpeg with SoX for one build, into .ffmpeg/<rid>
+inputs:
+  rid:
+    description: osx-arm64, osx-x64, linux-x64, linux-arm64, win-x64 or win-arm64
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      id: cache
+      with:
+        path: .ffmpeg/${{ inputs.rid }}
+        key: ffmpeg-${{ inputs.rid }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/ffmpeg/**', '.github/actions/ffmpeg/action.yml') }}
+    - name: OpenSSL's headers (Linux, the build's TLS)
+      if: runner.os == 'Linux' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libssl-dev make
+    - name: MSYS2 (Windows)
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: ${{ inputs.rid == 'win-arm64' && 'CLANGARM64' || 'UCRT64' }}
+        update: false
+        install: make curl tar xz diffutils
+        pacboy: toolchain:p
+    - name: Build (tools/ffmpeg/build.sh)
+      if: runner.os != 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        RID: ${{ inputs.rid }}
+        WORK: ${{ runner.temp }}/ffmpeg-work
+      run: tools/ffmpeg/build.sh "$RID" ".ffmpeg/$RID"
+    - name: Build in MSYS2 (tools/ffmpeg/build.sh)
+      if: runner.os == 'Windows' && steps.cache.outputs.cache-hit != 'true'
+      shell: msys2 {0}
+      env:
+        RID: ${{ inputs.rid }}
+      run: WORK="$(cygpath -u "$RUNNER_TEMP")/ffmpeg-work" tools/ffmpeg/build.sh "$RID" ".ffmpeg/$RID"
+    # Built now or restored from the cache, it has SoX (where it runs: the Intel Mac's is built on Apple silicon).
+    - name: What was built, and it has SoX
+      shell: bash
+      env:
+        RID: ${{ inputs.rid }}
+      run: |
+        ls -l .ffmpeg/"$RID"/bin
+        head -12 .ffmpeg/"$RID"/NOTICE.md
+        [ "$RID" = osx-x64 ] && exit 0
+        f=.ffmpeg/"$RID"/bin/ffmpeg; [ "$RUNNER_OS" = Windows ] && f="$f.exe"
+        "$f" -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || { echo "::error::the bridge's ffmpeg has no SoX"; exit 1; }

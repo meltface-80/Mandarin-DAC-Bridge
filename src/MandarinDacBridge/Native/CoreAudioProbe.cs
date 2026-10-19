@@ -74,6 +74,9 @@ internal static unsafe partial class CoreAudio
         if (HasProperty(obj, in a) == 0) return new CoreAudioRead(name, what, false, 0, 0, 0, [], entry);
         int sizeStatus = GetPropertyDataSize(obj, in a, 0, null, out var size);
         if (sizeStatus != 0) return new CoreAudioRead(name, what, true, sizeStatus, 0, 0, [], entry);
+        // An empty list: nothing to read (reading 0 bytes fails with '!dat', which isn't the answer; macOS 26
+        // gives a size of 0 for 'pft?' on its own virtual devices).
+        if (size == 0) return new CoreAudioRead(name, what, true, 0, 0, 0, [], entry);
         var data = new byte[size];
         int readStatus;
         fixed (byte* p = data) readStatus = GetPropertyData(obj, in a, 0, null, ref size, p);

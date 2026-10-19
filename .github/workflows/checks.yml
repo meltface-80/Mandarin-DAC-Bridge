@@ -49,19 +49,30 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: ffmpeg (and on Linux ALSA and PulseAudio)
+      - name: ALSA and PulseAudio (Linux)
+        if: runner.os == 'Linux'
         shell: bash
-        run: |
-          case "$RUNNER_OS" in
-            Linux)   sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg libasound2t64 pulseaudio pulseaudio-utils clang zlib1g-dev ;;
-            macOS)   brew install ffmpeg-full && echo "$(brew --prefix ffmpeg-full)/bin" >> "$GITHUB_PATH" ;;
-            Windows) choco install ffmpeg-full -y --no-progress ;;
-          esac
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2t64 pulseaudio pulseaudio-utils clang zlib1g-dev
+      # The bridge's own ffmpeg, as each release archive carries it (dev/design/install.md), built from its
+      # pinned sources: the suite runs with it, first on the PATH, so it tests the ffmpeg users get.
+      - uses: ./.github/actions/ffmpeg
+        with:
+          rid: ${{ matrix.rid }}
+      - name: Its ffmpeg first on the PATH
+        shell: pwsh
+        env:
+          RID: ${{ matrix.rid }}
+        run: Join-Path $env:GITHUB_WORKSPACE ".ffmpeg/$env:RID/bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       # The bridge resamples with SoX or refuses (Audio/Soxr.cs): without it here, the resampling tests
-      # would test the refusal instead, and pass.
-      - name: ffmpeg has SoX
+      # would test the refusal instead, and pass. And the ffmpeg the tests find is the bridge's own.
+      - name: ffmpeg is the bridge's own, with SoX
         shell: bash
-        run: ffmpeg -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || { echo "::error::this runner's ffmpeg has no SoX (libsoxr)"; exit 1; }
+        env:
+          RID: ${{ matrix.rid }}
+        run: |
+          found="$(command -v ffmpeg)"; echo "ffmpeg: $found"
+          case "$found" in *".ffmpeg/$RID/bin/ffmpeg"*) ;; *) echo "::error::the ffmpeg on the PATH isn't the bridge's own"; exit 1 ;; esac
+          ffmpeg -hide_banner -buildconf 2>&1 | grep -q -- '--enable-libsoxr' || { echo "::error::this ffmpeg has no SoX (libsoxr)"; exit 1; }
       - run: dotnet test -c Release
       # The native program each platform gets, and its own sound-device code run for real
       # (Core Audio on macOS, WASAPI on Windows, ALSA on Linux): it must list and diagnose without failing.

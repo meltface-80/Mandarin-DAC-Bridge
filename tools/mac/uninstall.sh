@@ -4,7 +4,8 @@
 #
 #   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/mac/uninstall.sh)"
 #
-# Homebrew and ffmpeg stay (Mandarin uses them too); brew uninstall ffmpeg-full removes the bridge's.
+# Its own ffmpeg goes with its folder. Homebrew and its ffmpegs stay (Mandarin uses them too); the
+# ffmpeg-full that installers before 1.1.31 added: brew uninstall ffmpeg-full, if nothing else uses it.
 set -uo pipefail
 
 LABEL="app.mandarin.dacbridge"
@@ -14,3 +15,9 @@ launchctl unload "$PLIST" 2>/dev/null
 rm -f "$PLIST"
 rm -rf "$HOME/Mandarin-DAC-Bridge"
 echo "Mandarin DAC Bridge is removed. The DACs are the Mac's again."
+for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+  if [ -x "$b" ] && "$b" list --versions ffmpeg-full >/dev/null 2>&1; then
+    echo "Homebrew's ffmpeg-full (added by installers before 1.1.31) was left as it is. If nothing else uses it: brew uninstall ffmpeg-full"
+    break
+  fi
+done

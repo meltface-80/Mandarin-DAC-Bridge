@@ -11,8 +11,9 @@ namespace MandarinDacBridge.Tests;
 public partial class WorkflowTests
 {
     private static string Root => ComposeTests.RepoRoot();
-    // As checked out: with CRLF line ends on Windows, read as LF.
-    private static string Workflow(string name) => File.ReadAllText(Path.Combine(Root, ".github", "workflows", name)).ReplaceLineEndings("\n");
+    // As checked out: with CRLF line ends on Windows, read as LF. A name with a folder is under .github (an action).
+    private static string Workflow(string name) =>
+        File.ReadAllText(name.Contains('/') ? Path.Combine([Root, ".github", .. name.Split('/')]) : Path.Combine(Root, ".github", "workflows", name)).ReplaceLineEndings("\n");
 
     // tools/release/version.sh, as release.yml runs it: (exit code, what it printed, what it complained of).
     private static (int Code, string Out, string Err) Version(string tag, string csproj)
@@ -82,12 +83,36 @@ public partial class WorkflowTests
             Assert.Contains($"rid: {rid} }}", yml);
     }
 
+    // The bridge's own ffmpeg (dev/design/install.md): in every release archive, checked for SoX, and what the
+    // suite runs with in CI on every system, instead of Homebrew's ffmpeg-full or Chocolatey's.
+    [Fact]
+    public void EveryArchiveHoldsTheBridgesOwnFfmpeg_AndTheSuiteRunsWithIt()
+    {
+        var release = Workflow("release.yml");
+        Assert.Contains("uses: ./.github/actions/ffmpeg", release);
+        Assert.Contains("-C out mandarin-dac-bridge ffmpeg", release);
+        Assert.Contains("-Path out/mandarin-dac-bridge.exe, out/ffmpeg", release);
+        Assert.Contains("the archive's ffmpeg has no SoX", release);
+
+        var checks = Workflow("checks.yml");
+        Assert.Contains("uses: ./.github/actions/ffmpeg", checks);
+        Assert.Contains("the ffmpeg on the PATH isn't the bridge's own", checks);
+        Assert.DoesNotContain("ffmpeg-full", checks);
+
+        var action = Workflow("actions/ffmpeg/action.yml");
+        Assert.Contains("tools/ffmpeg/build.sh \"$RID\" \".ffmpeg/$RID\"", action);
+        // A change to the script, a pin or the action builds it again; built or restored, it is checked for SoX.
+        Assert.Contains("hashFiles('tools/ffmpeg/**', '.github/actions/ffmpeg/action.yml')", action);
+        Assert.Contains("the bridge's ffmpeg has no SoX", action);
+    }
+
     // A value from the event (a tag, a title) written into a command runs as part of it: values reach
     // commands through env. Each workflow's run: lines, single or a block.
     [Theory]
     [InlineData("release.yml")]
     [InlineData("checks.yml")]
     [InlineData("test-image.yml")]
+    [InlineData("actions/ffmpeg/action.yml")]
     public void NoWorkflowWritesAnExpressionIntoACommand(string name)
     {
         var found = new List<string>();
