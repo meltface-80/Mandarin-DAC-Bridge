@@ -184,6 +184,9 @@ public class DsdMalformedTests
 
     // The header comes whole, then the server stalls on the request for the samples (from the seek point,
     // which a server that ignores ranges makes the bridge read up to): stopping must not wait on that either.
+    // The stop comes once the samples have been asked for, so the time measured is the stall's alone: a
+    // deadline from the start once ran out on a busy CI runner (macOS) while the header was still being
+    // fetched, before there was any stall to test.
     [Theory]
     [InlineData(false)]   // it ignores the range, and the bridge skips to the seek point itself
     public async Task ADsdServerThatStallsOnTheSamples_DoesNotHoldAStopUp(bool honoursRange)
@@ -195,6 +198,7 @@ public class DsdMalformedTests
         using var stop = new CancellationTokenSource();
         var held = new List<System.Net.Sockets.TcpClient>();
         int requests = 0;
+        var stalled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _ = Task.Run(async () =>
         {
             while (!stop.IsCancellationRequested)
@@ -215,13 +219,13 @@ public class DsdMalformedTests
                 var status = honoursRange ? "206 Partial Content" : "200 OK";
                 await n.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 {status}\r\nContent-Type: audio/x-dsf\r\nContent-Length: 5000000\r\n\r\n"));
                 await n.WriteAsync(file.AsMemory(0, 64));
+                stalled.TrySetResult();
                 // and then nothing: the connection stays open
             }
         });
         try
         {
-            using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(600));
-            var clock = System.Diagnostics.Stopwatch.StartNew();
+            using var cancel = new CancellationTokenSource();
             // From one second in, so that a server ignoring the range has the bridge skip to there.
             var open = Task.Run(() =>
             {
@@ -230,9 +234,14 @@ public class DsdMalformedTests
                 if (s != null) { using (s) _ = s.Read(new byte[1 << 16], cancel.Token); }
                 return s;
             });
+            // However long the header takes, the stall must begin: the samples are asked for.
+            await Task.WhenAny(stalled.Task, open, Task.Delay(TimeSpan.FromSeconds(10)));
+            Assert.True(stalled.Task.IsCompleted, open.IsCompleted ? "it ended before asking for the samples" : "the samples were never asked for");
+            // Stopped while stalled: it gives up promptly.
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            cancel.CancelAfter(TimeSpan.FromMilliseconds(200));
             Assert.True(await Task.WhenAny(open, Task.Delay(TimeSpan.FromSeconds(4))) == open, "it didn't give up when cancelled");
             Assert.True(clock.Elapsed < TimeSpan.FromSeconds(1.5), $"took {clock.Elapsed}");
-            Assert.True(Volatile.Read(ref requests) >= 2, "the samples were never asked for");
         }
         finally
         {
