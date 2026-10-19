@@ -5,7 +5,7 @@ Status: **decided by the owner on 2026-10-19** (the decisions are at the end). P
 hundred Homebrew packages on the machine, and the page then said "the DAC doesn't take 44.1 kHz"
 for a DAC whose own panel listed 44.1 kHz. The second part is a bug, not an install question. It is
 investigated here because it came in the same report, and it shipped first, as 1.1.30; the bundled
-ffmpeg follows, its version named by the owner.
+ffmpeg followed in 1.2.0.
 
 ## Part 1: why the Mac install is so big
 

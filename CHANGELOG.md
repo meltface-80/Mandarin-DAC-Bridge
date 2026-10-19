@@ -8,6 +8,11 @@ the owner publishes a release is the release (`dev/release.md`).
 On `dev`, not yet given a version: the owner names it when the dev tests are checked out
 (`dev/release.md`).
 
+## [1.2.0] — 2026-10-19
+
+The bridge's own ffmpeg; the Mac installer needs no Homebrew and tidies up after earlier versions.
+Numbered by the owner after testing `dev`.
+
 ### Changed
 
 - **The bridge brings its own small ffmpeg with SoX: the Mac installer needs no Homebrew, and installs
