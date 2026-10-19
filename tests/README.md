@@ -17,7 +17,11 @@ and the release both need it green.
 
 ## What the suite needs
 
-- **ffmpeg** on the PATH, for the end-to-end tests (they decode real FLAC, DSD and WAV).
+- **ffmpeg** with SoX on the PATH, for the end-to-end tests (they decode real FLAC, DSD and WAV).
+  CI uses the bridge's own, as the releases carry it (`tools/ffmpeg/build.sh <rid> <folder>`, its
+  `bin` first on the PATH): the suite tests the ffmpeg users get, and it holds only what the bridge
+  and these tests use (the tones are `-f lavfi -i sine=…`, written as FLAC or raw PCM). A test that
+  needs another part of ffmpeg adds it to `build.sh` too.
 - On Linux, **ALSA's library** (`libasound2`), and **PulseAudio** for the Spotify Soloist test.
 - **Python 3**, for the stand-in servers some tests run.
 
@@ -37,6 +41,7 @@ These return early, and pass, elsewhere. CI runs each on at least one system whe
 | `Caldera_IsSetUpBitPerfect_SharesTheDac_ShowsWhatPlexPlays` | Linux | Caldera Headless runs only there |
 | `RoonBridge_RunsBesideTheBridge_SharesTheDacs_AndStopsWithAllItStarted` | Linux | the bridge runs Roon Bridge itself only on Linux; on a Mac and Windows Roon's own app or installer does |
 | `Qobuz_GetsASpeakerPerDac_AimedAtTheBridge_AndIsNamedQobuz` | macOS, Linux | its stand-in for QobuzProxy is a shell script |
+| `MacInstallerTests` (what the installer's tidy-up of an earlier `ffmpeg-full` removes) | macOS | it runs the installer's script with `osascript`. The run against real Homebrew is `tests/mac/tidy-on-homebrew.sh`, a CI step on the macOS runner only: it installs and removes packages |
 | The owner-only checks in `SettingsTests` | macOS, Linux | on Windows a file's access comes from its folder's permissions, not a file mode |
 
 ## Layout

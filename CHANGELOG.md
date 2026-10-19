@@ -3,6 +3,110 @@
 All notable changes to Mandarin DAC Bridge. Versions count up on `dev`; the version on `main` when
 the owner publishes a release is the release (`dev/release.md`).
 
+## [Unreleased]
+
+On `dev`, not yet given a version: the owner names it when the dev tests are checked out
+(`dev/release.md`).
+
+## [1.2.0] — 2026-10-19
+
+The bridge's own ffmpeg; the Mac installer needs no Homebrew and tidies up after earlier versions.
+Numbered by the owner after testing `dev`.
+
+### Changed
+
+- **The bridge brings its own small ffmpeg with SoX: the Mac installer needs no Homebrew, and installs
+  nothing else.**
+  - Reported on macOS 27: the installer put about a hundred Homebrew packages on the Mac. It installed
+    Homebrew's `ffmpeg-full` for the one library the bridge needs from it, libsoxr (SoX's resampler,
+    `CLAUDE.md`, bit-perfect). Since Homebrew split its ffmpeg in 2025, the plain `ffmpeg` has no SoX,
+    and `ffmpeg-full` has 46 direct dependencies, among them OCR, speech recognition and video codecs.
+  - As the owner decided (`dev/design/install.md`, option C), the release builds the bridge's own
+    ffmpeg (`tools/ffmpeg/build.sh`):
+    - FFmpeg 9.0.2 and libsoxr 0.1.3, each refused unless its SHA-256 is the one pinned in
+      `tools/ffmpeg/sources.lock`;
+    - only what the bridge and its tests use: its formats' demuxers, decoders and parsers, WAV out,
+      the `pan` and `aresample` filters, SoX, and HTTP(S) with the system's TLS;
+    - LGPL and static, a few MB. It needs a C compiler and `make`, and no cmake, nasm or Homebrew;
+    - in every release archive as `ffmpeg/`, with `NOTICE.md` (versions, sources, sums, configure
+      line) and the licences, covered by `SHA256SUMS` with the archive.
+  - The bridge looks for `ffmpeg/bin/ffmpeg` beside itself first, on every system
+    (`Config.FfmpegFolders`), then where it looked before. `FFMPEG` still overrides.
+  - The Mac installer: from a release, the program and its ffmpeg, and nothing else. With no release,
+    it builds both on the Mac with Apple's command line tools, which building the bridge already needs.
+    The Windows installer: from a release, the same, with no winget; with no release, winget's
+    `Gyan.FFmpeg` as before.
+  - **Running the same install line on a Mac an earlier version set up tidies up** (decision 3, as
+    the owner changed it): once the bridge's own ffmpeg works, Homebrew's `ffmpeg-full` and the
+    packages only it brought go, after the installer lists them and the space they free and asks
+    (Return: yes; unattended, without asking). Nothing asked for or needed by anything else installed
+    goes, nor Homebrew, nor Mandarin's ffmpeg; what Homebrew still counts needed is kept and named.
+    `-- --tidy-only` runs just that (also after uninstalling). Homebrew's own auto-remove is held off
+    (`HOMEBREW_NO_AUTOREMOVE`), so nothing outside that list goes. `MacInstallerTests` checks the
+    choice with the installer's own script on made-up Homebrew records; `tests/mac/tidy-on-homebrew.sh`
+    runs the tidy-up for real against Homebrew on CI's macOS runner. Windows leaves an earlier `Gyan.FFmpeg` alone and says how to remove it.
+  - CI (`checks.yml`) builds the same ffmpeg on macOS, Windows (MSYS2) and Linux, cached by the hash
+    of `tools/ffmpeg/`, and runs the whole suite with it first on the PATH, so the suite tests the
+    ffmpeg users get. Homebrew's and Chocolatey's are no longer installed there. Docker keeps Debian's
+    ffmpeg, which has SoX.
+  - Tests: `test_ffmpeg_build.py` (a tarball that isn't the pinned one is refused and nothing built;
+    broken on purpose, it failed), `WorkflowTests` (every archive holds it and is checked for SoX, the
+    suite runs with it, the action writes no expression into a command), and
+    `SoxrTests.TheBridgesOwnFfmpeg_BesideIt_IsLookedForFirst` (broken on purpose, it failed).
+  - Tried here (Linux x64) with ffmpeg 6.1.1's source, as ffmpeg.org can't be reached from this
+    environment: it built with gcc and with clang, 2.6 MB, and the whole suite (313 tests) passed
+    with it first on the PATH. An HTTPS stream played through it, resampled with SoX. The 9.0.2 build
+    and the other five targets are first built by CI. The installers were not run: not on a Mac, and
+    not on Windows.
+  - CI's first run built 9.0.2 on macOS and Linux and passed the suite with it there; on Windows,
+    MSYS2's tar couldn't unpack libsoxr's one symlink (an install check, not built), so it is now
+    left out when unpacking.
+
+### Fixed
+
+- **The Mac's format probe (1.1.30) reads an empty list as empty.** CI's macOS runner (macOS 26.6.2)
+  gave the first real answers: for Apple's own virtual devices, `'pft?'` (the physical formats) has
+  a size of 0, while the current format and the virtual formats read. The probe then read 0 bytes,
+  failed with `'!dat'`, and would have said the list couldn't be read. Now a size of 0 is an empty
+  list, and the refusal says Core Audio lists no formats. The same empty `'pft?'` on macOS 26 is a
+  lead for the K5 Pro on macOS 27 (`dev/design/install.md`, hypothesis 1), not its proven cause.
+
+## [1.1.30] — 2026-10-19
+
+### Fixed
+
+- **On a Mac, a DAC whose formats Core Audio doesn't list was said not to take 44.1 kHz.**
+  - Reported on macOS 27 with a FiiO K5 Pro. Its panel listed 44.1 to 768 kHz, with bit depths
+    "not reported" and formats "–", and the bridge said "the DAC doesn't take 44.1 kHz".
+  - The panel's rates came from the device's nominal rates, its fallback when the stream lists no
+    physical formats. The sink looks only at that list, so with it empty every rate was "not taken".
+    Reading the list says nothing when it fails, so neither the log nor `--diagnose` could tell why.
+  - The class of error: a failure reported as a different one (Core Audio's empty answer was read
+    as the DAC refusing the rate).
+  - Why the list is empty on that Mac is **not known yet**. Nothing in the Mac's audio code had
+    changed since 1.1.0. As the owner decided (`dev/design/install.md`, decision 4), the DAC is still
+    refused, never played in a format it didn't list, and now:
+    - Core Audio is asked again, and every step of every read goes to the log: whether the property
+      exists, the size call and the read with their result codes, and what was read. That covers the
+      device's rates and streams, and each output stream's physical and virtual formats. It is logged
+      once per rate and channel count until the answer changes;
+    - the error says which refusal it was, from that answer rather than from an empty list: no
+      output stream; a rate the DAC doesn't list (with the ones it does) or lists only with fewer
+      channels; or, with no PCM format found, whether the list isn't there, couldn't be sized or read
+      (with Core Audio's code), is cut short, holds only other kinds of format, changed between two
+      reads, or is empty. Each has the macOS version, and the full list is in
+      `dev/design/install.md`;
+    - `mandarin-dac-bridge --diagnose` prints the same for every device;
+    - the panel's formats line of such a DAC says Core Audio lists none, and that the rates shown
+      are only the device's nominal ones.
+  - The gate: the choice of a format, every refusal and the report are pure code
+    (`Audio/MacFormats.cs`), tested on any system (`MacFormatsTests`). A refusal that blames the rate
+    when Core Audio listed nothing, or that hides which step failed, fails them. Against the old
+    message five of them failed. Each of the panel's note, the selector's spelling and a failed
+    read's refusal was also broken on purpose, and a test failed each time.
+  - Not tried on a real Mac, on macOS 27 or with a K5 Pro. CI's macOS runner runs `--diagnose`, which
+    probes its own devices.
+
 ## [1.1.29] — 2026-10-14
 
 ### Changed

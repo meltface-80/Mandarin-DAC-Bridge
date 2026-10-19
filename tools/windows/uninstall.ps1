@@ -2,7 +2,8 @@
 #
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/uninstall.ps1 | iex"
 #
-# ffmpeg stays (other programs may use it): winget uninstall Gyan.FFmpeg removes it.
+# Its own ffmpeg goes with its folder. An ffmpeg from winget stays (other programs may use it):
+# winget uninstall Gyan.FFmpeg removes it.
 $ErrorActionPreference = 'SilentlyContinue'
 $Task = 'Mandarin DAC Bridge'
 Stop-ScheduledTask -TaskName $Task
@@ -12,3 +13,6 @@ Remove-NetFirewallRule -DisplayName 'Mandarin DAC Bridge'
 Start-Sleep 1
 Remove-Item (Join-Path $env:LOCALAPPDATA 'Mandarin-DAC-Bridge') -Recurse -Force
 Write-Host 'Mandarin DAC Bridge is removed. The DACs are Windows'' again.'
+if (Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\ffmpeg.exe')) {
+    Write-Host 'The ffmpeg from winget (Gyan.FFmpeg) was left as it is. If nothing else uses it: winget uninstall Gyan.FFmpeg'
+}

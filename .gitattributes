@@ -1,0 +1,4 @@
+# Scripts that bash runs keep LF line ends on every checkout, Windows' included (MSYS2's bash and Git
+# Bash stop at a CR): tools/ffmpeg/build.sh is run there by CI.
+*.sh text eol=lf
+tools/ffmpeg/sources.lock text eol=lf

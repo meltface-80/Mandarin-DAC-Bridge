@@ -78,7 +78,10 @@ caught it is added.
 - **When in doubt, ask the owner** — and explain plainly what is being asked and why.
 - Every connection besides UPnP is off by default.
 - Third-party programs (Spotify Soloist, Roon Bridge, Caldera Headless, QobuzProxy) are downloaded
-  from their publishers when the owner asks, never committed or put in the image.
+  from their publishers when the owner asks, never committed or put in the image. ffmpeg is the
+  exception (2026-10-19, `dev/design/install.md`): a small LGPL build with SoX, made from ffmpeg's
+  and libsoxr's pinned source by `tools/ffmpeg/build.sh`, ships in the release archives; never
+  committed, never in the image.
 - The site (`docs/`) and the README's install instructions describe `main`; they move with the
   owner's merge (`dev/release.md`).
 
@@ -89,10 +92,11 @@ each. When its CI is green it goes to `dev` by a pull request **the owner merges
 merges `dev` into `main`. Claude never merges a pull request, never commits to `dev` or `main`,
 never pushes to a branch whose PR is merged, and never rewrites pushed history.
 
-A build bumps `<Version>` in `src/MandarinDacBridge/MandarinDacBridge.csproj` and adds a CHANGELOG
-entry, in one commit with the code. A change touching only `docs/`, `dev/` or `*.md` is not a build:
-no bump. Nor is one touching only the tests and the gates (`tests/`, `tools/check.sh`,
-`tools/quality/`, `.github/workflows/checks.yml`): nothing that ships changes. After a push, the docker command for the branch's test image is given only once that
+Versions (the owner's decision, 2026-10-19, `dev/release.md`): every change, tweak and feature
+goes to `dev` by a pull request, with **no version bump**: its CHANGELOG entry goes under
+`## [Unreleased]`. The version moves only when the owner says "bump version" and names the number,
+once the owner's own tests of `dev` are done; that bump also brings the README and the site
+(`docs/`, GitHub Pages) up to date, from `dev/at-bump.md`. After a push, the docker command for the branch's test image is given only once that
 commit's Test image run (`test-image.yml`, which runs the checks first) is green.
 
 ## Markdown

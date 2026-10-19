@@ -1,5 +1,5 @@
 # Builds Mandarin DAC Bridge for every platform (macOS, Linux, Windows; x64
-# and ARM) and attaches it to a GitHub
+# and ARM), each with its own ffmpeg (ffmpeg/, dev/design/install.md), and attaches it to a GitHub
 # Release. On GitHub: Releases → Draft a new release → tag vX.Y.Z (the
 # .csproj's <Version>; another tag is refused) → Publish. A few minutes later
 # the installer's link (releases/latest/download/…) serves the new build.
@@ -56,6 +56,20 @@ jobs:
       - name: Native AOT build
         shell: bash
         run: dotnet publish src/MandarinDacBridge -c Release -r "$RID" -p:Version="$VERSION" -o out
+      # The bridge's own ffmpeg, with SoX, beside it in the archive (dev/design/install.md): ffmpeg/bin,
+      # with its notice and licences.
+      - uses: ./.github/actions/ffmpeg
+        with:
+          rid: ${{ matrix.rid }}
+      - name: Its ffmpeg beside it
+        shell: bash
+        run: mkdir -p out/ffmpeg && cp -R ".ffmpeg/$RID/." out/ffmpeg/
+      - name: The build's ffmpeg has SoX
+        if: matrix.rid != 'osx-x64'
+        shell: bash
+        run: |
+          f=out/ffmpeg/bin/ffmpeg; [ "$RUNNER_OS" = Windows ] && f=out/ffmpeg/bin/ffmpeg.exe
+          "$f" -hide_banner -buildconf 2>&1 | grep -c -- '--enable-libsoxr' >/dev/null || { echo "::error::the archive's ffmpeg has no SoX"; exit 1; }
       # Run where it can: the Intel Mac build is made on an Apple silicon runner.
       - name: The build says its version
         if: matrix.rid != 'osx-x64'
@@ -68,11 +82,11 @@ jobs:
       - name: Package
         if: runner.os != 'Windows'
         shell: bash
-        run: tar -czf "mandarin-dac-bridge-$RID.tar.gz" -C out mandarin-dac-bridge
+        run: tar -czf "mandarin-dac-bridge-$RID.tar.gz" -C out mandarin-dac-bridge ffmpeg
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path out/mandarin-dac-bridge.exe -DestinationPath "mandarin-dac-bridge-$env:RID.zip"
+        run: Compress-Archive -Path out/mandarin-dac-bridge.exe, out/ffmpeg -DestinationPath "mandarin-dac-bridge-$env:RID.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: mandarin-dac-bridge-${{ matrix.rid }}

@@ -2,14 +2,16 @@
 #
 #   powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/meltface-80/Mandarin-DAC-Bridge/main/tools/windows/install.ps1 | iex"
 #
-# Installs ffmpeg with SoX with winget (if none is there), downloads the bridge (one
-# native program) from the repository's latest GitHub Release into
-# %LOCALAPPDATA%\Mandarin-DAC-Bridge, checked against that release's SHA256SUMS
-# (from 1.1.26; an earlier release is installed unchecked: one that differs is
-# refused, and nothing is changed), starts it now and at every sign-in (a hidden
-# scheduled task), and opens its page. If there is no Release yet, or no build
-# in it for this PC, it is built here from the source (a private .NET SDK is
-# downloaded for it).
+# Downloads the bridge (one native program) and its own small ffmpeg with SoX
+# (dev/design/install.md) from the repository's latest GitHub Release
+# into %LOCALAPPDATA%\Mandarin-DAC-Bridge, checked against that release's
+# SHA256SUMS (from 1.1.26; an earlier release is installed unchecked: one that
+# differs is refused, and nothing is changed), starts it now and at every sign-in
+# (a hidden scheduled task), and opens its page. If there is no Release yet, or no
+# build in it for this PC, it is built here from the source (a private .NET SDK is
+# downloaded for it); then, as for an earlier release without it, ffmpeg with SoX
+# comes from winget (Gyan.FFmpeg), if none is there: building ffmpeg needs MSYS2.
+# A Gyan.FFmpeg installed before is left alone: something else may use it.
 #
 # Windows 10 or 11, x64 or ARM64. Run it again to update; settings are kept.
 $ErrorActionPreference = 'Stop'
@@ -60,10 +62,10 @@ function Test-Sum($File, $Name, $Sums) {
 $rid = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'win-arm64' } else { 'win-x64' }
 Say "Installing Mandarin DAC Bridge ($rid). Leave this window open."
 
-# 1. ffmpeg, the decoder, built with SoX: a track at a rate the DAC can't take is resampled with SoX or
-#    refused (Audio/Soxr.cs). winget's Gyan.FFmpeg and Chocolatey's ffmpeg-full (Gyan's full build) have
-#    it; the essentials build (Gyan.FFmpeg.Essentials, Chocolatey's ffmpeg) doesn't. The bridge picks the
-#    one with SoX by itself.
+# ffmpeg, the decoder, built with SoX: a track at a rate the DAC can't take is resampled with SoX or
+# refused (Audio/Soxr.cs). The bridge's own comes with each release that carries it. Without it: winget's
+# Gyan.FFmpeg and Chocolatey's ffmpeg-full (Gyan's full build) have SoX; the essentials build
+# (Gyan.FFmpeg.Essentials, Chocolatey's ffmpeg) doesn't. The bridge picks its own, else the one with SoX.
 function Find-Ffmpegs {
     $all = @(Get-Command ffmpeg -All -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
     $links = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\ffmpeg.exe'
@@ -82,7 +84,8 @@ function Test-Sox($ffmpeg) {
         return ($out.Result + $err.Result).Contains('--enable-libsoxr')
     } catch { return $false }
 }
-if (-not (Find-Ffmpegs | Where-Object { Test-Sox $_ })) {
+function Install-Ffmpeg {
+    if (Find-Ffmpegs | Where-Object { Test-Sox $_ }) { return }
     Say 'Installing ffmpeg with SoX (winget)…'
     $said = 'no winget'
     if (Get-Command winget -ErrorAction SilentlyContinue) {
@@ -99,8 +102,8 @@ if (-not (Find-Ffmpegs | Where-Object { Test-Sox $_ })) {
     }
 }
 
-# 2. The bridge: fetched (and checked) or built first; one already running is stopped only to put the
-#    new one in place, so a download refused or failed leaves it as it was.
+# 1. The bridge and its ffmpeg: fetched (and checked) or built first; one already running is stopped only
+#    to put the new ones in place, so a download refused or failed leaves it as it was.
 New-Item -ItemType Directory -Force -Path $Data | Out-Null
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("mdb-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -129,6 +132,8 @@ try {
         Expand-Archive $zip -DestinationPath $tmp -Force
         $new = Join-Path $tmp 'mandarin-dac-bridge.exe'
         if (-not (Test-Path $new)) { Write-Host "The release's build has no mandarin-dac-bridge.exe in it. Nothing was changed."; exit 1 }
+        $ownFfmpeg = Join-Path $tmp 'ffmpeg'   # a release that carries its own ffmpeg
+        if (-not (Test-Path (Join-Path $ownFfmpeg 'bin\ffmpeg.exe'))) { $ownFfmpeg = $null }
     } else {
         Say 'No ready-made build for this PC yet: building it here (a few minutes, once)…'
         $dotnet = Join-Path $AppDir '.dotnet'
@@ -149,11 +154,28 @@ try {
                 -p:PublishAot=false -p:SelfContained=true -p:PublishSingleFile=true
         }
         $new = Join-Path $tmp 'out\mandarin-dac-bridge.exe'
+        $ownFfmpeg = $null
     }
+    if (-not $ownFfmpeg) { Install-Ffmpeg }
     # A second run: the one running is replaced now (a running program can't be written over).
     Stop-ScheduledTask -TaskName $Task -ErrorAction SilentlyContinue
     Get-Process mandarin-dac-bridge -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
     Copy-Item $new $Bin -Force
+    $ffDir = Join-Path $AppDir 'ffmpeg'
+    if ($ownFfmpeg) {
+        # A track still decoding holds its ffmpeg.exe open: only the bridge's own are stopped.
+        Get-Process ffmpeg -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($ffDir, [StringComparison]::OrdinalIgnoreCase) } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+        # A stopped process lets go of its file a moment later: tried for a few seconds, and never copied
+        # into a folder still there (it would land in ffmpeg\ffmpeg).
+        foreach ($i in 1..10) {
+            Remove-Item $ffDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (-not (Test-Path $ffDir)) { break }
+            Start-Sleep -Milliseconds 500
+        }
+        if (Test-Path $ffDir) { Write-Host "The bridge's old ffmpeg ($ffDir) couldn't be replaced: something still has it open. Close it, or restart the PC, and run this again."; exit 1 }
+        Copy-Item $ownFfmpeg $ffDir -Recurse -Force
+    }
 } finally { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
 
 Say 'The USB DACs it can see:'
@@ -191,4 +213,8 @@ if ($ip) { Write-Host "  On your phone: http://${ip}:$Port" }
 Write-Host ''
 Write-Host 'Each USB DAC is now on your network as "<its name> (Bridge)". Choose it in Audirvana, Mandarin, JRiver, foobar2000 (UPnP)…'
 Write-Host 'If a DAC says "Waiting", another program has it in exclusive mode: point that program at the bridge instead.'
+if ($ownFfmpeg -and (Test-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links\ffmpeg.exe'))) {
+    Write-Host 'The bridge has its own ffmpeg now; the one from winget (Gyan.FFmpeg) was left as it is, as something else may use it.'
+    Write-Host 'If nothing does: winget uninstall Gyan.FFmpeg'
+}
 Write-Host "To remove it: powershell -ExecutionPolicy Bypass -c `"irm https://raw.githubusercontent.com/$OwnerRepo/main/tools/windows/uninstall.ps1 | iex`""
