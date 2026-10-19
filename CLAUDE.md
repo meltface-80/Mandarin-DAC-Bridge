@@ -78,7 +78,10 @@ caught it is added.
 - **When in doubt, ask the owner** — and explain plainly what is being asked and why.
 - Every connection besides UPnP is off by default.
 - Third-party programs (Spotify Soloist, Roon Bridge, Caldera Headless, QobuzProxy) are downloaded
-  from their publishers when the owner asks, never committed or put in the image.
+  from their publishers when the owner asks, never committed or put in the image. ffmpeg is the
+  exception (2026-10-19, `dev/design/install.md`): a small LGPL build with SoX, made from ffmpeg's
+  and libsoxr's pinned source by `tools/ffmpeg/build.sh`, ships in the release archives; never
+  committed, never in the image.
 - The site (`docs/`) and the README's install instructions describe `main`; they move with the
   owner's merge (`dev/release.md`).
 

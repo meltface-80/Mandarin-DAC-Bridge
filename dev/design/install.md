@@ -1,18 +1,19 @@
 # A lighter install, the same on every system
 
-Status: **draft for the owner's review.** No code depends on it until the open questions at the end
-are answered. Prompted on 2026-10-19 by a report from a user on macOS 27 with a FiiO K5 Pro: the Mac
-installer put about a hundred Homebrew packages on the machine, and the page then said "the DAC
-doesn't take 44.1 kHz" for a DAC whose own panel listed 44.1 kHz. The second part is a bug, not an
-install question. It is investigated here because it was in the same report, and its fix is its own
-branch (below).
+Status: **decided by the owner on 2026-10-19** (the decisions are at the end). Prompted on
+2026-10-19 by a report from a user on macOS 27 with a FiiO K5 Pro: the Mac installer put about a
+hundred Homebrew packages on the machine, and the page then said "the DAC doesn't take 44.1 kHz"
+for a DAC whose own panel listed 44.1 kHz. The second part is a bug, not an install question. It is
+investigated here because it came in the same report, and it ships as its own version (1.1.30)
+before the bundled ffmpeg (1.1.31).
 
 ## Part 1: why the Mac install is so big
 
 ### What happens today
 
 `tools/mac/install.sh`, step 2, runs `brew install ffmpeg-full`. Before that it installs Homebrew if
-the Mac has none, and Homebrew installs Apple's command-line tools.
+the Mac has none, and Homebrew installs Apple's command-line tools. No release has been published
+yet, so every Mac also builds the bridge from source, with a private .NET SDK.
 
 In 2025 Homebrew split its ffmpeg in two. The formulas as they stand today (ffmpeg 9.0.2, read from
 `Homebrew/homebrew-core` on 2026-10-19):
@@ -28,73 +29,114 @@ several hundred MB, for one library the bridge uses, `libsoxr`, which depends on
 
 ### What the bridge needs from ffmpeg
 
-- **Decoding**: FLAC, ALAC, WAV, AIFF, MP3, AAC and raw PCM, read over `http`/`https` only
-  (`StreamUri.FfmpegProtocols`), turned into 32-bit PCM in a WAV (`FfmpegSource`).
-- **SoX**, only when the DAC can't take a track's rate (`CLAUDE.md`, *Bit-perfect*):
-  `aresample=<rate>:resampler=soxr:precision=28` (`Sources.Open`). A DAC like the K5 Pro
-  (44.1 to 768 kHz) never needs it. Without SoX, such a track is refused (`Audio/Soxr.cs`).
+- **Decoding** what the renderer says it plays (`Upnp/Control.cs`): FLAC, WAV, AIFF, ALAC and AAC
+  (MP4), MP3, Ogg (Vorbis, Opus, FLAC), DSD files (DSF, DFF) when the DAC takes no DoP, and raw
+  PCM, read over `http`/`https` only (`StreamUri.FfmpegProtocols`), written as 32-bit PCM in a WAV
+  to its output pipe (`FfmpegSource`).
+- **Filters:** `pan` (mono to stereo, more channels down to two) and, only when the DAC can't take a
+  track's rate (`CLAUDE.md`, *Bit-perfect*), `aresample=<rate>:resampler=soxr:precision=28`
+  (`Sources.Open`). Without SoX such a track is refused (`Audio/Soxr.cs`).
 
-No video, subtitles, OCR, speech recognition, filters other than `aresample`, or network protocols
-beyond HTTP(S). Almost everything `ffmpeg-full` installs is never used.
+No video, subtitles, OCR, speech recognition, other filters, or network protocols beyond HTTP(S).
+Almost everything `ffmpeg-full` installs is never used.
 
 ### The same question on the other systems
 
-| System | Where ffmpeg with SoX comes from today | Weight |
-|---|---|---|
-| macOS | Homebrew → `ffmpeg-full` (and Homebrew and Apple's command-line tools first, if missing) | heavy: the report |
-| Windows | winget → `Gyan.FFmpeg` (Gyan's full build); a user who already has the essentials build is told to remove it | one large download, but it needs winget, and the bridge has to find it among others |
-| Linux / Docker | Debian's `ffmpeg` in the image (has libsoxr) | fine, it is in the image |
+| System | Where ffmpeg with SoX comes from today |
+|---|---|
+| macOS | Homebrew → `ffmpeg-full` (and Homebrew and Apple's command-line tools first, if missing) |
+| Windows | winget → `Gyan.FFmpeg` (Gyan's full build); a user who already has the essentials build is told to remove it |
+| Linux / Docker | Debian's `ffmpeg` in the image (has libsoxr) |
 
-Each system gets ffmpeg in its own way, so each has its own failures: Homebrew's split, winget's
-missing or broken, an essentials build found first.
+### The options weighed
 
-### Options
+- **A.** Keep Homebrew, use plain `ffmpeg` plus `libsoxr`, and have the bridge call SoX itself. Still
+  Homebrew and Apple's tools, resampling moved into the audio path, and nothing for Windows.
+- **B.** The installers download a ready-made static ffmpeg from a third-party builder. This adds a
+  publisher to trust and keep watching.
+- **C.** The release builds its own small ffmpeg, the same on every system. **Chosen by the owner.**
 
-**A. Keep Homebrew, but plain `ffmpeg` plus `libsoxr`, and the bridge calls SoX itself.** ffmpeg
-decodes at the track's own rate; when resampling is needed the bridge passes the PCM through libsoxr
-(P/Invoke) at the same quality as today (`precision=28`, SoX's very high quality). About a sixth of
-today's packages. But it still needs Homebrew and Apple's tools, it moves resampling into the audio
-path (owner's judgment, the multi-agent review), and Windows would need a `soxr.dll` from somewhere.
-The weight is smaller, the problem is the same.
+Not an option: Homebrew's plain `ffmpeg` alone. It has no SoX, and the bit-perfect rule allows SoX
+or nothing.
 
-**B. No Homebrew: the installers download a ready-made static ffmpeg with SoX from a publisher of
-ffmpeg builds,** pinned by SHA-256 like QobuzProxy (`Qobuz/QobuzProxy.lock`), into the bridge's
-own folder (`~/Mandarin-DAC-Bridge/ffmpeg/bin/ffmpeg`; on Windows the bridge already looks in
-`<its folder>\ffmpeg\bin`, `Config.Common`). One file, no Homebrew, no Apple tools, removed with the
-folder. But it puts trust in a third party's build, which builds have libsoxr (checked with
-`-buildconf`, as today) has to be confirmed per publisher and processor before choosing one, and
-their URLs and hashes move when they publish.
+## The bridge's own ffmpeg (C), as built
 
-**C. The release builds its own small ffmpeg, the same on every system (recommended).** `release.yml`
-(and `test-image.yml` for test builds) builds ffmpeg from ffmpeg.org's source with only what the
-bridge uses, statically, for each of the six builds, and puts it in the bridge's tarball/zip:
+### What it is
 
-- `--disable-everything`, then: the decoders above, the `wav`, `flac`, `mov`/`mp4`, `aiff`, `mp3`,
-  `aac` and raw-PCM demuxers, the `wav` muxer, the `aresample` filter with `--enable-libsoxr`
-  (libsoxr built statically beside it), and the `http`/`https`/`tcp`/`tls` protocols (TLS from the
-  system: Secure Transport on macOS, Schannel on Windows; Docker keeps Debian's ffmpeg).
-- A few MB instead of a few hundred. LGPL only (libsoxr is LGPL; nothing GPL is enabled).
-- Covered by the release's `SHA256SUMS` like the bridge itself (1.1.26): no new trust and no new
-  publisher, since it is built from ffmpeg's own source by the owner's workflow.
-- The installers stop installing ffmpeg at all: the Mac installer needs neither Homebrew nor Apple's
-  tools (unless there is no release build and it has to build the bridge from source, as today),
-  and the Windows installer no longer needs winget.
-- The bridge looks for `ffmpeg` beside itself first (it already does on Windows), then where it looks
-  today, so an install made with the old installer keeps working.
-- The ffmpeg that can be refused for SoX, and the remedies telling users to install `ffmpeg-full`
-  (`Soxr.Remedy`), go away for installed copies. They stay for a copy run from source.
-- Cost: building ffmpeg in CI for six targets (minutes per release, cacheable), and the LGPL's duty
-  that goes with handing it out: say which ffmpeg and libsoxr versions are inside, link to their
-  source and the build options, and give the licence (a `THIRD-PARTY.md` in the archive).
+- **ffmpeg 9.0.2** from `https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz` and **libsoxr 0.1.3**
+  from `https://downloads.sourceforge.net/project/soxr/soxr-0.1.3-Source.tar.xz`, each refused
+  unless its SHA-256 is the one pinned in `tools/ffmpeg/sources.lock`. The pins are the ones
+  Homebrew's formulas carry for the same files; libsoxr's was also checked here by downloading it.
+- Built by **`tools/ffmpeg/build.sh <rid> <out>`**, one script for all six builds and for a Mac that
+  builds from source. It needs a C compiler, `make`, `curl` and a POSIX shell, and nothing else: no
+  cmake, no nasm, no pkg-config, no Homebrew.
+  - **libsoxr** is compiled directly, without its cmake: its scalar engines only (`cr32`, `cr64`,
+    `vr32`; `soxr-config.h` written by the script). `precision=28` uses `cr64`, SoX's
+    double-precision engine, the same quality as now. Without the SIMD engines it is slower, but a
+    single stereo track takes a small fraction of one core.
+  - **ffmpeg** with `--disable-everything --disable-autodetect`, then only: the decoders, demuxers
+    and parsers for the formats above; the `pcm_s32le` and `flac` encoders; the `wav`, `flac`, raw
+    PCM and `null` muxers; the `pan`, `aresample`, `aformat`, `anull`, `atrim` and `sine` filters and
+    the `lavfi` input; the `http`, `https`, `tcp`, `tls`, `crypto`, `httpproxy`, `data`, `file` and
+    `pipe` protocols; `--enable-libsoxr`. LGPL (no `--enable-gpl`); static, with no shared FFmpeg
+    libraries.
+  - `sine`, `lavfi`, the `flac` encoder and `file` are there for the test suite, which makes its test
+    tones with `ffmpeg -f lavfi -i sine=…`, so the suite runs against the very ffmpeg users get. The
+    bridge itself never names them: a controller's stream is held to `StreamUri`'s protocols by
+    `-protocol_whitelist`, and no `movie`/`amovie` filter, which could read files, is built.
+  - **TLS** from the system, as Debian's ffmpeg has it from OpenSSL: Secure Transport on macOS,
+    Schannel on Windows, the system's OpenSSL 3 on Linux (the one shared library the Linux build
+    needs besides the C library). Certificate checking is ffmpeg's default, unchanged from today.
+  - The script runs the result once: `-buildconf` must list `--enable-libsoxr`, and a second of
+    `sine` must resample with SoX (not run for a build made for another processor).
+- Each release archive carries it beside the program:
 
-**Not an option:** using Homebrew's plain `ffmpeg` alone. It has no SoX, so on a DAC that lacks a
-track's rate that track would be refused. The bit-perfect rule allows SoX or nothing.
+  ```
+  mandarin-dac-bridge(.exe)
+  ffmpeg/bin/ffmpeg(.exe)
+  ffmpeg/NOTICE.md        what it is, its versions, source URLs and SHA-256, the configure line, how to rebuild it
+  ffmpeg/COPYING.LGPLv2.1 ffmpeg's licence
+  ffmpeg/LICENCE.soxr     libsoxr's
+  ```
 
-### Recommendation
+  LGPL's terms for handing out a static build are met by naming the exact sources, the script and
+  the configure line, all public: anyone can rebuild it, or swap in their own ffmpeg (`FFMPEG`).
+  The bridge only runs ffmpeg as a separate program; nothing of ffmpeg is linked into the bridge.
 
-C. It answers both parts of the request: the Mac install is the bridge and nothing else, and every
-system gets the same ffmpeg in the same way, checked the same way. A has the same weight problem in a
-smaller size. B is quicker, but it adds a third party the owner has to trust and keep watching.
+### Decision 2: shipping it is allowed
+
+`CLAUDE.md` says third-party programs (Soloist, Roon Bridge, Caldera, QobuzProxy) are downloaded
+from their publishers and never committed or put in the image. ffmpeg here is different: it is
+built from ffmpeg.org's own source by the release workflow (or by the Mac installer), is never
+committed, and is not put in the Docker image. It does ship in the release archives, and the owner
+decided that is what is needed (2026-10-19). `CLAUDE.md` says so under *Owner's decisions*.
+
+### Where it is used
+
+- **The bridge** looks for `ffmpeg/bin/ffmpeg` beside itself first, on every system, then where it
+  looks today (Homebrew's `ffmpeg-full`, the PATH, winget's and the package managers' folders).
+  `FFMPEG` still overrides. Of those, the first with SoX is taken, as today (`Soxr.Pick`).
+- **The Mac installer:** from a release, unpacks the program and `ffmpeg/` together, checked against
+  `SHA256SUMS` as one archive, and names the bundled ffmpeg in the launch file (`FFMPEG`). No
+  Homebrew and no Apple tools. With no release, it builds the bridge (as today) and then this ffmpeg
+  with `tools/ffmpeg/build.sh`, using the Apple tools that building already needs, and no Homebrew.
+- **The Windows installer:** from a release, the same, and winget is not used. With no release, or a
+  release from before 1.1.31 without `ffmpeg\`, it falls back to winget's `Gyan.FFmpeg` as today:
+  building ffmpeg needs MSYS2, which a user's PC doesn't have.
+- **CI** (`checks.yml`) builds it on macOS, Windows (MSYS2) and Linux, cached by the hash of
+  `tools/ffmpeg/`, puts it first on the PATH, and runs the whole suite with it. Homebrew's
+  `ffmpeg-full` and Chocolatey's are no longer installed there.
+- **The release** (`release.yml`) builds it for all six: natively on each runner, the Intel Mac on
+  the Apple silicon runner for x86_64, Windows ARM64 on the Windows ARM runner. Each build's
+  archive holds it, and `SHA256SUMS` covers the archive.
+- **Docker** keeps Debian's ffmpeg, which has SoX and gets Debian's security updates.
+
+### Decision 3: an earlier `ffmpeg-full` is left alone
+
+The installers never remove an `ffmpeg-full` (or Homebrew, or `Gyan.FFmpeg`) they installed before:
+something else may use it, and removing packages is the user's call. The Mac installer says once
+that the bridge no longer needs it, and how to remove it (`brew uninstall ffmpeg-full`). The
+uninstallers say the same.
 
 ## Part 2: "the DAC doesn't take 44.1 kHz"
 
@@ -112,10 +154,9 @@ smaller size. B is quicker, but it adds a third party the owner has to trust and
   "not reported" and "–" mean the physical-format list came back **empty**, and the rates shown are
   the fallback.
 - `CoreAudioSink.Configure` looks only at that same list, with no fallback. An empty list leaves
-  `best = -1` and it throws "the DAC doesn't take 44.1 kHz", and would for any rate.
+  `best = -1`, and it throws "the DAC doesn't take 44.1 kHz", and would for any rate.
 - So the message is wrong: it says the DAC refuses 44.1 kHz, when what happened is that Core Audio
-  listed no formats for the stream. Two parts of the bridge also disagree about the same DAC: the
-  panel says it takes 44.1 kHz and the sink says it doesn't.
+  listed no formats for the stream.
 - `CoreAudio.GetArray` returns an empty array on every failure (the property missing, the size
   call failing, the read failing) and says nothing, so the log can't tell which one it was.
 
@@ -129,52 +170,48 @@ presents its stream.
 
 Hypotheses, none checked against a real Mac, so none is a root cause yet (`dev/lessons.md`):
 
-1. On macOS 27 (or with this DAC), `pft?` on the stream fails or is empty, and the formats can
+1. On macOS 27 (or with this DAC), `pft?` on the stream fails or is empty, and the formats could
    only be read some other way (the current `pft `, the virtual formats `sfma`).
-2. The DAC has more than one output stream and the first (`FirstOutputStream`) isn't the one with
+2. The DAC has more than one output stream, and the first (`FirstOutputStream`) isn't the one with
    the formats.
 3. A size or layout mismatch makes `GetArray` give up (`size < sizeof(T)`).
 
-The existing `--diagnose` tells 1 and 3 apart from a working case only partly: it prints formats for
-the first stream, and nothing at all when the list is empty.
+### Decision 4: refuse, probe, and say why (1.1.30)
 
-### What is needed, in order
+- **Refused, never guessed.** When no linear-PCM physical format covers the track's rate, the DAC
+  is not played. There is no fallback to the nominal rate or to the current format.
+- **Probed when it happens.** Before refusing, the sink asks Core Audio again and records what it
+  said: for each of the device's output streams, `pft?`, `pft `, `sfma` and `sfmt` (whether the
+  property exists, the result code and size of the size call and of the read, and what was read),
+  and the device's `nsr#` and `nsrt`, with the macOS version.
+- **The error says what is true.** Which one depends on what was read:
+  - no stream at all: "Core Audio shows no output stream for this DAC";
+  - a stream, but no formats listed: "Core Audio lists no formats for this DAC (macOS …), so it
+    can't be set to 44.1 kHz";
+  - formats listed, none covering the rate: "the DAC doesn't take 44.1 kHz (it lists: 48 kHz, …)",
+    the message from before, now true.
+  Each ends with where the details are: "what Core Audio said is in the log; `mandarin-dac-bridge
+  --diagnose` prints it all".
+- **The log** gets the whole probe, once per DAC and rate until the answer changes (so a controller
+  retrying doesn't fill it).
+- **`--diagnose`** prints the same probe for every output device.
+- **Tested** on any system: the choice of a format, the wording of each refusal and the probe's
+  report are pure code (`Audio/MacFormats.cs`) given what Core Audio said. Reading Core Audio itself
+  (`Native/CoreAudioProbe.cs`) runs only on a Mac: CI's macOS runner runs `--diagnose`, which
+  probes its devices.
+- The fix of the cause follows once a user's probe shows it.
 
-1. **From the user**, as it is today:
-   `~/Mandarin-DAC-Bridge/mandarin-dac-bridge --diagnose`, and the lines of
-   `~/Mandarin-DAC-Bridge/data/bridge.log` around the message.
-2. **A diagnostic build** (its own branch, `fix/mac-formats-diagnose`): `--diagnose` prints every
-   output stream of each device, the result code of each Core Audio call (`HasProperty`, the size,
-   the read) for `pft?`, and the current physical (`pft `) and virtual (`sfmt`) formats and `sfma`.
-   It changes no behaviour.
-3. **The fix**, once the dump shows the cause (`fix/mac-formats`): a failing test first, on the
-   pure part (`FromMac`'s and `Configure`'s choice of a format, moved out so it can be tested on any
-   system). Whatever the cause, the message changes to say what is true ("Core Audio lists no formats
-   for this DAC") instead of blaming the rate.
+## The owner's decisions (2026-10-19)
 
-Whether the sink may fall back to the nominal rate and the current physical format when no list
-comes back is open question 4: it is the audio path, and it means playing to a format the bridge
-didn't choose.
-
-## Open questions for the owner
-
-1. **Which option for ffmpeg: A, B or C?** (Recommended: C.) It decides whether the release ships
-   an ffmpeg, which is the owner's decision.
-2. If C: is ffmpeg in the release archive acceptable under the rule that third-party programs are
-   "downloaded from their publishers … never committed or put in the image"? Here ffmpeg is built
-   from ffmpeg.org's source by the release workflow, not downloaded, committed or put in the Docker
-   image, but it does ship.
-3. If C: do the installers remove an `ffmpeg-full` they installed before? Recommended: no. It may be
-   in use by something else, and removing Homebrew packages is the user's call. The installer would
-   say it is no longer needed and how to remove it.
-4. When Core Audio lists no physical formats, may the sink play at a nominal rate the device lists,
-   in the stream's current physical format, or must it refuse (as now, with a truthful message)?
-   Recommended: refuse until the dump shows why the list is empty.
-5. May the user's `--diagnose` output be asked for in the issue tracker? It holds device names and
-   UIDs, but no secrets.
+1. **Option C**: the release builds its own small ffmpeg with SoX, for every system.
+2. **Shipping it in the release archives is allowed**, under the conditions above.
+3. **An earlier `ffmpeg-full` (or `Gyan.FFmpeg`) is never removed** by the installers.
+4. **A DAC whose formats can't be read is refused, probed, and the error and the log say why**;
+   no fallback.
 
 ## Not tried
 
 Nothing here was run on a Mac, on macOS 27, or with a K5 Pro. The Homebrew dependency counts were
-read from the formulas, not from an install. Building ffmpeg as described in C hasn't been tried in
-CI.
+read from the formulas, not from an install. The ffmpeg build was tried here on Linux x64 only, with
+Ubuntu's ffmpeg 6.1.1 source (ffmpeg.org can't be reached from this environment); 9.0.2 and the other
+five targets are built first by CI.
